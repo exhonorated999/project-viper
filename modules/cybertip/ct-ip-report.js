@@ -279,6 +279,7 @@
                         '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>' +
                         'Save PDF to Evidence</button>' +
                     '<button type="button" data-ct-ipr-save="copy" onclick="CTIpReportUI.save(\'' + scope + '\', false)" class="' + btn + ' bg-viper-cyan/10 text-viper-cyan border-viper-cyan/40 hover:bg-viper-cyan/20" title="Save the PDF somewhere else">Save a copy\u2026</button>' +
+                    ((typeof window !== 'undefined' && window.CTSubpoenaUI) ? window.CTSubpoenaUI.panelButton(scope) : '') +
                 '</div>' +
             '</div>';
 

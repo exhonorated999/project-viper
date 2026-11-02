@@ -114,6 +114,8 @@
     <!-- CyberTip "Uploads by IP": per-tip panel + combined report, PDF to Evidence. -->
     <script src="modules/cybertip/ct-ip-report.js"></script>
     <script src="modules/cybertip/ct-ip-report-ui.js"></script>
+    <script src="modules/cybertip/ct-subpoena.js"></script>
+    <script src="modules/cybertip/ct-subpoena-ui.js"></script>
     <!-- Area Canvas media: photos attached from disk, video/audio recorded
          in-app. Loaded WITHOUT defer — the canvass tab's render functions
          call CanvasMedia.galleryHtml()/attachBarHtml() synchronously while
@@ -48035,6 +48037,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             ${arin ? _CT_ARIN_DONE : _CT_ARIN_IDLE}
                         </button>
                         ${_ctSrcBtn(t, 'IP address', [g.address, g.last], { valueLabels: ['IP address', 'Timestamp'], context: [['Seen', g.entries.length + '×']] })}
+                        ${(typeof window !== 'undefined' && window.CTSubpoenaUI) ? window.CTSubpoenaUI.cardButton() : ''}
                         <button onclick="ctSendBtn(${regIdx})" class="ml-auto px-2.5 py-1 text-xs bg-viper-cyan/20 text-viper-cyan rounded border border-viper-cyan/40 hover:bg-viper-cyan/30 transition-colors flex items-center gap-1" title="Send to Suspect / Victim / Other Individual">
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
                             Send To
@@ -48093,6 +48096,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
                                 Send selected to…
                             </button>
+                            ${(__ctIpGroups.length && typeof window !== 'undefined' && window.CTSubpoenaUI) ? window.CTSubpoenaUI.barButton() : ''}
                         </div>
                     </div>`;
 

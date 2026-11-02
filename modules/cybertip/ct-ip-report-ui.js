@@ -103,7 +103,7 @@
     }
 
     // Same record shape and storage path as the Evidence tab's own upload.
-    async function saveToEvidence(c, fileName, bytes, description) {
+    async function saveToEvidence(c, fileName, bytes, description, source, mime) {
         var savedPath = await window.electronAPI.saveEvidenceFile({
             caseNumber: c.caseNumber, evidenceTag: EVIDENCE_TAG, fileName: fileName, fileData: Array.from(bytes)
         });
@@ -112,8 +112,8 @@
         var rec = {
             id: Date.now(), type: 'document', tag: EVIDENCE_TAG, discoverable: true,
             description: description, location: '', fileCount: 1, totalSize: bytes.length,
-            files: [{ name: fileName, path: savedPath, size: bytes.length, type: 'application/pdf', lastModified: now.getTime() }],
-            source: 'cybertip_ip_report', collectedDate: localDay(now), createdAt: now.toISOString()
+            files: [{ name: fileName, path: savedPath, size: bytes.length, type: mime || 'application/pdf', lastModified: now.getTime() }],
+            source: source || 'cybertip_ip_report', collectedDate: localDay(now), createdAt: now.toISOString()
         };
         var mem = null;
         try { if (typeof caseEvidence !== 'undefined' && Array.isArray(caseEvidence)) mem = caseEvidence; } catch (_) {}
@@ -190,5 +190,9 @@
         } finally { setBusy(false); }
     }
 
-    window.CTIpReportUI = { tipPanel: tipPanel, caseView: caseView, listButton: listButton, filter: filter, expand: expand, save: save };
+    window.CTIpReportUI = {
+        tipPanel: tipPanel, caseView: caseView, listButton: listButton, filter: filter, expand: expand, save: save,
+        // shared with ct-subpoena-ui.js
+        saveToEvidence: saveToEvidence, logoData: logoData, localDay: localDay, b64ToBytes: b64ToBytes, EVIDENCE_TAG: EVIDENCE_TAG
+    };
 })();

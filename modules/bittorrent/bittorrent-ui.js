@@ -550,10 +550,23 @@
             const files = (this.model && this.model.files) || [];
             if (!md || md.loading) return '<div class="btt-verify btt-dim">Looking for the downloaded files…</div>';
             if (md.error) return `<div class="btt-verify btt-dim">${esc(md.error)}</div>`;
-            if (!md.hasDownloadFolder) return '<div class="btt-verify btt-dim">These logs came without a Download folder, so there are no downloaded files to show or check.</div>';
-            if (!md.folderFound) return '<div class="btt-verify btt-warn">The Download folder for this download can\'t be reached. It may be on a drive that isn\'t connected.</div>';
+            const look = ' <button class="btt-btn small" data-act="mrescan" title="Search this download\'s folder and the case Evidence again">↻ Look again</button>';
+            const amb = md.ambiguous ? ` <span class="btt-warn" title="A file with the same name and size is in more than one Evidence item, so none of them was linked automatically.">${num(md.ambiguous)} file${md.ambiguous === 1 ? '' : 's'} found in more than one Evidence item (not linked).</span>` : '';
+            if (!md.matched) {
+                const capped = md.searchCapped ? ' <span class="btt-dim">The Evidence folder is very large; the search stopped early.</span>' : '';
+                if (!md.hasDownloadFolder) return `<div class="btt-verify btt-dim">These logs came without a Download folder, and none of the torrent's files were found in this case's Evidence.${amb}${capped}${look}</div>`;
+                if (!md.folderFound) return `<div class="btt-verify btt-warn">The Download folder for this download can't be reached. It may be on a drive that isn't connected. The torrent's files were not found in this case's Evidence either.${amb}${capped}${look}</div>`;
+            }
             const run = this.verifyRun && this.verifyRun.id === this.selectedId ? this.verifyRun : null;
-            const found = `${num(md.matched)} of ${num(files.length)} torrent files are in the Download folder.`;
+            const places = (md.places || []).map(p => `${esc(p.label || 'Evidence')} (${num(p.count)})`).join(', ');
+            const inOwn = md.matched - (md.elsewhere || 0);
+            let found;
+            if (!md.elsewhere) found = `${num(md.matched)} of ${num(files.length)} torrent files are in the ${md.folderFound ? 'Download folder' : 'download\'s folder'}.`;
+            else if (inOwn > 0) found = `${num(md.matched)} of ${num(files.length)} torrent files found: ${num(inOwn)} in the download's folder, ${num(md.elsewhere)} elsewhere in Evidence (${places}).`;
+            else found = `${num(md.matched)} of ${num(files.length)} torrent files found in Evidence: ${places}.`;
+            found += amb;
+            if (!md.folderFound && md.hasDownloadFolder && md.matched) found += ' <span class="btt-dim">(The recorded Download folder can\'t be reached.)</span>';
+            if (md.matched < files.length) found += look;
             if (run) {
                 return `<div class="btt-verify"><div class="btt-progress-row"><span class="btt-progress-label">Checking SHA-1 hashes</span>
                     <span class="btt-progress-text">${esc(run.text || '')}</span><button class="btt-btn small" data-act="vcancel">Cancel</button></div>
@@ -586,14 +599,18 @@
             if (box) box.innerHTML = this._verifyHtml();
         }
 
-        async _loadMedia(id) {
+        async _loadMedia(id, opts) {
             this.media = { id, loading: true };
             this._refreshVerify();
             let r;
-            try { r = await this.module.mediaList(id); } catch (err) { r = { success: false, error: err.message || String(err) }; }
+            try { r = await this.module.mediaList(id, opts); } catch (err) { r = { success: false, error: err.message || String(err) }; }
             if (this.selectedId !== id) return;
             this.media = r && r.success
-                ? { id, hasDownloadFolder: r.hasDownloadFolder, folderFound: r.folderFound, onDisk: r.onDisk || {}, matched: r.matched || 0 }
+                ? {
+                    id, hasDownloadFolder: r.hasDownloadFolder, folderFound: r.folderFound, onDisk: r.onDisk || {}, matched: r.matched || 0,
+                    elsewhere: r.elsewhere || 0, places: Array.isArray(r.places) ? r.places : [], ambiguous: r.ambiguous || 0,
+                    searchCapped: !!r.searchCapped
+                }
                 : { id, error: (r && r.error) || 'Could not look for the downloaded files.' };
             if (r && r.success && r.verify && this.model) this.model.verify = r.verify;
             this._refreshVerify();
@@ -636,7 +653,7 @@
 
         _verifyBadge(st, f) {
             if (st.verify === 'mismatch') return '<span class="btt-badge bad" title="The file on disk does not match the SHA-1 in the TD log">✗ hash differs</span>';
-            if (st.verify === 'missing') return '<span class="btt-badge bad" title="The log has a hash for this file but it is not in the Download folder">missing</span>';
+            if (st.verify === 'missing') return '<span class="btt-badge bad" title="The log has a hash for this file but it was not found in this download\'s folder or the case Evidence">missing</span>';
             if (st.verify === 'unreadable') return '<span class="btt-badge bad">unreadable</span>';
             if (st.verify === 'ok') return '<span class="btt-badge ok" title="SHA-1 on disk matches the TD log">✓ hash</span>';
             if (this.media && this.media.onDisk && !st.onDisk && f.status && f.status !== 'none') return '<span class="btt-badge none" title="Not found in the Download folder">not on disk</span>';
@@ -1205,6 +1222,7 @@
             if (act === 'tile') return this._onTile(Number(b.getAttribute('data-i')));
             if (act === 'revealall') { BitTorrentUI.revealAll = !BitTorrentUI.revealAll; if (!BitTorrentUI.revealAll) BitTorrentUI.revealed.clear(); this._refreshFiles(); return; }
             if (act === 'verify') return this.runVerify(this.selectedId);
+            if (act === 'mrescan') { if (this.selectedId) this._loadMedia(this.selectedId, { rescan: true }); return; }
             if (act === 'vcancel') { this.module.cancelVerify(); if (this.verifyRun) { this.verifyRun.text = 'Cancelling…'; this._refreshVerify(); } return; }
             if (act === 'vproblems') {
                 this.fileView.status = 'problem'; this.fileView.page = 0; this._rememberFileView();

@@ -214,6 +214,129 @@ function writeDownload(dlRoot, model, prefix) {
   const listN = await ipc.h['bt-media-list']({}, { caseNumber: '24-003', downloadId: impN.meta.id });
   ok(listN.success && listN.hasDownloadFolder === false && listN.matched === 0, 'no Download folder: empty list');
 
+  // ── media uploaded to Evidence somewhere other than a Download folder
+  const logsSrc = path.join(srcCase, 'Logs');
+  const putLogs = (dir, tweak) => {
+    fs.mkdirSync(dir, { recursive: true });
+    for (const n of fs.readdirSync(logsSrc)) fs.copyFileSync(path.join(logsSrc, n), path.join(dir, n));
+    if (tweak) fs.appendFileSync(path.join(dir, 'details.txt'), '\n2026-03-02 21:20:00 another download\n');
+  };
+  const sized = (p, n, head) => {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    const b = Buffer.alloc(n, 0x61);
+    if (head) head.copy(b, 0);
+    fs.writeFileSync(p, b);
+  };
+  const SZ = {}; model0.files.forEach(f => { SZ[f.index] = f.size; });
+  const evOf = (cn) => path.join(casesDir, cn, 'Evidence');
+  const ctxOf = (cn, extra) => ({ casesDir, caseNumber: cn, extraRoots: extra || [], security: null });
+  const withStore = (st) => Object.assign({}, model0, { storage: st });
+
+  // 1. files uploaded flat beside loose logs (no Download folder)
+  const flat = path.join(evOf('24-010'), 'TD upload');
+  putLogs(flat);
+  sized(path.join(flat, 'beach_01.jpg'), SZ[0]);
+  sized(path.join(flat, 'beach_02.jpg'), SZ[1] - 10);        // partial copy, own folder → name match
+  const rF = await B.locateDownloadFiles(withStore({ caseDir: flat, logsDir: flat, downloadDir: null }), ctxOf('24-010'));
+  ok(rF.byIndex.has(0) && rF.byIndex.has(1), 'locate: files flat beside the logs are found');
+  ok(rF.byIndex.get(0).where === 'case' && rF.byIndex.get(0).how === 'size', 'locate: flat file matched by name + exact size, in the own folder');
+  eq(rF.exists, false, 'locate: exists stays false without a Download folder');
+  const rFs = B.resolveDownloadFiles(withStore({ caseDir: flat, logsDir: flat, downloadDir: null }), ctxOf('24-010'));
+  ok(rFs.byIndex.size === 2 && rFs.extra === 0, 'resolve (sync): own folder only, extras counted only in a Download folder');
+
+  // 2. media in a separate Evidence item (own logs in their own tag folder)
+  putLogs(path.join(evOf('24-011'), 'TD logs', 'Logs'));
+  sized(path.join(evOf('24-011'), 'Pictures', 'beach_01.jpg'), SZ[0]);
+  writeDownload(path.join(evOf('24-011'), 'Pictures'), { files: [model0.files[1]] });          // Holiday Set\beach_02.jpg, partial content
+  sized(path.join(evOf('24-011'), 'Pictures', 'clip.mp4'), 1234);                              // wrong size, name only → not used
+  const st11 = { caseDir: path.join(evOf('24-011'), 'TD logs'), logsDir: path.join(evOf('24-011'), 'TD logs', 'Logs'), downloadDir: null };
+  const r11 = await B.locateDownloadFiles(withStore(st11), ctxOf('24-011'));
+  ok(r11.searchedEvidence, 'locate: case Evidence searched when files are missing');
+  ok(r11.byIndex.has(0) && r11.byIndex.get(0).where === 'evidence' && r11.byIndex.get(0).how === 'size', 'locate: same name + exact size in another Evidence item');
+  ok(r11.byIndex.has(1) && r11.byIndex.get(1).how === 'path', 'locate: torrent folder + name in another Evidence item (partial file)');
+  ok(!r11.byIndex.has(2), 'locate: name-only match with the wrong size is not used outside the own folder');
+  eq(r11.places, [{ where: 'evidence', label: 'Pictures', count: 2 }], 'locate: places name the Evidence item');
+  eq(r11.elsewhere, 2, 'locate: elsewhere count');
+  ok(r11.roots.includes(evOf('24-011')), 'locate: matched Evidence folder becomes an allowed root');
+
+  // 3 + 4. another TD download is never borrowed from; a copy of this one (twin) is
+  const own12 = path.join(evOf('24-012'), 'Own');
+  putLogs(own12);
+  putLogs(path.join(evOf('24-012'), 'Other TD', 'Logs'), true);
+  sized(path.join(evOf('24-012'), 'Other TD', 'Download', 'Holiday Set', 'beach_01.jpg'), SZ[0]);
+  putLogs(path.join(evOf('24-012'), 'Copy TD', 'Logs'));
+  sized(path.join(evOf('24-012'), 'Copy TD', 'Download', 'Holiday Set', 'clip.mp4'), 5000);
+  sized(path.join(evOf('24-012'), 'Copy TD', 'Download', 'beach_02.jpg'), 40);             // twin: own rules (name only)
+  const r12 = await B.locateDownloadFiles(withStore({ caseDir: own12, logsDir: own12, downloadDir: null }), ctxOf('24-012'));
+  ok(!r12.byIndex.has(0), 'locate: files under another TD download are never used');
+  ok(r12.byIndex.has(2) && r12.byIndex.get(2).where === 'evidence', 'locate: a copy of the same TD download (same log sizes) is used');
+  ok(r12.byIndex.has(1) && r12.byIndex.get(1).how === 'name', 'locate: twin copy gets the own-folder rules');
+
+  // 5. the same file in two Evidence items → left unmatched (ambiguous)
+  const own13 = path.join(evOf('24-013'), 'Own');
+  putLogs(own13);
+  sized(path.join(evOf('24-013'), 'Item A', 'beach_01.jpg'), SZ[0]);
+  sized(path.join(evOf('24-013'), 'Item B', 'beach_01.jpg'), SZ[0]);
+  const r13 = await B.locateDownloadFiles(withStore({ caseDir: own13, logsDir: own13, downloadDir: null }), ctxOf('24-013'));
+  ok(!r13.byIndex.has(0) && r13.ambiguous.includes(0), 'locate: same name + size in two Evidence items → ambiguous, not guessed');
+
+  // 6. Field Security copy: size = plain + 40-byte header
+  const own15 = path.join(evOf('24-015'), 'Own');
+  putLogs(own15);
+  sized(path.join(evOf('24-015'), 'Enc', 'beach_02.jpg'), SZ[1] + 40, Buffer.from('VIPENC'));
+  sized(path.join(evOf('24-015'), 'Enc', 'beach_01.jpg'), SZ[0] + 40);                        // no header → size is off by 40
+  const r15 = await B.locateDownloadFiles(withStore({ caseDir: own15, logsDir: own15, downloadDir: null }), ctxOf('24-015'));
+  ok(r15.byIndex.has(1) && r15.byIndex.get(1).how === 'size', 'locate: encrypted copy matched on its plain size');
+  ok(!r15.byIndex.has(0), 'locate: unencrypted file 40 bytes too big is not matched');
+
+  // 7. case folder moved: stored paths re-based onto the current cases folder
+  const moved = path.join(evOf('24-014'), 'TD1');
+  putLogs(path.join(moved, 'Logs'));
+  writeDownload(path.join(moved, 'Download'), model0);
+  const oldBase = path.join(TMP, 'old-drive', 'cases', '24-014', 'Evidence', 'TD1');
+  const r14 = await B.locateDownloadFiles(withStore({ caseDir: oldBase, logsDir: path.join(oldBase, 'Logs'), downloadDir: path.join(oldBase, 'Download') }), ctxOf('24-014'));
+  ok(r14.exists && r14.byIndex.size === notNone.length && [...r14.byIndex.values()].every(v => v.where === 'download'), 'locate: moved case folder → stored paths re-based');
+  const r14b = await B.locateDownloadFiles(withStore({ caseDir: oldBase, logsDir: path.join(oldBase, 'Logs'), downloadDir: path.join(oldBase, 'Download') }), ctxOf('24-099'));
+  eq(r14b.byIndex.size, 0, 'locate: re-basing only within the same case number');
+
+  // 8. Logs uploaded straight into Evidence: the whole Evidence folder is not an "own" folder
+  putLogs(path.join(evOf('24-016'), 'Logs'));
+  sized(path.join(evOf('24-016'), 'Pics', 'beach_02.jpg'), 77);                                 // name only, wrong size
+  const r16 = await B.locateDownloadFiles(withStore({ caseDir: evOf('24-016'), logsDir: path.join(evOf('24-016'), 'Logs'), downloadDir: null }), ctxOf('24-016'));
+  ok(!r16.roots.includes(evOf('24-016')) || !r16.byIndex.size, 'locate: Evidence root is not searched with the loose own rules');
+  ok(!r16.byIndex.has(1), 'locate: no name-only match across the whole Evidence folder');
+
+  // 9. linked ("reference only") Evidence folder outside the cases folder
+  const linked = path.join(TMP, 'USB', 'Linked media');
+  sized(path.join(linked, 'beach_02.jpg'), SZ[1]);
+  const r17 = await B.locateDownloadFiles(withStore(st11), ctxOf('24-011', B.cleanExtraRoots([linked, path.join(linked, 'beach_02.jpg')])));
+  ok(r17.byIndex.get(1).where === 'evidence' && !r17.roots.includes(linked), 'locate: a stronger match in the case Evidence beats a linked copy; unused linked folder not allowed');
+  eq(B.cleanExtraRoots([path.parse(TMP).root, 'relative\\x', '', null, path.join(TMP, 'nope'), linked, path.join(linked, 'beach_02.jpg')]), [linked], 'cleanExtraRoots: no drive root, relative or missing paths; files → folder; deduped');
+  const r18 = await B.locateDownloadFiles(withStore({ caseDir: own13, logsDir: own13, downloadDir: null }), ctxOf('24-013', B.cleanExtraRoots([linked])));
+  ok(!r18.byIndex.has(0) && r18.byIndex.has(1) && r18.byIndex.get(1).where === 'linked', 'locate: linked folder match reported as linked');
+  // cached listing is reused, not re-walked
+  sized(path.join(evOf('24-011'), 'Late', 'Holiday Set', 'clip.mp4'), 9000);
+  const r11c = await B.locateDownloadFiles(withStore(st11), Object.assign(ctxOf('24-011'), { wide: r11.wide }));
+  ok(!r11c.byIndex.has(2), 'locate: cached Evidence listing reused');
+  const r11d = await B.locateDownloadFiles(withStore(st11), ctxOf('24-011'));
+  ok(r11d.byIndex.has(2), 'locate: fresh search finds a newly added file');
+
+  // IPC: import from inside the case, media found elsewhere in Evidence, served by index
+  const imp11 = await ipc.h['bt-import'](fakeEvent([]), { jobId: 'j11', caseNumber: '24-011', sourceDir: path.join(evOf('24-011'), 'TD logs'), mode: 'case' });
+  ok(imp11.success && imp11.meta.storage.hasDownload === false, 'IPC: import of logs without a Download folder');
+  const l11 = await ipc.h['bt-media-list']({}, { caseNumber: '24-011', downloadId: imp11.meta.id, extraPaths: [linked], rescan: true });
+  ok(l11.success && l11.matched === 3 && l11.elsewhere === 3, 'IPC media-list: files found elsewhere in Evidence + linked folder');
+  ok(l11.hasDownloadFolder === false && l11.searchedEvidence === true && l11.ambiguous === 0, 'IPC media-list: state fields');
+  ok(Array.isArray(l11.places) && l11.places.some(p => p.label === 'Pictures' && p.count === 2) && l11.places.some(p => p.label === 'Late'), 'IPC media-list: places by Evidence item');
+  const esc = (s) => JSON.stringify(s).slice(1, -1);
+  ok(!JSON.stringify(l11).includes(esc(casesDir)) && !JSON.stringify(l11).includes(esc(TMP)), 'IPC media-list: still no paths sent to the renderer');
+  const u11 = await ipc.h['bt-media-url']({}, { caseNumber: '24-011', downloadId: imp11.meta.id, index: 0 });
+  ok(u11.success && served[served.length - 1] === path.join(evOf('24-011'), 'Pictures', 'beach_01.jpg'), 'IPC media-url: serves the file found in another Evidence item');
+  const u11l = await ipc.h['bt-media-url']({}, { caseNumber: '24-011', downloadId: imp11.meta.id, index: 1 });
+  ok(u11l.success && served[served.length - 1].startsWith(path.join(evOf('24-011'), 'Pictures')), 'IPC media-url: own-case Evidence preferred over the linked copy');
+  const u11r = await ipc.h['bt-media-url']({}, { caseNumber: '24-011', downloadId: imp11.meta.id, index: 3 });
+  ok(u11r.success === false, 'IPC media-url: not-found file refused');
+
   // ── renderer: grid / blur / verify UI (pure parts)
   const store = {};
   globalThis.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } };
@@ -246,6 +369,13 @@ function writeDownload(dlRoot, model, prefix) {
   ok(/without a Download folder/.test(ui._verifyHtml()), 'ui: no Download folder message');
   ui.media = { id, hasDownloadFolder: true, folderFound: false };
   ok(/can't be reached/.test(ui._verifyHtml()), 'ui: unreachable folder message');
+  ok(/data-act="mrescan"/.test(ui._verifyHtml()), 'ui: nothing found → Look again button');
+  ui.media = { id, hasDownloadFolder: false, folderFound: false, onDisk: list.onDisk, matched: 3, elsewhere: 3, places: [{ where: 'evidence', label: 'Pictures <b>', count: 3 }], ambiguous: 1 };
+  const vhE = ui._verifyHtml();
+  ok(/found in Evidence: Pictures &lt;b&gt; \(3\)/.test(vhE) && !/without a Download folder/.test(vhE), 'ui: files found elsewhere in Evidence (label escaped)');
+  ok(/1 file found in more than one Evidence item/.test(vhE), 'ui: ambiguous count shown');
+  ui.media = { id, hasDownloadFolder: false, folderFound: false, onDisk: list.onDisk, matched: 3, elsewhere: 1, places: [{ where: 'evidence', label: 'Pictures', count: 1 }], ambiguous: 0 };
+  ok(/2 in the download's folder, 1 elsewhere in Evidence \(Pictures \(1\)\)/.test(ui._verifyHtml()), 'ui: split between own folder and Evidence');
   ui.media = { id, hasDownloadFolder: true, folderFound: true, onDisk: list.onDisk, matched: list.matched };
 
   // blur: default on, per-officer pref, reveal one, reveal all (session)
@@ -302,6 +432,10 @@ function writeDownload(dlRoot, model, prefix) {
   bm.imports = [{ id: 'd1' }];
   bm.saveData = () => {};
   eq(await bm.mediaUrl('d1', 3), 'viper-media://m/x', 'module.mediaUrl');
+  const mlA = (await bm.mediaList('d1', { rescan: true })).a;
+  ok(mlA.downloadId === 'd1' && mlA.rescan === true && Array.isArray(mlA.extraPaths), 'module.mediaList sends linked Evidence folders + rescan');
+  bm._evidenceList = () => [{ referenceOnly: true, sourcePath: 'E:\\Seized\\Pics', files: [{ path: 'E:\\Seized\\Pics\\sub\\a.jpg' }] }, { released: true, referenceOnly: true, sourcePath: 'E:\\Gone' }, { sourcePath: 'C:\\copied' }];
+  eq(bm._evidenceLinkedFolders(), ['E:\\Seized\\Pics', 'E:\\Seized\\Pics\\sub'], 'module: linked folders from reference-only Evidence items (not released, not copied)');
   eq(Object.keys(seen[0][1]).sort(), ['caseNumber', 'downloadId', 'index'], 'module.mediaUrl sends case + download id + index only');
   eq(await bm.videoThumb('d1', 1), false, 'module.videoThumb: undecodable → false (final)');
   eq(await bm.videoThumb('d1', 2), 'data:x', 'module.videoThumb: frame');

@@ -213,11 +213,23 @@
 
         itemCount() { return this.imports.length; }
 
+        /** Every folder behind a linked ("reference only") Evidence item, for the media search. */
+        _evidenceLinkedFolders() {
+            const out = [];
+            const dir = (p) => String(p).replace(/[\\/][^\\/]*$/, '');
+            for (const ev of this._evidenceList()) {
+                if (!ev || ev.released || !(ev.referenceOnly || ev.storageMode === 'reference')) continue;
+                if (ev.sourcePath) out.push(String(ev.sourcePath));
+                for (const f of (Array.isArray(ev.files) ? ev.files : [])) if (f && f.path) out.push(dir(f.path));
+            }
+            return Array.from(new Set(out.filter(Boolean))).slice(0, 200);
+        }
+
         // ── Downloaded files (BT Phase 4): by index only, main resolves + guards ──
-        async mediaList(id) {
+        async mediaList(id, opts) {
             const api = this._api();
             if (!api.btMediaList) return { success: false, error: 'Needs the VIPER desktop app.' };
-            return api.btMediaList({ caseNumber: this.caseNumber, downloadId: id });
+            return api.btMediaList({ caseNumber: this.caseNumber, downloadId: id, extraPaths: this._evidenceLinkedFolders(), rescan: !!(opts && opts.rescan) });
         }
 
         async mediaUrl(id, index) {

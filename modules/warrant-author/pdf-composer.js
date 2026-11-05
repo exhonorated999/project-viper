@@ -648,6 +648,344 @@
     }
   }
 
+  // ─── TEXAS layout (meta.layout === 'tx') ───────────────────────────────
+  // A separate flow so every other jurisdiction stays bit-for-bit as it
+  // was. Geometry from the exemplar .docx: Letter, 0.5" top/bottom, 1"
+  // sides, Times 10pt single-spaced body with a blank line between
+  // paragraphs, 11pt captions / titles / provider block / PC box.
+  const TX = Object.freeze({
+    TOP: 66,            // first body line (header sits above it)
+    BOTTOM: PAGE_H - 40,
+    HDR_BASE: 46,       // running-header baseline
+    HDR_LEFT: 58,       // header text inset from the left margin
+    LH: 1.15,           // line height = size * LH
+    BOX_OUT: 4,         // box frame sits this far outside the text column
+    BOX_PAD: 5,         // vertical padding inside the box
+    BULLET_X: 76,
+    TEXT_X: 96,
+  });
+
+  function _txFont(doc, size, bold) {
+    doc.setFont('times', bold ? 'bold' : 'normal');
+    doc.setFontSize(size);
+  }
+
+  // "**bold** plain" → [{text, bold}]. Unbalanced markers fall back to plain.
+  function _txRuns(text, rich, bold) {
+    const s = _safeText(text);
+    if (!rich || s.indexOf('**') === -1) return [{ text: s, bold: !!bold }];
+    const parts = s.split('**');
+    if (parts.length % 2 === 0) return [{ text: s.replace(/\*\*/g, ''), bold: !!bold }];
+    return parts.map((t, i) => ({ text: t, bold: !!bold || (i % 2 === 1) })).filter(r => r.text);
+  }
+
+  // Runs → word tokens. `glue` marks a token that touches the previous one
+  // (no space), e.g. the ":" after "**Records pertaining to**".
+  function _txTokens(runs) {
+    const toks = [];
+    let spaceBefore = true;
+    for (const r of runs) {
+      const re = /(\s+)|([^\s]+)/g;
+      let m;
+      while ((m = re.exec(r.text))) {
+        if (m[1]) { spaceBefore = true; continue; }
+        toks.push({ t: m[2], bold: r.bold, glue: !spaceBefore && toks.length > 0 });
+        spaceBefore = false;
+      }
+    }
+    return toks;
+  }
+
+  // Greedy line breaking over measured tokens.
+  function _txLayout(doc, toks, size, width, firstIndent) {
+    const lines = [];
+    _txFont(doc, size, false);
+    const spaceW = doc.getTextWidth(' ');
+    let cur = [], curW = 0, ind = firstIndent || 0;
+    for (const tk of toks) {
+      _txFont(doc, size, tk.bold);
+      tk.w = doc.getTextWidth(tk.t);
+      if (!cur.length) { cur = [tk]; curW = tk.w; continue; }
+      const add = (tk.glue ? 0 : spaceW) + tk.w;
+      if (curW + add > width - ind) {
+        // keep glued tokens with their word
+        let carry = [tk];
+        while (carry[0].glue && cur.length > 1) carry.unshift(cur.pop());
+        const lineW = cur.reduce((a, t, i) => a + t.w + (i && !t.glue ? spaceW : 0), 0);
+        lines.push({ toks: cur, width: lineW, indent: ind, last: false });
+        cur = carry; ind = 0;
+        curW = cur.reduce((a, t, i) => a + t.w + (i && !t.glue ? spaceW : 0), 0);
+      } else {
+        cur.push(tk); curW += add;
+      }
+    }
+    if (cur.length) lines.push({ toks: cur, width: curW, indent: ind, last: true });
+    return { lines, spaceW };
+  }
+
+  function _flowTx(doc, blocks) {
+    let pageIdx = 1;
+    let y = TX.TOP;
+    let dirty = false;          // anything drawn on the current page?
+    let pendingGap = 0;
+    const sections = [{ start: 1, end: 1 }];
+    let box = null;             // {top} while a box is open
+
+    function inner() {
+      return box
+        ? { x: MARGIN + TX.BOX_OUT, w: CONTENT_W - TX.BOX_OUT * 2 }
+        : { x: MARGIN, w: CONTENT_W };
+    }
+    function drawBoxFrame(bottom) {
+      doc.setLineWidth(0.6);
+      doc.rect(MARGIN - TX.BOX_OUT, box.top, CONTENT_W + TX.BOX_OUT * 2, Math.max(4, bottom - box.top));
+    }
+    function newPage() {
+      if (box) drawBoxFrame(Math.min(TX.BOTTOM, y) + TX.BOX_PAD);
+      doc.addPage();
+      pageIdx += 1;
+      sections[sections.length - 1].end = pageIdx;
+      y = TX.TOP;
+      dirty = false;
+      pendingGap = 0;
+      if (box) { box.top = y; y += TX.BOX_PAD; }
+    }
+    function room(h) { if (y + h > TX.BOTTOM - (box ? TX.BOX_PAD : 0)) newPage(); }
+    function gap() {
+      if (dirty && pendingGap) y += pendingGap;
+      pendingGap = 0;
+    }
+
+    // Draw one laid-out line of tokens at (x, baseline).
+    function drawLine(L, x, base, width, size, opts) {
+      const gaps = L.toks.reduce((a, t, i) => a + (i && !t.glue ? 1 : 0), 0);
+      const avail = width - L.indent;
+      const slack = avail - L.width;
+      _txFont(doc, size, false);
+      const spaceW = doc.getTextWidth(' ');
+      let gapW = spaceW;
+      if (opts.justify && !L.last && gaps > 0 && slack > 0 && slack < avail * 0.35) gapW = spaceW + slack / gaps;
+      let cx = x + L.indent;
+      if (opts.align === 'center') cx = x + (width - L.width) / 2;
+      L.toks.forEach((t, i) => {
+        if (i && !t.glue) cx += gapW;
+        _txFont(doc, size, t.bold);
+        doc.text(t.t, cx, base);
+        cx += t.w;
+      });
+    }
+
+    function drawParagraph(b) {
+      const size = b.size || 10;
+      const lh = size * TX.LH;
+      const segs = _safeText(b.text).split(/\r?\n/);
+      const col = inner();
+      const laid = [];
+      for (const seg of segs) {
+        if (!seg.trim()) { laid.push(null); continue; }
+        const toks = _txTokens(_txRuns(seg, b.rich, b.bold));
+        const { lines } = _txLayout(doc, toks, size, col.w, b.firstIndent || 0);
+        for (const L of lines) laid.push(L);
+      }
+      // Short paragraphs stay together; longer ones keep ≥2 lines per side.
+      const total = laid.length * lh;
+      const limit = TX.BOTTOM - (box ? TX.BOX_PAD : 0);
+      if (dirty && y + total > limit) {
+        const fit = Math.floor((limit - y) / lh);
+        if (laid.length <= 3 || fit < 2 || laid.length - fit < 2) newPage();
+      }
+      for (const L of laid) {
+        room(lh);
+        if (L) drawLine(L, col.x, y + size * 0.85, col.w, size, b);
+        y += lh;
+        dirty = true;
+      }
+    }
+
+    function drawBullets(b) {
+      const size = b.size || 10;
+      const lh = size * TX.LH;
+      const col = inner();
+      const tx = col.x + TX.TEXT_X - (box ? TX.BOX_OUT : 0);
+      const bx = col.x + TX.BULLET_X - (box ? TX.BOX_OUT : 0);
+      const w = col.x + col.w - tx;
+      for (const it of (b.items || [])) {
+        const segs = _safeText(it.text).split(/\r?\n/).filter(s => s.trim());
+        const laid = [];
+        segs.forEach((seg) => {
+          const { lines } = _txLayout(doc, _txTokens(_txRuns(seg, it.rich, it.bold)), size, w, 0);
+          lines.forEach(L => laid.push(L));
+        });
+        if (laid.length <= 3) room(laid.length * lh); else room(2 * lh);
+        laid.forEach((L, i) => {
+          room(lh);
+          const base = y + size * 0.85;
+          if (i === 0) {
+            doc.setFillColor(0, 0, 0);
+            doc.circle(bx + 1.6, base - size * 0.3, 1.6, 'F');
+          }
+          drawLine(L, tx, base, w, size, {});
+          y += lh;
+          dirty = true;
+        });
+      }
+    }
+
+    function drawCaption(b) {
+      const size = b.size || 11;
+      const lh = size * TX.LH;
+      const rows = Array.isArray(b.rows) ? b.rows : [];
+      room(rows.length * lh);
+      const rightX = MARGIN + (b.rightCol || 256);
+      const rightW = PAGE_W - MARGIN - rightX;
+      for (const r of rows) {
+        _txFont(doc, size, !!b.bold);
+        const base = y + size * 0.85;
+        const right = doc.splitTextToSize(_safeText((r && r.right) || ''), rightW);
+        if (r && r.left) doc.text(_safeText(r.left), MARGIN, base);
+        doc.text(_safeText(b.sep || '\u00a7'), MARGIN + (b.sepCol || 216), base);
+        right.forEach((ln, i) => doc.text(ln, rightX, base + i * lh));
+        y += Math.max(1, right.length) * lh;
+        dirty = true;
+      }
+    }
+
+    function drawTitle(b) {
+      const size = b.size || 11;
+      const lh = size * TX.LH;
+      room(lh * 3);
+      _txFont(doc, size, true);
+      const col = inner();
+      const lines = doc.splitTextToSize(_safeText(b.text), col.w);
+      for (const ln of lines) {
+        const w = doc.getTextWidth(ln);
+        const cx = col.x + col.w / 2;
+        const base = y + size * 0.85;
+        doc.text(ln, cx, base, { align: 'center' });
+        if (b.underline) {
+          doc.setLineWidth(0.6);
+          doc.line(cx - w / 2, base + 1.5, cx + w / 2, base + 1.5);
+        }
+        y += lh;
+      }
+      dirty = true;
+    }
+
+    function drawSigColumns(b) {
+      const size = b.size || 10;
+      const lh = size * TX.LH;
+      const left = Array.isArray(b.left) ? b.left : [];
+      const right = Array.isArray(b.right) ? b.right : [];
+      const rows = Math.max(left.length, right.length);
+      const space = b.space || 0;
+      if (y + space + rows * lh > TX.BOTTOM) newPage();
+      const y0 = y + space;
+      const ruleW = b.ruleW || 200;
+      const drawCol = (entries, x) => {
+        entries.forEach((e, i) => {
+          const base = y0 + i * lh + size * 0.85;
+          if (!e || e.blank) return;
+          if (e.rule) {
+            doc.setLineWidth(0.6);
+            doc.line(x, base, x + ruleW, base);
+            return;
+          }
+          _txFont(doc, size, !!e.bold);
+          doc.text(_safeText(e.text), x + (e.indent || 0), base);
+        });
+      };
+      drawCol(left, MARGIN + (b.leftX || 0));
+      drawCol(right, MARGIN + (b.rightX || 252));
+      y = y0 + rows * lh;
+      dirty = true;
+    }
+
+    function drawImage(b) {
+      if (!b || !b.dataUrl) return;
+      const maxW = CONTENT_W, maxH = TX.BOTTOM - TX.TOP - 8;
+      let w = maxW, h = maxW * 0.75;
+      if (b.w > 0 && b.h > 0) { h = w * (b.h / b.w); if (h > maxH) { h = maxH; w = h * (b.w / b.h); } }
+      if (y + h > TX.BOTTOM) newPage();
+      try {
+        doc.addImage(b.dataUrl, /png/i.test(b.mime || '') ? 'PNG' : 'JPEG', MARGIN + (CONTENT_W - w) / 2, y, w, h, undefined, 'FAST');
+        y += h + 8;
+      } catch (_e) {
+        _txFont(doc, 10, false);
+        doc.text('[exhibit image could not be rendered]', MARGIN, y + 9);
+        y += 12;
+      }
+      dirty = true;
+    }
+
+    for (const b of blocks) {
+      if (!b) continue;
+      switch (b.kind) {
+        case 'section-break':
+          if (box) { drawBoxFrame(y + TX.BOX_PAD); box = null; }
+          if (dirty) newPage();
+          if (sections[sections.length - 1].start !== pageIdx) {
+            sections[sections.length - 1].end = pageIdx - 1;
+            sections.push({ start: pageIdx, end: pageIdx });
+          }
+          pendingGap = 0;
+          continue;
+        case 'page-break':
+          if (dirty) newPage();
+          continue;
+        case 'box-start':
+          gap();
+          room(40);
+          box = { top: y };
+          y += TX.BOX_PAD;
+          dirty = true;
+          continue;
+        case 'box-end':
+          if (box) { y += TX.BOX_PAD; drawBoxFrame(y); box = null; }
+          pendingGap = 10 * TX.LH;
+          continue;
+        case 'spacer':
+          y += _spacerSize(b.size);
+          continue;
+        default:
+          break;
+      }
+      gap();
+      switch (b.kind) {
+        case 'caption-table': drawCaption(b); break;
+        case 'heading-2':
+          if (b.align === 'center' || b.underline) drawTitle(b);
+          else drawParagraph({ text: b.text, bold: true, size: b.size || 11 });
+          break;
+        case 'heading-1': drawParagraph({ text: b.text, bold: true, size: 11 }); break;
+        case 'paragraph': drawParagraph(b); break;
+        case 'bullets': drawBullets(b); break;
+        case 'sig-columns': drawSigColumns(b); break;
+        case 'exhibit-image': drawImage(b); break;
+        default:
+          if (b.text) drawParagraph({ text: b.text, size: 10 });
+      }
+      pendingGap = b.tight ? 0 : ((b.size || 10) * TX.LH);
+    }
+    if (box) drawBoxFrame(y + TX.BOX_PAD);
+    sections[sections.length - 1].end = pageIdx;
+    return { pageCount: pageIdx, sections };
+  }
+
+  // "SEARCH WARRANT NO:____" left, "Page n of m" right, m = pages in the
+  // page's own section.
+  function _stampTxHeaders(doc, sections, runningHeader) {
+    const left = _safeText((runningHeader && runningHeader.left) || 'SEARCH WARRANT NO:');
+    for (const s of sections) {
+      const m = s.end - s.start + 1;
+      for (let p = s.start; p <= s.end; p++) {
+        doc.setPage(p);
+        _txFont(doc, 11, false);
+        doc.text(left, MARGIN + TX.HDR_LEFT, TX.HDR_BASE);
+        doc.text(`Page ${p - s.start + 1} of ${m}`, PAGE_W - MARGIN, TX.HDR_BASE, { align: 'right' });
+      }
+    }
+  }
+
   /**
    * Compose a PDF from a block stream.
    * @param {Object} args
@@ -674,6 +1012,12 @@
       doc.text('(empty document)', MARGIN, MARGIN + 12);
       const ab = doc.output('arraybuffer');
       return { arrayBuffer: ab, blob: doc.output('blob'), pageCount: 1 };
+    }
+
+    if (meta.layout === 'tx') {
+      const { pageCount: txPages, sections } = _flowTx(doc, blocks);
+      _stampTxHeaders(doc, sections, runningHeader);
+      return { arrayBuffer: doc.output('arraybuffer'), blob: doc.output('blob'), pageCount: txPages, sections };
     }
 
     // When a CA running header is enabled, only push content start down if
@@ -712,7 +1056,7 @@
 
   const api = Object.freeze({
     composePdf,
-    _internals: { _flowBlocks, _stampFooters, _stampHeaders, _safeText, PAGE_W, PAGE_H, MARGIN, CONTENT_W },
+    _internals: { _flowBlocks, _stampFooters, _stampHeaders, _safeText, PAGE_W, PAGE_H, MARGIN, CONTENT_W, _flowTx, _stampTxHeaders, _txRuns, _txTokens },
   });
 
   if (typeof module !== 'undefined' && module.exports) {

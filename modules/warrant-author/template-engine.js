@@ -790,6 +790,242 @@ function _resolvePageBreak(block) {
   };
 }
 
+// ─── TX-SPECIFIC RESOLVERS ─────────────────────────────────────────────────
+// Texas Warrant for Electronic Customer Data (CCP Art. 18B.354-18B.357) +
+// Affidavit and Application, modelled on a Texas municipal department's
+// ESP exemplars. Layout-only kinds; block-builder._buildTxEsp renders them.
+// Nothing agency-specific is hard-coded: county, agency name, affiant
+// name/rank/badge/email all come from the agency profile.
+
+const TX_TARGET_LABELS = Object.freeze({
+  'esp-user-id': 'Account ID',
+  'user-id': 'Account ID',
+  'uid': 'Account ID',
+  'account-id': 'Account ID',
+  'email': 'email',
+  'phone': 'phone number',
+  'username': 'username',
+  'handle': 'username',
+  'screen-name': 'screen name',
+  'ip': 'IP address',
+});
+
+const TX_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
+// "2017-01-01" → "January 1, 2017". Anything else passes through verbatim
+// (the warrant never rewrites what the affiant typed).
+function _txLongDate(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return s;
+  const mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return s;
+  return `${TX_MONTHS[mo - 1]} ${Number(m[3])}, ${m[1]}`;
+}
+
+function _txCounty(ctx) {
+  return _arCounty(ctx);
+}
+
+function _txProviderName(ctx) {
+  const p = ctx.provider || {};
+  return String(p.name || p.legalEntity || '').trim();
+}
+
+function _txFax(provider) {
+  const direct = String((provider && provider.fax) || '').trim();
+  if (direct) return direct;
+  const m = /\bfax[:\s]*([+()\d][\d\s().\-]{6,}\d)/i.exec(String((provider && provider.notes) || ''));
+  return m ? m[1].trim() : '';
+}
+
+function _resolveTxCaption(block, ctx) {
+  // Warrant:   THE STATE OF TEXAS  §
+  //            COUNTY OF <COUNTY>  §   COURT: ____ DISTRICT COURT
+  // Affidavit: THE STATE OF TEXAS  §   IN THE DISTRICT COURT IN
+  //            COUNTY OF <COUNTY>  §   AND FOR <COUNTY> COUNTY, TEXAS
+  const county = _txCounty(ctx);
+  const dangling = county ? [] : ['court.county'];
+  const C = (county || '__________').toUpperCase();
+  const draft = ctx.draft || {};
+  const courtNo = String(draft.txDistrictCourt || '').trim();
+  const variant = block.variant === 'affidavit' ? 'affidavit' : 'warrant';
+  const rows = variant === 'affidavit'
+    ? [
+        { left: 'THE STATE OF TEXAS', right: 'IN THE DISTRICT COURT IN' },
+        { left: `COUNTY OF ${C}`, right: `AND FOR ${C} COUNTY, TEXAS` },
+      ]
+    : [
+        { left: 'THE STATE OF TEXAS', right: '' },
+        { left: `COUNTY OF ${C}`, right: `COURT: ${courtNo || '________'} DISTRICT COURT` },
+      ];
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    variant,
+    county,
+    rows,
+    danglingSlots: dangling,
+  };
+}
+
+function _resolveTxProviderBlock(block, ctx) {
+  // Centered, bold: name / mailing address / "Phone: … / Fax: … / email".
+  const provider = ctx.provider || {};
+  const dangling = [];
+  const name = String(provider.legalEntity || provider.name || '').trim();
+  if (!name) dangling.push('provider.name');
+  const lines = [];
+  if (name) lines.push(name);
+  const address = String(provider.address || '').replace(/\s*\r?\n\s*/g, ', ').trim();
+  if (address) lines.push(address);
+  else dangling.push('provider.address');
+  const contact = [];
+  const phone = String(provider.phone || '').trim();
+  const fax = _txFax(provider);
+  const email = String(provider.email || '').trim();
+  if (phone) contact.push('Phone: ' + phone);
+  if (fax) contact.push('Fax: ' + fax);
+  if (email) contact.push(email);
+  if (contact.length) lines.push(contact.join(' / '));
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: lines.join('\n'),
+    lines,
+    danglingSlots: dangling,
+  };
+}
+
+// "Records pertaining to: <Provider> Account ID X and/or email Y from
+// January 1, 2017 to February 1, 2017:" + one bullet per record type +
+// a bold closing bullet "Provide Records to <rank> <name> at email address
+// <email>". addendum.recordsPertainingTo replaces the generated sentence
+// when the affiant needs the exemplar's free-form wording ("... AND any
+// account that has messaged ...").
+function _resolveTxRecords(block, ctx) {
+  const ad = ctx.addendum || {};
+  const agency = ctx.agency || {};
+  const dangling = [];
+  const provider = _txProviderName(ctx);
+
+  let lead = String(ad.recordsPertainingTo || '').trim();
+  if (!lead) {
+    const targets = Array.isArray(ad.targets) ? ad.targets : [];
+    const ids = targets
+      .filter(t => t && String(t.value || '').trim())
+      .map(t => {
+        const type = String(t.type || '').trim().toLowerCase();
+        const label = TX_TARGET_LABELS[type] || (type ? type.replace(/[-_]/g, ' ') : 'identifier');
+        return `${label} ${String(t.value).trim()}`;
+      });
+    if (!ids.length) dangling.push('addendum.targets');
+    const range = ad.dateRange || {};
+    let when = '';
+    if (range.allAvailable) {
+      when = ' for all available dates';
+    } else if (range.start && range.end) {
+      when = ` from ${_txLongDate(range.start)} to ${_txLongDate(range.end)}`;
+    } else {
+      if (!range.start) dangling.push('addendum.dateRange.start');
+      if (!range.end) dangling.push('addendum.dateRange.end');
+    }
+    const who = ids.length ? ids.join(' and/or ') : '{{addendum.targets}}';
+    lead = `${provider ? provider + ' ' : ''}${who}${when}`;
+  }
+  lead = lead.replace(/[:.;\s]+$/, '') + ':';
+
+  // Record types — reuse the shared items-to-seize resolution.
+  const itemsRes = _resolveItemsToSeize({ key: block.key, kind: 'items-to-seize' }, ctx);
+  const items = (itemsRes.items || [])
+    .map(it => String(it.description || it.label || '').trim())
+    .filter(Boolean);
+  for (const d of itemsRes.danglingSlots || []) dangling.push(d);
+
+  const who = [agency.affiantRank, agency.affiantName].map(s => String(s || '').trim()).filter(Boolean).join(' ');
+  const email = String(agency.affiantEmail || '').trim();
+  if (!String(agency.affiantName || '').trim()) dangling.push('agency.affiantName');
+  if (!email) dangling.push('agency.affiantEmail');
+  const provideTo = `Provide Records to ${who || '{{agency.affiantName}}'} at email address ${email || '{{agency.affiantEmail}}'}`;
+
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: [`Records pertaining to: ${lead}`].concat(items.map(i => '• ' + i), ['• ' + provideTo]).join('\n'),
+    lead,
+    items,
+    provideTo,
+    danglingSlots: dangling,
+  };
+}
+
+// Offense (centered, bold) + GROUNDS FOR ISSUANCE: CCP Art. 18.02 (a)(10)
+// and (13) always; (9) "implements or instruments" only when the affiant
+// ticks it (addendum.txGround9) — one exemplar has it, another doesn't.
+function _resolveTxGrounds(block, ctx) {
+  const ad = ctx.addendum || {};
+  const cs = ctx.case || {};
+  const offense = String(ad.txOffense || cs.offenseDescription || '').trim();
+  const dangling = offense ? [] : ['case.offenseDescription'];
+  const lines = ['Texas Code of Criminal Procedure Article 18.02:'];
+  if (ad.txGround9) lines.push('(9) implements or instruments used in the commission of a crime;');
+  lines.push('(10) property or items, except personal writings by the accused, constituting evidence tending to show that a particular person committed an offense;');
+  lines.push('And');
+  lines.push('(13) electronic customer data held in electronic storage, including the contents of and records and other information related to a wire communication or electronic communication held in electronic storage.');
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: 'GROUNDS FOR ISSUANCE:',
+    text: lines.join('\n'),
+    offense: offense || '{{case.offenseDescription}}',
+    lines,
+    danglingSlots: dangling,
+  };
+}
+
+function _resolveTxMagistrateSignature(block, ctx) {
+  const county = _txCounty(ctx);
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    county,
+    danglingSlots: county ? [] : ['court.county'],
+  };
+}
+
+function _resolveTxSignatures(block, ctx) {
+  // Left:  ____ / AFFIANT / <Name> #<badge>, <RANK> / <agencyName>
+  // Right: ____ / JUDGE / IN AND FOR THE STATE OF TEXAS / COUNTY OF <C>
+  //        + "Sworn to and subscribed before me this __ day of __, 20__"
+  const agency = ctx.agency || {};
+  const county = _txCounty(ctx);
+  const dangling = [];
+  const name = String(agency.affiantName || '').trim();
+  const agencyName = String(agency.agencyName || '').trim();
+  if (!name) dangling.push('agency.affiantName');
+  if (!agencyName) dangling.push('agency.agencyName');
+  if (!county) dangling.push('court.county');
+  return {
+    key: block.key,
+    kind: block.kind,
+    heading: '',
+    text: '',
+    name,
+    badge: String(agency.affiantBadge || '').trim(),
+    rank: String(agency.affiantRank || '').trim(),
+    agencyName,
+    county,
+    danglingSlots: dangling,
+  };
+}
+
 // ─── BLOCK DISPATCH TABLE ──────────────────────────────────────────────────
 const RESOLVERS = Object.freeze({
   'constant':                _resolveConstant,
@@ -816,6 +1052,17 @@ const RESOLVERS = Object.freeze({
   'ar-affiant-signature':    _resolveArAffiantSignature,
   'ar-judge-block':          _resolveArJudgeBlock,
   'page-break':              _resolvePageBreak,
+  // TX-specific
+  'tx-caption':              _resolveTxCaption,
+  'tx-provider-block':       _resolveTxProviderBlock,
+  'tx-records':              _resolveTxRecords,
+  'tx-grounds':              _resolveTxGrounds,
+  'tx-magistrate-signature': _resolveTxMagistrateSignature,
+  'tx-signatures':           _resolveTxSignatures,
+  // Layout markers (pass-through, no slots)
+  'section-break':           _resolvePageBreak,
+  'box-start':               _resolvePageBreak,
+  'box-end':                 _resolvePageBreak,
 });
 
 // ─── COMPOSE ───────────────────────────────────────────────────────────────
@@ -952,6 +1199,7 @@ const api = Object.freeze({
   RESOLVERS,
   _splitUsAddress,
   _formatItemsText,
+  _txLongDate,
 });
 
 if (typeof module !== 'undefined' && module.exports) {

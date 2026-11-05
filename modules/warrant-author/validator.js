@@ -380,6 +380,42 @@ function validateDraft(input) {
         }
     }
 
+    // Texas (Art. 18B) — county drives both captions + the magistrate /
+    // judge blocks; the offense prints above GROUNDS FOR ISSUANCE (per
+    // addendum override txOffense, else the case offense); the affiant
+    // e-mail prints in the "Provide Records to …" bullet. Warnings only.
+    const _isTxJurisdiction = _jx ? (_jx === 'TX') : _tpl.startsWith('tx-');
+    if (_isTxJurisdiction) {
+        const txCounty = String(draft.arCounty || agency.county || '').trim();
+        if (!txCounty) {
+            warnings.push(_warn(
+                'agency.county.empty.tx',
+                'TX_COUNTY_EMPTY',
+                'No county on file — the TX captions and signature blocks will print a blank county. Set it under Settings → Agency Profile → Agency Identity, or use the County override on the draft.',
+                { scope: 'agency', fieldPath: 'agency.county' }
+            ));
+        }
+        const txCaseOffense = String(caseCtx.offenseDescription || draft.offenseDescription || '').trim();
+        const txAds = Array.isArray(draft.addendums) ? draft.addendums : [];
+        const txNoOffense = !txCaseOffense && (txAds.length === 0 || txAds.some(a => !String((a && a.txOffense) || '').trim()));
+        if (txNoOffense) {
+            warnings.push(_warn(
+                'draft.offenseDescription.empty.tx',
+                'TX_OFFENSE_DESCRIPTION_EMPTY',
+                'No offense description — the TX affidavit prints it above "GROUNDS FOR ISSUANCE". Set the Primary Offense on the case Overview tab, or fill the Offense override on each provider page.',
+                { scope: 'case', fieldPath: 'case.offenseDescription' }
+            ));
+        }
+        if (!String(agency.affiantEmail || '').trim()) {
+            warnings.push(_warn(
+                'agency.affiantEmail.empty.tx',
+                'TX_AFFIANT_EMAIL_EMPTY',
+                'No affiant e-mail on file — the TX "Provide Records to …" line needs it. Set it under Settings → Agency Profile.',
+                { scope: 'agency', fieldPath: 'agency.affiantEmail' }
+            ));
+        }
+    }
+
     // Hobbs articulation warning
     if (draft.hobbsSealing === 'requested' && pcNarrative && !/hobbs/i.test(pcNarrative)) {
         warnings.push(_warn(

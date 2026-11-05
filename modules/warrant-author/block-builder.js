@@ -1551,6 +1551,174 @@
     return blocks;
   }
 
+  // ─── TX Warrant for Electronic Customer Data (Art. 18B) ──────────────
+  // Every provider gets its own packet, exactly as the exemplars are
+  // served: WARRANT section → section-break → AFFIDAVIT section, and a
+  // section-break before the next provider's warrant. A 'section-break'
+  // starts a new page AND restarts the running header's "Page X of Y"
+  // count (the exemplar numbers the warrant and the affidavit separately).
+  //
+  // The emitted primitives are rendered by the TX paths of the composers
+  // (pdf-composer _flowTx, docx-composer _composeTxDocx), selected by
+  // meta.layout === 'tx':
+  //   caption-table {rows, sep, sepCol, rightCol, bold, size}
+  //   heading-2     {text, align:'center', underline, size}
+  //   paragraph     {text, rich, bold, align, firstIndent, justify, size, tight}
+  //                 rich = inline **bold** spans; \n = new sub-paragraph
+  //   bullets       {items:[{text, bold}]}  \n inside an item = continuation line
+  //   box-start / box-end   single-line frame around the enclosed blocks
+  //   sig-columns   {leftX, rightX, space, left:[entry], right:[entry]}
+  //                 entry = {rule} | {blank} | {text, bold, indent}
+  //   section-break / page-break
+  const TX_SIZE_BODY = 10;
+  const TX_SIZE_LARGE = 11;
+  const TX_FIRST_INDENT = 36;
+  const TX_CAPTION_SEP = 216;   // x of the "§" column, from the left margin
+  const TX_CAPTION_RIGHT = 256; // x of the caption's right column
+
+  function _txFlags(format) {
+    const set = {};
+    String(format || '').split(/\s+/).filter(Boolean).forEach(f => { set[f] = true; });
+    return set;
+  }
+
+  function _txPara(text, f) {
+    const p = { kind: 'paragraph', text, size: f.large ? TX_SIZE_LARGE : TX_SIZE_BODY };
+    if (f.center) p.align = 'center';
+    else p.justify = true;
+    if (f.prose) p.firstIndent = TX_FIRST_INDENT;
+    if (f.bold) p.bold = true;
+    if (f.rich) p.rich = true;
+    if (f.tight) p.tight = true;
+    return p;
+  }
+
+  function _mapTxBlock(rb) {
+    const out = [];
+    if (!rb || rb.omitted) return out;
+    const heading = _safe(rb.heading).trim();
+    const text = _safe(rb.text).trim();
+    const f = _txFlags(rb.format);
+    switch (rb.kind) {
+      case 'tx-caption':
+        out.push({
+          kind: 'caption-table',
+          rows: Array.isArray(rb.rows) ? rb.rows : [],
+          sep: '\u00a7',
+          sepCol: TX_CAPTION_SEP,
+          rightCol: TX_CAPTION_RIGHT,
+          bold: true,
+          size: TX_SIZE_LARGE,
+        });
+        break;
+      case 'constant':
+      case 'verbatim-paragraph':
+      case 'provider-slot-paragraph':
+      case 'optional-paragraph':
+        if (heading && !text) {
+          out.push({ kind: 'heading-2', text: heading, align: 'center', underline: true, size: TX_SIZE_LARGE });
+          break;
+        }
+        if (heading) out.push({ kind: 'paragraph', text: heading, bold: true, size: f.large ? TX_SIZE_LARGE : TX_SIZE_BODY });
+        if (text) out.push(_txPara(text, f));
+        break;
+      case 'tx-provider-block': {
+        const lines = Array.isArray(rb.lines) ? rb.lines : text.split('\n');
+        if (lines.length) out.push({ kind: 'paragraph', text: lines.join('\n'), bold: true, align: 'center', size: TX_SIZE_LARGE });
+        break;
+      }
+      case 'tx-records': {
+        const lead = _safe(rb.lead).trim();
+        out.push({ kind: 'paragraph', text: `**Records pertaining to**: ${lead}`, rich: true, justify: true, tight: true, size: TX_SIZE_BODY });
+        const items = (Array.isArray(rb.items) ? rb.items : []).map(t => ({ text: _safe(t) }));
+        items.push({ text: _safe(rb.provideTo), bold: true });
+        out.push({ kind: 'bullets', items, size: TX_SIZE_BODY });
+        break;
+      }
+      case 'tx-grounds':
+        out.push({ kind: 'paragraph', text: _safe(rb.offense), bold: true, align: 'center', size: TX_SIZE_LARGE, tight: true });
+        out.push({ kind: 'paragraph', text: heading || 'GROUNDS FOR ISSUANCE:', bold: true, tight: true, size: TX_SIZE_BODY });
+        out.push({ kind: 'bullets', items: [{ text: (Array.isArray(rb.lines) ? rb.lines : text.split('\n')).join('\n') }], size: TX_SIZE_BODY });
+        break;
+      case 'tx-magistrate-signature': {
+        const county = _safe(rb.county).trim() || '__________';
+        out.push({
+          kind: 'sig-columns',
+          space: 14,
+          rightX: 216,
+          ruleW: 216,
+          left: [],
+          right: [
+            { rule: true },
+            { text: `Magistrate in and for ${county} County, Texas`, bold: true, indent: 14 },
+            { blank: true },
+            { rule: true },
+            { text: 'Printed Name \u2013 Office held by Magistrate', indent: 14 },
+          ],
+        });
+        break;
+      }
+      case 'tx-signatures': {
+        const C = (_safe(rb.county).trim() || '__________').toUpperCase();
+        const nameLine = _safe(rb.name).trim()
+          + (_safe(rb.badge).trim() ? ` #${_safe(rb.badge).trim()}` : '')
+          + (_safe(rb.rank).trim() ? `, ${_safe(rb.rank).trim().toUpperCase()}` : '');
+        out.push({
+          kind: 'sig-columns',
+          space: 30,
+          rightX: 252,
+          ruleW: 180,
+          left: [
+            { rule: true },
+            { text: 'AFFIANT', bold: true },
+            { text: nameLine || '____________________', bold: true },
+            { text: _safe(rb.agencyName).trim() || '____________________', bold: true },
+          ],
+          right: [
+            { rule: true },
+            { text: 'JUDGE', bold: true },
+            { text: 'IN AND FOR THE STATE OF TEXAS', bold: true },
+            { text: `COUNTY OF ${C}`, bold: true },
+            { blank: true },
+            { text: 'Sworn to and subscribed before me' },
+            { text: 'this _____ day of _______________________, 20__' },
+          ],
+        });
+        break;
+      }
+      case 'box-start':
+      case 'box-end':
+      case 'section-break':
+      case 'page-break':
+        out.push({ kind: rb.kind });
+        break;
+      default:
+        for (const m of _mapResolvedBlock(rb)) out.push(m);
+    }
+    return out;
+  }
+
+  function _buildTxEsp(draft, agency, caseInfo, addendumComposes) {
+    const blocks = [];
+    if (!Array.isArray(addendumComposes) || !addendumComposes.length) {
+      blocks.push({
+        kind: 'paragraph',
+        size: TX_SIZE_BODY,
+        text: '[ No provider attached \u2014 add a provider addendum to render the TX Warrant / Affidavit. ]',
+      });
+      return blocks;
+    }
+    addendumComposes.forEach((ac, i) => {
+      if (i > 0) blocks.push({ kind: 'section-break' });
+      const composed = ac.compose || {};
+      const resolvedBlocks = Array.isArray(composed.blocks) ? composed.blocks : [];
+      for (const rb of resolvedBlocks) {
+        for (const m of _mapTxBlock(rb)) blocks.push(m);
+      }
+    });
+    return blocks;
+  }
+
   /**
    * Top-level: build complete document block stream.
    */
@@ -1594,6 +1762,48 @@
       _safe(draft.template) === 'ar-multi-business-esp' ||
       _safe(draft.jurisdiction).toUpperCase() === 'AR'
     );
+    // Texas — Warrant for Electronic Customer Data + Affidavit, one packet
+    // per provider. Checked before VA for the same reason as AR.
+    const isTx = (
+      _safe(draft.template) === 'tx-multi-business-esp' ||
+      _safe(draft.jurisdiction).toUpperCase() === 'TX'
+    );
+
+    // 0-TX) Texas ESP flow. Returns early; no cover, no disclaimer (the
+    //       document is filed as-is), no generic addendum loop.
+    if (isTx && !isResidential) {
+      for (const b of _buildTxEsp(draft, agency, caseInfo, addendumComposes)) blocks.push(b);
+      const allDanglingTx = [];
+      for (const ac of addendumComposes) {
+        const cs = (ac.compose && Array.isArray(ac.compose.danglingSlots)) ? ac.compose.danglingSlots : [];
+        for (const d of cs) allDanglingTx.push(`${ac.addendumId || ac.providerKey || '?'}/${d}`);
+      }
+      const sw = _safe(draft.swNumber).trim();
+      return {
+        blocks,
+        meta: {
+          jurisdiction: 'TX',
+          layout: 'tx',
+          // "SEARCH WARRANT NO:____" left, "Page X of Y" right, where Y
+          // counts the pages of the current section (warrant / affidavit).
+          runningHeader: {
+            enabled: true,
+            style: 'tx',
+            lines: [],
+            left: `SEARCH WARRANT NO:${sw || '_________________________________'}`,
+            sectionPages: true,
+          },
+          runningFooter: { enabled: false, none: true },
+        },
+        stats: {
+          addendums: addendumComposes.length,
+          totalBlocks: blocks.length,
+          danglingSlots: allDanglingTx,
+          pcAuthored: !!(pcNarrative && String(pcNarrative).trim().length > 0),
+          texas: true,
+        },
+      };
+    }
 
     // 0-AR) Arkansas ESP flow — combined Affidavit + Search Warrant to
     //       Provide Records, then ALL provider addendums grouped at the
@@ -1850,7 +2060,7 @@
 
   const api = Object.freeze({
     build,
-    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature, _buildCaStatementOfProbableCause, _buildVaEsp, _buildCoEsp, _buildArEsp },
+    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature, _buildCaStatementOfProbableCause, _buildVaEsp, _buildCoEsp, _buildArEsp, _buildTxEsp, _mapTxBlock },
   });
 
   if (typeof module !== 'undefined' && module.exports) {

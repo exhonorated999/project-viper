@@ -817,7 +817,7 @@ function harvestIdentifiers(caseId) {
 function _readWarrantAuthorState() {
   // Settings dropdown wins over agency.state; falls back to agency.state, then 'CA'.
   // Must mirror _WARRANT_AUTHOR_SUPPORTED_STATES in settings.html.
-  const SUPPORTED = ['CA', 'VA', 'CO', 'PA', 'AR'];
+  const SUPPORTED = ['CA', 'VA', 'CO', 'PA', 'AR', 'TX'];
   try {
     const s = (localStorage.getItem('viperWarrantAuthorState') || '').toUpperCase();
     if (SUPPORTED.includes(s)) return s;
@@ -839,6 +839,7 @@ function _espTemplateForState(state) {
     case 'CO': return { id: 'co-multi-business-esp',     label: 'CO — Affidavit + Search Warrant (§16-3-301) · Beta' };
     case 'PA': return { id: 'pa-multi-business-esp',     label: 'PA — Search Warrant + Affidavit (AOPC 410A) · Beta' };
     case 'AR': return { id: 'ar-multi-business-esp',     label: 'AR — Circuit Court ESP (Affidavit + Search Warrant) · Beta' };
+    case 'TX': return { id: 'tx-multi-business-esp',     label: 'TX — Warrant for Electronic Customer Data (Art. 18B) · Beta' };
     default:   return { id: 'generic-us-multi-business-esp', label: 'US Generic — Multi-Business ESP (SCA §2703)' };
   }
 }
@@ -1628,6 +1629,7 @@ function _renderDraftHeader(caseId, draft) {
     { v: 'co-multi-business-esp', label: 'CO — Affidavit + Search Warrant (§16-3-301)' },
     { v: 'pa-multi-business-esp', label: 'PA — Search Warrant + Affidavit (AOPC 410A)' },
     { v: 'ar-multi-business-esp', label: 'AR — Circuit Court ESP (Affidavit + Search Warrant)' },
+    { v: 'tx-multi-business-esp', label: 'TX — Electronic Customer Data Warrant + Affidavit (Art. 18B)' },
     { v: 'generic-us-multi-business-esp', label: 'US Generic — SCA §2703' },
   ];
   // Colorado: the agency profile carries a user-maintained list of courts
@@ -1680,6 +1682,38 @@ function _renderDraftHeader(caseId, draft) {
                onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','arCircuitDivision',this.value)"
                class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
         <span class="block mt-0.5 text-[11px] text-slate-500">Prints as "<span class="text-slate-400">${esc(draft.arCircuitDivision || arProfileDivision || '____')} Division</span>" under the judge signature.</span>
+      </label>
+    ` : '';
+  // Texas: the warrant caption reads "COURT: <N> DISTRICT COURT" and both
+  // captions read "COUNTY OF <county>". County defaults from the agency
+  // profile (same per-draft override key as Arkansas); the district court
+  // number is per-draft and prints as a blank line when left empty.
+  const isTxTemplate = String(draft.template || '') === 'tx-multi-business-esp'
+    || String(draft.jurisdiction || '').toUpperCase() === 'TX';
+  let txProfileCounty = '';
+  if (isTxTemplate && typeof window !== 'undefined' && window.WarrantAuthorAgencyProfile) {
+    try {
+      const raw = localStorage.getItem('viperAgencyProfile');
+      const profile = window.WarrantAuthorAgencyProfile.normalize(raw ? JSON.parse(raw) : {});
+      txProfileCounty = String(profile.county || '');
+    } catch (_) { /* non-fatal */ }
+  }
+  const txFieldsHtml = isTxTemplate ? `
+      <label class="text-xs">
+        <span class="text-slate-400 uppercase tracking-wider">County <span class="text-slate-600 normal-case tracking-normal">(override)</span></span>
+        <input type="text" value="${attr(draft.arCounty || '')}"
+               placeholder="${attr(txProfileCounty || 'e.g. Example')}"
+               onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','arCounty',this.value)"
+               class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+        <span class="block mt-0.5 text-[11px] text-slate-500">Blank uses the agency profile${txProfileCounty ? ` (<span class="text-slate-400">${esc(txProfileCounty)}</span>)` : ''}.</span>
+      </label>
+      <label class="text-xs">
+        <span class="text-slate-400 uppercase tracking-wider">District Court</span>
+        <input type="text" value="${attr(draft.txDistrictCourt || '')}"
+               placeholder="e.g. 123rd"
+               onchange="WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','txDistrictCourt',this.value)"
+               class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+        <span class="block mt-0.5 text-[11px] text-slate-500">Prints as "<span class="text-slate-400">COURT: ${esc(draft.txDistrictCourt || '________')} DISTRICT COURT</span>". Blank leaves a line to fill in.</span>
       </label>
     ` : '';
   // When CO template is active AND the agency has a Colorado Courts list,
@@ -1751,6 +1785,7 @@ function _renderDraftHeader(caseId, draft) {
       </label>
       ${courtPickerHtml}
       ${arFieldsHtml}
+      ${txFieldsHtml}
 
       <div class="col-span-2 text-[11px] text-slate-500 flex items-center justify-between border-t border-slate-700 pt-2 mt-1">
         <span>
@@ -3041,6 +3076,7 @@ function _renderAddendumForm(caseId, draft, addendumId, harvest) {
 function _renderAddendumOptionalClauses(caseId, draft, ad) {
   const jx = (draft.jurisdiction || '').toUpperCase();
   const tpl = String(draft.template || '');
+  if (jx === 'TX' || tpl.startsWith('tx-')) return _renderTxAddendumOptions(caseId, draft, ad);
   // CalECPA §1546.x clauses are California-specific. Show them ONLY when
   // the draft jurisdiction / template is CA. All other states (VA, CO,
   // US-generic, anything we add later) fall through to the federal SCA
@@ -3078,6 +3114,41 @@ function _renderAddendumOptionalClauses(caseId, draft, ad) {
           <input type="checkbox" ${ad.includeCalecpaSealing ? 'checked' : ''}
                  onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','includeCalecpaSealing',this.checked)">
           ${esc(labels.sealing.text)}
+        </label>
+      </div>
+  `;
+}
+
+// Texas (Art. 18B) addendum options. The federal / CalECPA clause set does
+// not apply; the TX packet has one optional non-disclosure request, an
+// optional Art. 18.02(9) ground, and two text overrides.
+function _renderTxAddendumOptions(caseId, draft, ad) {
+  const on = (field, how) =>
+    `WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','${field}',${how})`;
+  return `
+      <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
+        <label class="flex items-center gap-2 text-xs text-slate-300" title="Adds the bold &quot;REQUEST FOR NON-DISCLOSURE&quot; paragraphs to the warrant (provider may not tell the subscriber).">
+          <input type="checkbox" ${ad.includeNonDisclosure ? 'checked' : ''} onchange="${on('includeNonDisclosure', 'this.checked')}">
+          Request for Non-Disclosure
+        </label>
+        <label class="flex items-center gap-2 text-xs text-slate-300" title="Adds Art. 18.02(9): implements or instruments used in the commission of a crime. Grounds (10) and (13) are always listed.">
+          <input type="checkbox" ${ad.txGround9 ? 'checked' : ''} onchange="${on('txGround9', 'this.checked')}">
+          Ground 18.02(9) — implements / instruments
+        </label>
+        <label class="text-xs col-span-2">
+          <span class="text-slate-400 uppercase tracking-wider">Offense <span class="text-slate-600 normal-case tracking-normal">(override)</span></span>
+          <input type="text" value="${attr(ad.txOffense || '')}"
+                 placeholder="Blank uses the case offense description"
+                 onchange="${on('txOffense', 'this.value')}"
+                 class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+          <span class="block mt-0.5 text-[11px] text-slate-500">Prints centered above "GROUNDS FOR ISSUANCE".</span>
+        </label>
+        <label class="text-xs col-span-2">
+          <span class="text-slate-400 uppercase tracking-wider">Records pertaining to <span class="text-slate-600 normal-case tracking-normal">(override)</span></span>
+          <textarea rows="2"
+                 placeholder="Blank builds it from the provider, target accounts and date range"
+                 onchange="${on('recordsPertainingTo', 'this.value')}"
+                 class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">${esc(ad.recordsPertainingTo || '')}</textarea>
         </label>
       </div>
   `;
@@ -3177,17 +3248,58 @@ function _renderLivePreview(caseId, draft, activeId) {
   const dangling = Array.isArray(danglingRaw) ? danglingRaw : [];
   const missingItems = Array.isArray(missingRaw) ? missingRaw : (missingRaw ? ['(see Items to Seize)'] : []);
   const isArTpl = String(draft.template || '') === 'ar-multi-business-esp';
+  const isTxTpl = String(draft.template || '') === 'tx-multi-business-esp';
+  // TX: "**bold**" markers inside constant text → <b>.
+  const txRich = (s) => _safeMultilineHtml(String(s || '')).replace(/\*\*([^*]+?)\*\*/g, '<b>$1</b>');
+  const txFmt = (f) => {
+    const st = [];
+    const fl = String(f || '').split(/\s+/);
+    if (fl.includes('prose')) st.push('text-indent:2.5em', 'text-align:justify');
+    if (fl.includes('bold')) st.push('font-weight:700');
+    return st.length ? ` style="${st.join(';')}"` : '';
+  };
+  const txSigCol = (rows) => rows.map(r => r === '—'
+    ? '<div>______________________________</div>'
+    : `<div>${r || '&nbsp;'}</div>`).join('');
 
   const html = blocks.map((b, i) => {
     if (b.omitted) return '';
     // Arkansas typesets section headings centered + underlined and body
     // prose first-line-indented + justified (see the exemplar). Mirror it
     // here or the preview stops predicting the PDF.
-    const heading = b.heading
-      ? `<div class="wa-pv-heading"${isArTpl ? ' style="text-align:center;text-decoration:underline"' : ''}>${esc(b.heading)}</div>`
+    const heading = (b.heading && !(isTxTpl && b.kind === 'tx-grounds'))
+      ? `<div class="wa-pv-heading"${(isArTpl || (isTxTpl && !b.text)) ? ' style="text-align:center;text-decoration:underline"' : ''}>${esc(b.heading)}</div>`
       : '';
     let body = '';
-    if (b.kind === 'label') {
+    if (isTxTpl && b.kind === 'tx-caption') {
+      const cells = (b.rows || []).map(r =>
+        `<div>${esc(r.left || '')}</div><div>§</div><div>${esc(r.right || '')}</div>`).join('');
+      body = `<div class="wa-pv-text font-bold" style="display:grid;grid-template-columns:1fr 1.5em 1fr;column-gap:.6em">${cells}</div>`;
+    } else if (isTxTpl && b.kind === 'tx-provider-block') {
+      body = `<div class="wa-pv-text text-center font-bold">${_safeMultilineHtml(b.text || '')}</div>`;
+    } else if (isTxTpl && b.kind === 'tx-records') {
+      const its = (b.items || []).map(t => `<li>${esc(t)}</li>`).join('');
+      body = `<div class="wa-pv-text"><b>Records pertaining to</b>: ${esc(b.lead || '')}</div>
+              <ul class="wa-pv-list" style="list-style:disc;margin-left:3em">${its}<li class="font-bold">${esc(b.provideTo || '')}</li></ul>`;
+    } else if (isTxTpl && b.kind === 'tx-grounds') {
+      body = `<div class="wa-pv-text text-center font-bold">${esc(b.offense || '')}</div>
+              <div class="wa-pv-text font-bold">${esc(b.heading || 'GROUNDS FOR ISSUANCE:')}</div>
+              <div class="wa-pv-text" style="margin-left:3em">${_safeMultilineHtml(b.text || '')}</div>`;
+    } else if (isTxTpl && b.kind === 'tx-magistrate-signature') {
+      body = `<div class="wa-pv-text" style="margin-left:45%">${txSigCol(['—', `<b>Magistrate in and for ${esc(b.county || '[County]')} County, Texas</b>`, '', '—', 'Printed Name – Office held by Magistrate'])}</div>`;
+    } else if (isTxTpl && b.kind === 'tx-signatures') {
+      const nm = `${esc(b.name || '[Affiant]')}${b.badge ? ' #' + esc(b.badge) : ''}${b.rank ? ', ' + esc(String(b.rank).toUpperCase()) : ''}`;
+      body = `<div class="wa-pv-text" style="display:grid;grid-template-columns:1fr 1fr;column-gap:2em">
+                <div class="font-bold">${txSigCol(['—', 'AFFIANT', nm, esc(b.agencyName || '[Agency]')])}</div>
+                <div>${txSigCol(['—', '<b>JUDGE</b>', '<b>IN AND FOR THE STATE OF TEXAS</b>', `<b>COUNTY OF ${esc(String(b.county || '[County]').toUpperCase())}</b>`, '', 'Sworn to and subscribed before me', 'this _____ day of ______________, 20__'])}</div>
+              </div>`;
+    } else if (isTxTpl && (b.kind === 'box-start' || b.kind === 'box-end')) {
+      body = `<div class="wa-pv-text text-center text-slate-500 italic text-[11px]">${b.kind === 'box-start' ? '┌ boxed section ┐' : '└ end of box ┘'}</div>`;
+    } else if (isTxTpl && b.kind === 'section-break') {
+      body = `<div class="wa-pv-text text-center text-amber-400 italic border-t border-b border-dashed border-amber-500/40 py-1 my-1">— Affidavit starts on a new page (own page numbering) —</div>`;
+    } else if (isTxTpl && b.text) {
+      body = `<div class="wa-pv-text"${txFmt(b.format)}>${txRich(b.text)}</div>`;
+    } else if (b.kind === 'label') {
       // Section header (block-builder maps this to heading-2). Without
       // this arm the preview shows it as ordinary body text and the
       // examiner cannot see the document's section structure.
@@ -3317,6 +3429,7 @@ function _renderLivePreview(caseId, draft, activeId) {
         : draft.template === 'va-multi-business-esp' ? 'VA template'
         : draft.template === 'co-multi-business-esp' ? 'CO template'
         : draft.template === 'ar-multi-business-esp' ? 'AR template'
+        : draft.template === 'tx-multi-business-esp' ? 'TX template'
         : 'US template'
       )} · Page ${esc(ad.pageLabel)}</div>
       ${issuesBar}
@@ -3665,6 +3778,7 @@ function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult,
               draft.template === 'co-multi-business-esp'  ? 'CO · §16-3-301' :
               draft.template === 'pa-multi-business-esp'  ? 'PA · AOPC 410A' :
               draft.template === 'ar-multi-business-esp'  ? 'AR · Circuit Court' :
+              draft.template === 'tx-multi-business-esp'  ? 'TX · Art. 18B ECD' :
               (String(draft.jurisdiction || '').toUpperCase() === 'PA') ? 'PA · AOPC 410A' :
               draft.template === 'ca-residential-sw'      ? 'CA · Residential SW' :
               draft.template === 'ca-residential'         ? 'CA · Residential SW' :
@@ -4185,6 +4299,7 @@ const bus = {
                   : tpl.startsWith('co-') ? 'CO'
                   : tpl.startsWith('pa-') ? 'PA'
                   : tpl.startsWith('ar-') ? 'AR'
+                  : tpl.startsWith('tx-') ? 'TX'
                   : 'US',
       agencyProfile: agency,
       crimeType: type === 'residential' ? crimeId : ''
@@ -4240,6 +4355,7 @@ const bus = {
       else if (v.startsWith('co-')) d.jurisdiction = 'CO';
       else if (v.startsWith('pa-')) d.jurisdiction = 'PA';
       else if (v.startsWith('ar-')) d.jurisdiction = 'AR';
+      else if (v.startsWith('tx-')) d.jurisdiction = 'TX';
       else                          d.jurisdiction = 'US';
     }
     ds.saveDraft(caseId, d, { silent: true });
@@ -5476,6 +5592,7 @@ const bus = {
       : draft.template === 'va-multi-business-esp' ? 'VA'
       : draft.template === 'co-multi-business-esp' ? 'CO'
       : draft.template === 'ar-multi-business-esp' ? 'AR'
+      : draft.template === 'tx-multi-business-esp' ? 'TX'
       : draft.template === 'pa-multi-business-esp' ? 'PA'
       : 'US'
     );

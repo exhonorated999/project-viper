@@ -1,0 +1,196 @@
+{
+  "id": "tx-multi-business-esp",
+  "name": "Texas Warrant for Electronic Customer Data (Art. 18B) + Affidavit",
+  "jurisdiction": "TX",
+  "version": 1,
+  "description": "Texas Warrant for Electronic Customer Data under Code of Criminal Procedure Art. 18B.354-18B.357, followed by the Affidavit and Application for Search Warrant. Modelled on a Texas municipal police department's ESP warrant exemplars (district court). Every provider gets its OWN packet: the warrant section, then the affidavit section. Each section restarts its 'Page X of Y' count in the running header 'SEARCH WARRANT NO:'. County comes from the agency profile; the district court number is a per-draft field (txDistrictCourt) and prints as a blank line when empty.\n\nLAYOUT KINDS: tx-* blocks are rendered only by block-builder._buildTxEsp. 'section-break' starts a new page AND a new page-numbering section; 'box-start'/'box-end' frame the enclosed blocks in a single-line box exactly like the exemplar's bordered text boxes. Paragraph 'format' is a space-separated list: prose (first-line indent), bold, center, rich (inline **bold**), large (11pt), tight (no gap after).",
+  "compatibleProviderTypes": [
+    "ESP",
+    "Phone",
+    "Internet",
+    "Financial",
+    "Other"
+  ],
+  "supportsMultipleProviders": true,
+  "blocks": [
+    {
+      "key": "w01-caption",
+      "kind": "tx-caption",
+      "variant": "warrant"
+    },
+    {
+      "key": "w02-title",
+      "kind": "constant",
+      "heading": "WARRANT FOR ELECTRONIC CUSTOMER DATA"
+    },
+    {
+      "key": "w03-address",
+      "kind": "verbatim-paragraph",
+      "format": "tight",
+      "text": "The State of Texas: To the Sheriff or any Peace Officer of {{court.county}} County, Texas, or any Peace Officer of the State of Texas:"
+    },
+    {
+      "key": "w04-whereas",
+      "kind": "constant",
+      "format": "prose",
+      "text": "Whereas, the affiant whose name appears on the affidavit attached hereto and incorporated herein for all purposes is a peace officer under the laws of Texas and did heretofore this day subscribe and swear to said affidavit before me, and whereas I find that the verified facts stated by affiant in said affidavit show that affiant has probable cause for the belief he/she expresses herein and establishes existence of proper grounds for issuance of this Warrant for Stored Customer Data or Communications under Article 18B.354-18B.357 of the Texas Code of Criminal Procedure."
+    },
+    {
+      "key": "w05-now-therefore",
+      "kind": "constant",
+      "format": "prose",
+      "text": "Now, therefore, you are commanded to execute this warrant by serving it upon the below-listed provider through any permissible means pursuant to the Texas Code of Criminal Procedure Article 18B.354-18B.357, to-wit:"
+    },
+    {
+      "key": "w06-provider",
+      "kind": "tx-provider-block"
+    },
+    {
+      "key": "w07-furnish",
+      "kind": "constant",
+      "text": "The employees or agents of the above-listed provider are hereby ordered to furnish the Affiant hereof with the following electronic customer data from the providers' electronic storage within fifteen (15) business days after the date the warrant is served as required by the Texas Code of Criminal Procedure Article 18B.354-18B.357, to-wit:"
+    },
+    {
+      "key": "w08-records",
+      "kind": "tx-records"
+    },
+    {
+      "key": "w09-ndo",
+      "kind": "optional-paragraph",
+      "guardSlot": "addendum.includeNonDisclosure",
+      "format": "bold",
+      "heading": "REQUEST FOR NON-DISCLOSURE:",
+      "text": "I am aware that {{provider.legalEntity}} may notify the subscriber of receipt of a search warrant, unless the issuing judge specifically prohibits it. Disclosure of the existence of a search warrant would seriously jeopardize the ongoing investigation. Accordingly, I request that {{provider.legalEntity}}, its employees, and agents be prohibited from notifying their customers, nor anyone else not directly involved in satisfying the requirements of the search warrant, until further order of the Court for a period of at least 90 days.\n\n{{provider.legalEntity}} is not to disclose the existence of this request, as any disclosure could impede the investigation being conducted and thereby interfere with the enforcement of the law."
+    },
+    {
+      "key": "w10-business-records",
+      "kind": "constant",
+      "format": "prose rich",
+      "text": "It is further ORDERED that the custodian of records of the above-listed provider, or any person otherwise qualified to attest to the authenticity of the information or records that are produced pursuant to this warrant, **shall execute a business records affidavit of the tenor enclosed**."
+    },
+    {
+      "key": "w11-remove",
+      "kind": "constant",
+      "format": "prose",
+      "text": "The court grants authorization to remove any property or item seized under this warrant from the county in which it was seized."
+    },
+    {
+      "key": "w12-return",
+      "kind": "constant",
+      "format": "prose",
+      "text": "Once said electronic customer data has been furnished to Affiant, herein fail not that you shall make due return thereon to this magistrate showing how you have executed same."
+    },
+    {
+      "key": "w13-issued",
+      "kind": "constant",
+      "text": "Issued this the ____day of ____________, ________, at ______, __. M., to certify which witness my hand this day"
+    },
+    {
+      "key": "w14-magistrate",
+      "kind": "tx-magistrate-signature"
+    },
+    {
+      "key": "a00-section-break",
+      "kind": "section-break"
+    },
+    {
+      "key": "a01-caption",
+      "kind": "tx-caption",
+      "variant": "affidavit"
+    },
+    {
+      "key": "a02-title",
+      "kind": "constant",
+      "heading": "AFFIDAVIT AND APPLICATION FOR SEARCH WARRANT"
+    },
+    {
+      "key": "a03-comes-now",
+      "kind": "constant",
+      "format": "prose",
+      "text": "COMES NOW, undersigned Affiant, being a Peace Officer under the laws of the State of Texas, and being duly sworn on oath, makes the following statements and accusations:"
+    },
+    {
+      "key": "a04-provider",
+      "kind": "tx-provider-block"
+    },
+    {
+      "key": "a05-custody",
+      "kind": "constant",
+      "text": "And there is now in the custody of the above-listed provider at the above-described premises, certain \"ELECTRONIC CUSTOMER DATA\" contained therein that has been used to commit or further a crime, or constitutes evidence relevant to proving that a crime has been committed, to wit:"
+    },
+    {
+      "key": "a06-box-start",
+      "kind": "box-start"
+    },
+    {
+      "key": "a07-records",
+      "kind": "tx-records"
+    },
+    {
+      "key": "a08-box-end",
+      "kind": "box-end"
+    },
+    {
+      "key": "a09-violation",
+      "kind": "constant",
+      "text": "Which is being kept and used in violation of the laws of the State of Texas, to wit:"
+    },
+    {
+      "key": "a10-box-start",
+      "kind": "box-start"
+    },
+    {
+      "key": "a11-grounds",
+      "kind": "tx-grounds"
+    },
+    {
+      "key": "a12-box-end",
+      "kind": "box-end"
+    },
+    {
+      "key": "a13-facts-lead",
+      "kind": "constant",
+      "text": "The facts establishing Affiant's basis for probable cause that the aforementioned violations of Texas law are being committed and the electronic customer data sought constitutes evidence of that offense or evidence a particular person committed that offense is held in electronic storage by the aforementioned provider are as follows:"
+    },
+    {
+      "key": "a14-box-start",
+      "kind": "box-start"
+    },
+    {
+      "key": "a15-training",
+      "kind": "verbatim-paragraph",
+      "format": "prose large",
+      "text": "{{agency.trainingExperienceBoilerplate}}"
+    },
+    {
+      "key": "a16-probable-cause",
+      "kind": "verbatim-paragraph",
+      "format": "prose large",
+      "text": "{{addendum.probableCause}}"
+    },
+    {
+      "key": "a17-authorized",
+      "kind": "constant",
+      "format": "prose large tight",
+      "text": "Affiant is requesting this warrant authorized under Texas Code of Criminal Procedure Article 18B.354-18B.357 and reciprocating statutes of other states."
+    },
+    {
+      "key": "a18-box-end",
+      "kind": "box-end"
+    },
+    {
+      "key": "a19-wherefore",
+      "kind": "constant",
+      "text": "WHEREFORE, Your Affiant makes this affidavit and prays that a search warrant be issued commanding any Peace Officer of the State of Texas, with proper and necessary assistance, to search the location listed above where the property and electronic customer data might be kept for the specified accounts."
+    },
+    {
+      "key": "a20-further",
+      "kind": "constant",
+      "text": "Further, Affiant requests that the custodian of records or any person otherwise qualified to attest to the authenticity of the records sought under this warrant provide with such records a signed and notarized business records affidavit."
+    },
+    {
+      "key": "a21-signatures",
+      "kind": "tx-signatures"
+    }
+  ]
+}

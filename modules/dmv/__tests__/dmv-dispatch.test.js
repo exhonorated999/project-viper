@@ -66,7 +66,7 @@ ok('the name is not three lines of the page run together', !/\n/.test(t.name), t
 ok('the license number is the number, not the word "Number"', t.dlNumber === '41238876', t.dlNumber);
 ok('the date of birth is read', t.dob === '1982-04-17', t.dob);
 ok('the street line is separated from the city line',
-    t.address === '1600 WOODSIDE LN' && t.addressCityStateZip === 'CLEBURNE, TX 76033', t);
+    t.address === '1600 SAMPLEWOOD LN' && t.addressCityStateZip === 'CLEBURNE, TX 76099', t);
 ok('height comes back in inches', t.height === '60', t.height);
 ok('eye colour is tidied', t.eyeColor === 'Hazel', t.eyeColor);
 ok('race is read', t.race === 'WHITE', t.race);
@@ -113,7 +113,7 @@ const CO = [
     'Hair: BRN',
     'Eye: HAZ',
     'MARGARET O FENWICK',
-    '1600 WOODSIDE LN',
+    '1600 SAMPLEWOOD LN',
     'CLEBURNE, CO 80014'
 ].join('\n');
 
@@ -123,7 +123,7 @@ ok('a Colorado record still reads its issuing state', co.dlState === 'CO', co.dl
 ok('a Colorado record still reads its date of birth', co.dob === '1982-04-17', co.dob);
 ok('a Colorado record still reads its height', co.height === '64', co.height);
 ok('a Colorado record still reads its hair colour', co.hairColor === 'Brown', co.hairColor);
-ok('a Colorado record still reads its address', co.address === '1600 WOODSIDE LN', co.address);
+ok('a Colorado record still reads its address', co.address === '1600 SAMPLEWOOD LN', co.address);
 ok('Colorado is still detected as Colorado', detectDmvState(CO) === 'CO', detectDmvState(CO));
 
 /* ------------------------------------------------------------------ */
@@ -138,7 +138,7 @@ ok('the license number is the number, not the page heading', f.dlNumber === '99-
 ok('the name is read', f.name === 'MARGARET OLIVE FENWICK', f.name);
 ok('the date of birth is the record\'s, not the query\'s', f.dob === '1982-04-17', f.dob);
 ok('the street line is separated from the city line',
-    f.address === '1600 WOODSIDE LN APT 4' && f.addressCityStateZip === 'WESTMINSTER, CO 80031-1234', f);
+    f.address === '1600 SAMPLEWOOD LN APT 4' && f.addressCityStateZip === 'WESTMINSTER, CO 80031-1234', f);
 ok('height comes back in inches', f.height === '69', f.height);
 ok('weight comes back as a bare number', f.weight === '180', f.weight);
 ok('eye colour is tidied', f.eyeColor === 'Hazel', f.eyeColor);

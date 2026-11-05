@@ -21,7 +21,7 @@
  *      12345678
  *
  *      Name:
- *      YASMINE MEADOW SALACH
+ *      QUINLEY MARSH OBERHAUSEN
  *
  * but at least one field (Expiration Date) is printed INLINE on a single
  * line, so the reader has to accept both. Several fields are routinely
@@ -284,10 +284,10 @@
     }
 
     /*
-     * Split "1600 WOODSIDE LN, CLEBURNE, TX 76033" into a street line and a
+     * Split "1600 SAMPLEWOOD LN, CLEBURNE, TX 76099" into a street line and a
      * city/state/ZIP line, anchored on the segment that actually looks like
      * a state and ZIP. Anchoring on that rather than counting commas keeps
-     * an apartment number ("..., Apt# 173, FORT WORTH, TX 76116") on the
+     * an apartment number ("..., Apt# 17, FORT WORTH, TX 76199") on the
      * street line where it belongs.
      */
     function splitAddress(raw) {

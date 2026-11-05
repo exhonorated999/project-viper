@@ -134,8 +134,8 @@ console.log('\n[file names]');
 
 const D = '2026-10-05T14:22:00Z';
 ok('a photo is numbered, dated and labelled',
-    UI.fileNameFor({ kind: 'photo', mime: 'image/jpeg', label: '3200 Las Vegas Trl', index: 2, date: D })
-    === 'Field Work 2026-10-05 3200-Las-Vegas-Trl photo 2.jpg');
+    UI.fileNameFor({ kind: 'photo', mime: 'image/jpeg', label: '3200 Example Mesa Trl', index: 2, date: D })
+    === 'Field Work 2026-10-05 3200-Example-Mesa-Trl photo 2.jpg');
 ok('two photos in the same entry do not collide',
     UI.fileNameFor({ kind: 'photo', mime: 'image/jpeg', label: 'x', index: 1, date: D })
     !== UI.fileNameFor({ kind: 'photo', mime: 'image/jpeg', label: 'x', index: 2, date: D }));
@@ -242,7 +242,7 @@ function boardFixture() {
         S.makeEntry({
             id: 'e1', preset: 'surveillance', timestamp: D,
             fields: {
-                location: { street: '3200 Las Vegas Trl', city: 'Fort Worth', state: 'TX', zip: '76116' },
+                location: { street: '3200 Example Mesa Trl', city: 'Fort Worth', state: 'TX', zip: '76199' },
                 subject: 'Silver Altima', followUp: true, notes: 'Arrived 1422.'
             },
             media: [
@@ -265,7 +265,7 @@ ok('the pin carries the board\'s own type vocabulary', pins[0].type === 'locatio
 ok('the pin is keyed on the entry id so it can be reconciled later',
     pins[0].sourceType === 'auto:fieldwork' && pins[0].sourceId === 'e1');
 ok('the pin carries the address string the board geocodes',
-    pins[0].address.indexOf('3200 Las Vegas Trl') === 0);
+    pins[0].address.indexOf('3200 Example Mesa Trl') === 0);
 ok('the label says what kind of work it was', pins[0].label.indexOf('Surveillance') === 0);
 ok('a follow-up pin is coloured as one', pins[0].color === '#a855f7');
 

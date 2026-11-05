@@ -33,7 +33,7 @@
  *      Name and Mailing Address
  *      (a line holding a single space)
  *      MARGARET OLIVE FENWICK                              <- name
- *      1600 WOODSIDE LN APT 4                              <- street
+ *      1600 SAMPLEWOOD LN APT 4                            <- street
  *      WESTMINSTER, CO 80031-1234                          <- city line
  *      Number
  *      (a line holding a single space)

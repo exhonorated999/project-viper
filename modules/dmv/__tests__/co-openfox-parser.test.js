@@ -50,7 +50,7 @@ console.log('\n[reading the record]');
 const r = FOX.parse(DOC);
 ok('format is tagged', r.format === 'co-openfox', r.format);
 ok('the name is read verbatim', r.name === 'MARGARET OLIVE FENWICK', r.name);
-ok('the street line is read (unit kept)', r.address === '1600 WOODSIDE LN APT 4', r.address);
+ok('the street line is read (unit kept)', r.address === '1600 SAMPLEWOOD LN APT 4', r.address);
 ok('the city line is read with its ZIP+4', r.addressCityStateZip === 'WESTMINSTER, CO 80031-1234', r.addressCityStateZip);
 ok('the license number is the number, not the page heading', r.dlNumber === '99-123-4567', r.dlNumber);
 ok('the issuing state is Colorado', r.dlState === 'CO', r.dlState);
@@ -110,11 +110,11 @@ ok('the record reads without the spacer lines', NO_SPACER.dlNumber === '99-123-4
 
 const NO_HEADER = FOX.parse(DOC.replace('Name and Mailing Address\n', ''));
 ok('the name block is found without its "Name and …" header',
-    NO_HEADER.name === 'MARGARET OLIVE FENWICK' && NO_HEADER.address === '1600 WOODSIDE LN APT 4'
+    NO_HEADER.name === 'MARGARET OLIVE FENWICK' && NO_HEADER.address === '1600 SAMPLEWOOD LN APT 4'
     && NO_HEADER.addressCityStateZip === 'WESTMINSTER, CO 80031-1234', NO_HEADER);
 
-const TWO_STREET = FOX.parse(DOC.replace('1600 WOODSIDE LN APT 4\n', '1600 WOODSIDE LN\nAPT 4\n'));
-ok('a second street line is kept, joined with a comma', TWO_STREET.address === '1600 WOODSIDE LN, APT 4', TWO_STREET.address);
+const TWO_STREET = FOX.parse(DOC.replace('1600 SAMPLEWOOD LN APT 4\n', '1600 SAMPLEWOOD LN\nAPT 4\n'));
+ok('a second street line is kept, joined with a comma', TWO_STREET.address === '1600 SAMPLEWOOD LN, APT 4', TWO_STREET.address);
 
 const NO_ZIP4 = FOX.parse(DOC.replace('80031-1234', '80031'));
 ok('a five-digit ZIP reads', NO_ZIP4.addressCityStateZip === 'WESTMINSTER, CO 80031', NO_ZIP4.addressCityStateZip);

@@ -68,9 +68,9 @@ ok('the license number is read', r.dlNumber === '41238876', r.dlNumber);
 ok('the license number is not the word "Number"', !/number/i.test(r.dlNumber), r.dlNumber);
 ok('the issuing state is Texas', r.dlState === 'TX', r.dlState);
 ok('the date of birth is read', r.dob === '1982-04-17', r.dob);
-ok('the address line is read', r.address === '1600 WOODSIDE LN', r.address);
+ok('the address line is read', r.address === '1600 SAMPLEWOOD LN', r.address);
 ok('the city, state and ZIP are read',
-    r.addressCityStateZip === 'CLEBURNE, TX 76033', r.addressCityStateZip);
+    r.addressCityStateZip === 'CLEBURNE, TX 76099', r.addressCityStateZip);
 ok('sex is read', r.sex === 'F', r.sex);
 ok('race is read', r.race === 'WHITE', r.race);
 ok('ethnicity is read', r.ethnicity === 'NON-HISPANIC', r.ethnicity);
@@ -178,19 +178,19 @@ ok('a missing colour gives nothing', TX.normalizeColor(undefined) === '');
 /* ------------------------------------------------------------------ */
 console.log('\n[addresses]');
 
-const a1 = TX.splitAddress('1600 WOODSIDE LN, CLEBURNE, TX 76033');
-ok('a plain address splits at the city', a1.address === '1600 WOODSIDE LN', a1);
-ok('the city line carries state and ZIP', a1.addressCityStateZip === 'CLEBURNE, TX 76033', a1);
+const a1 = TX.splitAddress('1600 SAMPLEWOOD LN, CLEBURNE, TX 76099');
+ok('a plain address splits at the city', a1.address === '1600 SAMPLEWOOD LN', a1);
+ok('the city line carries state and ZIP', a1.addressCityStateZip === 'CLEBURNE, TX 76099', a1);
 
 // An apartment number belongs on the street line, not in the city line.
-const a2 = TX.splitAddress('3226 LAS VEGAS TRL, APT 173, FORT WORTH, TX 76116');
+const a2 = TX.splitAddress('2210 EXAMPLE MESA TRL, APT 17, FORT WORTH, TX 76199');
 ok('an apartment number stays on the street line',
-    a2.address === '3226 LAS VEGAS TRL, APT 173', a2);
+    a2.address === '2210 EXAMPLE MESA TRL, APT 17', a2);
 ok('the city is still found behind the apartment number',
-    a2.addressCityStateZip === 'FORT WORTH, TX 76116', a2);
+    a2.addressCityStateZip === 'FORT WORTH, TX 76199', a2);
 
-const a3 = TX.splitAddress('1600 WOODSIDE LN, CLEBURNE, TX 76033-1234');
-ok('a ZIP+4 is handled', a3.addressCityStateZip === 'CLEBURNE, TX 76033-1234', a3);
+const a3 = TX.splitAddress('1600 SAMPLEWOOD LN, CLEBURNE, TX 76099-1234');
+ok('a ZIP+4 is handled', a3.addressCityStateZip === 'CLEBURNE, TX 76099-1234', a3);
 
 const a4 = TX.splitAddress('PO BOX 12');
 ok('an address with no city line is kept whole', a4.address === 'PO BOX 12', a4);

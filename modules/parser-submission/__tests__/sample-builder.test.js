@@ -17,8 +17,8 @@
  *
  *   1. The redactor's name patterns needed either a comma ("JONES, MARK")
  *      or proper case ("Mark Jones"). Police and DMV printouts use
- *      neither, so "YASMINE MEADOW SALACH" went out verbatim. The street
- *      suffix list was Title Case only, so "1600 WOODSIDE LN" did too.
+ *      neither, so "QUINLEY MARSH OBERHAUSEN" went out verbatim. The street
+ *      suffix list was Title Case only, so "1600 SAMPLEWOOD LN" did too.
  *
  *   2. The headings / label_tokens / vertical_labels channels were emitted
  *      with no redaction at all, bypassing every other safeguard.
@@ -56,11 +56,11 @@ const R = (s, opts) => I._redactExcerpt(s, opts);
 section('privacy: ALL-CAPS names, the 5.3.1 leak');
 
 ok('a three-word ALL-CAPS name does not survive',
-    R('YASMINE MEADOW SALACH').indexOf('SALACH') < 0, R('YASMINE MEADOW SALACH'));
+    R('QUINLEY MARSH OBERHAUSEN').indexOf('OBERHAUSEN') < 0, R('QUINLEY MARSH OBERHAUSEN'));
 ok('a two-word ALL-CAPS name does not survive',
-    R('MARTINEZ XAVIEN').indexOf('MARTINEZ') < 0, R('MARTINEZ XAVIEN'));
+    R('PELLHAM DARIUS').indexOf('PELLHAM') < 0, R('PELLHAM DARIUS'));
 ok('and it reports how many words it removed',
-    R('YASMINE MEADOW SALACH') === '<NAME CAPS x3>', R('YASMINE MEADOW SALACH'));
+    R('QUINLEY MARSH OBERHAUSEN') === '<NAME CAPS x3>', R('QUINLEY MARSH OBERHAUSEN'));
 ok('the old comma form still works',
     R('JONES, MARK ANDREW') === '<NAME LAST, FIRST>', R('JONES, MARK ANDREW'));
 ok('proper case still works',
@@ -71,16 +71,16 @@ ok('proper case WITH a comma works — the roster column layout',
 section('privacy: addresses in any case');
 
 ok('an ALL-CAPS street address does not survive',
-    R('1600 WOODSIDE LN, CLEBURNE, TX 76033').indexOf('WOODSIDE') < 0,
-    R('1600 WOODSIDE LN, CLEBURNE, TX 76033'));
+    R('1600 SAMPLEWOOD LN, CLEBURNE, TX 76099').indexOf('SAMPLEWOOD') < 0,
+    R('1600 SAMPLEWOOD LN, CLEBURNE, TX 76099'));
 ok('and it describes which parts were present',
-    R('1600 WOODSIDE LN, CLEBURNE, TX 76033') === '<ADDRESS street+city+state+zip>',
-    R('1600 WOODSIDE LN, CLEBURNE, TX 76033'));
+    R('1600 SAMPLEWOOD LN, CLEBURNE, TX 76099') === '<ADDRESS street+city+state+zip>',
+    R('1600 SAMPLEWOOD LN, CLEBURNE, TX 76099'));
 ok('an apartment number is recognised as a unit, not kept',
-    R('3226 LAS VEGAS TRL, Apt# 173, FORT WORTH') === '<ADDRESS street+unit+city>',
-    R('3226 LAS VEGAS TRL, Apt# 173, FORT WORTH'));
+    R('2210 EXAMPLE MESA TRL, Apt# 17, FORT WORTH') === '<ADDRESS street+unit+city>',
+    R('2210 EXAMPLE MESA TRL, Apt# 17, FORT WORTH'));
 ok('a bare street address with no city is still removed',
-    R('3226 LAS VEGAS TRL') === '<ADDRESS street>', R('3226 LAS VEGAS TRL'));
+    R('2210 EXAMPLE MESA TRL') === '<ADDRESS street>', R('2210 EXAMPLE MESA TRL'));
 ok('an abbreviated suffix is matched case-insensitively — the actual 5.3.1 bug',
     R('742 EVERGREEN TER').indexOf('EVERGREEN') < 0, R('742 EVERGREEN TER'));
 ok('Title Case addresses, which already worked, still work',
@@ -110,15 +110,15 @@ ok('the module exposes the label-protection rule so this is testable',
 // a protected phrase is passed through untouched.
 const pOnce = I._protectableLabels([{ label: 'Thornbury Rowan', count: 1 }]);
 ok('a label seen once is not trusted (vertical-label rule)', pOnce.size === 0, [...pOnce]);
-const pCaps = I._protectableLabels([{ label: 'MARTINEZ XAVIEN', count: 9 }]);
+const pCaps = I._protectableLabels([{ label: 'PELLHAM DARIUS', count: 9 }]);
 ok('an ALL-CAPS entry is never trusted as a label however often it repeats',
     pCaps.size === 0, [...pCaps]);
-const pComma = I._protectableLabels([{ label: 'Trl, Apt# 173, FORT', count: 4 }]);
+const pComma = I._protectableLabels([{ label: 'Trl, Apt# 17, FORT', count: 4 }]);
 ok('an entry with a comma is not a label — this is what protected a home address',
     pComma.size === 0, [...pComma]);
 const pDigits = I._protectableLabels([{ label: 'Apt# 1731', count: 4 }]);
 ok('an entry with a long digit run is not a label', pDigits.size === 0, [...pDigits]);
-const pStreet = I._protectableLabels([{ label: 'Las Vegas Trl', count: 4 }]);
+const pStreet = I._protectableLabels([{ label: 'Example Mesa Trl', count: 4 }]);
 ok('an entry ending in a street type is not a label', pStreet.size === 0, [...pStreet]);
 
 const pGood = I._protectableLabels([{ label: 'Hair Color', count: 6 }]);
@@ -190,9 +190,9 @@ ok('the separator is preserved',
     R('04-17-1982') === '<DATE MM-DD-YYYY>', R('04-17-1982'));
 
 ok('a ZIP and a licence number are distinguishable',
-    R('76116') !== R('12345678'), [R('76116'), R('12345678')]);
+    R('76199') !== R('12345678'), [R('76199'), R('12345678')]);
 ok('digit width is reported', R('12345678') === '<NUM:8>', R('12345678'));
-ok('a five-digit ZIP reports its width', R('76116') === '<NUM:5>', R('76116'));
+ok('a five-digit ZIP reports its width', R('76199') === '<NUM:5>', R('76199'));
 ok('short digit runs are left alone — a row index or an age is not identifying',
     R('Age 41') === 'Age 41', R('Age 41'));
 
@@ -201,8 +201,8 @@ ok('the phone token carries the printed punctuation',
 ok('name tokens carry the word count',
     R('ABERNATHY CALLOWAY') === '<NAME CAPS x2>', R('ABERNATHY CALLOWAY'));
 ok('address tokens carry the component list',
-    R('1600 WOODSIDE LN, CLEBURNE, TX 76033').indexOf('street+city+state+zip') > 0,
-    R('1600 WOODSIDE LN, CLEBURNE, TX 76033'));
+    R('1600 SAMPLEWOOD LN, CLEBURNE, TX 76099').indexOf('street+city+state+zip') > 0,
+    R('1600 SAMPLEWOOD LN, CLEBURNE, TX 76099'));
 
 /* ------------------------------------------------------------------ *
  * utility — structural text survives                                  *
@@ -233,7 +233,7 @@ ok('the safe-word rule is exposed', typeof I._safeCapsWords === 'function');
 const sw = I._safeCapsWords([{ heading: 'FORT WORTH POLICE DEPARTMENT', count: 11 }]);
 ok('words from a heading printed on every page are trusted',
     sw.has('WORTH') && sw.has('FORT'), [...sw]);
-const swRare = I._safeCapsWords([{ heading: 'ESTRADA FERNANDA YAMILET', count: 2 }]);
+const swRare = I._safeCapsWords([{ heading: 'OKAFOR BENEDIKT AMARE', count: 2 }]);
 ok('words from a heading printed twice are NOT trusted — measured, every ' +
    'leaked name appeared once or twice and the agency header eleven times',
     swRare.size === 0, [...swRare]);
@@ -264,8 +264,8 @@ ok('protecting the label does not protect its value',
     R('Reporting Officer: Harlan Smith', { protect }).indexOf('Harlan') < 0,
     R('Reporting Officer: Harlan Smith', { protect }));
 ok('a protected label does not shield an address sitting next to it',
-    R('Hair Color 1600 WOODSIDE LN', { protect }).indexOf('WOODSIDE') < 0,
-    R('Hair Color 1600 WOODSIDE LN', { protect }));
+    R('Hair Color 1600 SAMPLEWOOD LN', { protect }).indexOf('SAMPLEWOOD') < 0,
+    R('Hair Color 1600 SAMPLEWOOD LN', { protect }));
 
 /* ------------------------------------------------------------------ *
  * layout hints                                                        *

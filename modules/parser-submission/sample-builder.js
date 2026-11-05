@@ -679,7 +679,7 @@ function _lineShape(line) {
 /*
  * Street-type suffixes, matched case-insensitively.  The pre-5.3.1 list was
  * case-sensitive Title Case only, so every ALL-CAPS address on a police or
- * DMV printout ("3226 LAS VEGAS TRL", "1600 WOODSIDE LN") sailed straight
+ * DMV printout ("2210 EXAMPLE MESA TRL", "1600 SAMPLEWOOD LN") sailed straight
  * through unredacted.  Both Fort Worth submissions leaked a real home
  * address that way.
  */
@@ -696,7 +696,7 @@ const STREET_SUFFIXES = [
  * ALL-CAPS words that are structural vocabulary rather than somebody's name.
  * An all-caps run is only redacted when NONE of its words is recognised, so
  * this list is what keeps "FORT WORTH POLICE DEPARTMENT" and
- * "MURDER/CAPITAL MURDER" readable while "ESTRADA FERNANDA YAMILET" does not
+ * "MURDER/CAPITAL MURDER" readable while "OKAFOR BENEDIKT AMARE" does not
  * survive.  It is deliberately a keep-list, not a block-list: an unrecognised
  * word is treated as a possible name, so the failure mode is over-redaction.
  */
@@ -888,7 +888,7 @@ function _redactExcerpt(s, opts) {
         .replace(/(?<![A-Za-z0-9])[X*]{3}-[X*]{2}-\d{4}(?!\d)/gi, '<SSN XXX-XX-NNNN>')
         .replace(/(?<![A-Za-z0-9])[X*]{2}\/[X*]{2}\/\d{4}(?!\d)/gi, '<DATE XX/XX/YYYY>');
 
-    // Addresses run BEFORE the name passes: "3226 LAS VEGAS TRL" is an
+    // Addresses run BEFORE the name passes: "2210 EXAMPLE MESA TRL" is an
     // address, and if the all-caps name pass saw it first it would report
     // "<NAME CAPS x3>" and lose the fact that the line is a street address.
     const suffixRe = STREET_SUFFIXES.map(_escapeRe).join('|');
@@ -1082,7 +1082,7 @@ function _redactExcerpt(s, opts) {
  *   document's labels were being destroyed.
  *
  * Requiring a lowercase letter additionally excludes the ALL-CAPS values
- * ("MARTINEZ XAVIEN") that the vertical-label heuristic picks up.
+ * ("PELLHAM DARIUS") that the vertical-label heuristic picks up.
  *
  * @param {Array<{label:string,count:number}>} entries
  * @param {Set<string>} [into]
@@ -1099,7 +1099,7 @@ function _protectableLabels(entries, into, opts) {
         if (!/[a-z]/.test(label)) continue;        // ALL-CAPS entries are values
         if (label.length > 40) continue;
         // A repeated mixed-case VALUE can satisfy the rules above: the Fort
-        // Worth report prints "3226 LAS VEGAS TRL, Apt# 173, FORT" twice and
+        // Worth report prints "2210 EXAMPLE MESA TRL, Apt# 17, FORT" twice and
         // the "Apt#" lowercase let the whole home address be protected —
         // which parked it behind a sentinel and shipped it verbatim.  No
         // real form label carries a comma, a long digit run or a street
@@ -1756,8 +1756,8 @@ async function inspectPdfTextAsync(buf, syncShape, onOcrPage) {
 
     // Headings / labels used to ship RAW.  Measured against the two Fort
     // Worth submissions, that channel alone leaked two real names and two
-    // full home addresses ("YASMINE MEADOW SALACH",
-    // "1600 WOODSIDE LN, CLEBURNE, TX 76033") straight past every other
+    // full home addresses ("QUINLEY MARSH OBERHAUSEN",
+    // "1600 SAMPLEWOOD LN, CLEBURNE, TX 76099") straight past every other
     // safeguard, because a one-off ALL-CAPS value is heading-shaped.  Every
     // emitted channel now goes through the redactor; genuine labels are in
     // `protect` and come out unchanged.

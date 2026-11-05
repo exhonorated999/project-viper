@@ -1,0 +1,176 @@
+
+
+Person Summary
+Invl
+ARR
+Invl. #
+1
+Type
+I
+Name
+PELLHAM  DARIUS 
+Race
+W
+Sex
+M
+DOB
+3/14/1999
+Charge Summary
+Charge
+PC 19.02
+(b)
+Charge Description
+PC 19.02(b) Murder
+Warrant No.
+2024FW
+999001
+Felony/Misdemeanor
+FELONY, 1ST 
+DEGREE
+countsTRN#TRS#
+Bond AmountCharge Literal
+Murder
+Criminal 
+Activity
+Warrant Agency ORI
+Local Warrant CountCitation #Dom. 
+Violence
+N::NO
+Offense Date
+6/14/2024
+Attempt./Comp
+lete
+02
+UCR/NIBRS Code
+09A
+NCIC Code
+09990030
+Degree
+F1
+State Code
+PC 19.02
+(b)
+Reportable
+true
+Administratvie Information
+Agency
+FORT WORTH POLICE DEPARTMENT
+Report No
+A9990001
+Supplement NO.Reported 
+06/22/2024 09:10:00
+Location
+900 SAMPLE CENTER DR
+City
+FORT WORTH
+Zip Code
+76199
+Arrest Date
+06/22/2024 
+08:45:00
+Arrest Type
+W WARRANT
+Juvinele
+No
+Arreste Segments
+N NOT APPLICABLE
+Property Summary
+Reporting Officer
+Quillfeather 9077, M 9077
+Printed At
+6/22/2024 10:02:44 
+AM
+Page1 of 3
+FORT WORTH POLICE DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+Fax 817-555-0101
+249990001
+Member#/Dept ID#
+Quillfeather 9077, M 9077
+Reporting Date
+06/22/2024 09:10:00 
+Booking No
+A9990001 
+
+Arrestee :  PELLHAM  DARIUS 
+Race
+WHITE
+Sex
+MALE
+DOB
+3/14/1999
+Age
+25
+Ethnicity
+N NOT 
+HISPANIC/L
+ATINO
+Juvenile?
+N
+Height
+511
+Weight
+172
+Hair Color
+BROWN
+Eye Color
+GREEN
+Secual AssaultRes Status
+R RESIDENT
+TypeAddress
+88 SAMPLE OAK LN, FORT WORTH TX 76199  
+Map Coordinates
+ 
+Rep DistBeat
+Phone TypePhone No:Phone Type
+Phone
+Phone No:
+8175550142
+Phone TypePhone No:Email
+Type
+DRIVER LICENSE
+ID No
+99887766
+OLS
+TEXAS
+Reporting Officer
+Quillfeather 9077, M 9077
+Printed At
+6/22/2024 10:02:44 
+AM
+Page2 of 3
+FORT WORTH POLICE DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+Fax 817-555-0101
+249990001
+Member#/Dept ID#
+Quillfeather 9077, M 9077
+Reporting Date
+06/22/2024 09:10:00 
+Booking No
+A9990001 
+
+Narrative
+Arrested on the listed warrant at the Sample Center. See warrant.
+Reporting Officer
+Quillfeather 9077, M 9077
+Printed At
+6/22/2024 10:02:44 
+AM
+Page3 of 3
+FORT WORTH POLICE DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+Fax 817-555-0101
+249990001
+Member#/Dept ID#
+Quillfeather 9077, M 9077
+Reporting Date
+06/22/2024 09:10:00 
+Booking No
+A9990001 

@@ -1,0 +1,348 @@
+
+
+Administrative Information
+Agency
+Fort Worth Police Department
+Report No
+249990001
+Supplement No.
+ORIG
+Reported Date/ Reported Time
+06/16/2024 09:15:00
+CAD Call No
+249990777
+StatusNature of Call
+MURDER/CAPITAL MURDER/CRIMINAL NEGLIGENT HOMICIDE
+Location
+4100 EXAMPLE RIDGE RD
+City
+FORT WORTH
+Zip
+76199
+Division
+North Division
+From Date and Time
+06/14/2024 23:42:00
+2nd Member#/ ID#
+  
+Property?
+No
+Council Dist.
+9
+# Offenses
+1
+Description
+Murder
+Complaint AC
+C
+Use
+NOT APPLICABLE
+Bias
+88
+LOC
+20
+#PRMOEACTWeapon/Force
+11
+IBRS
+09A
+NoCargo?
+# Offenses
+1
+Description
+Aggravated Assault bodily 
+injury w/Deadly Weapon
+Complaint AC
+C
+Use
+NOT APPLICABLE
+Bias
+88
+LOC
+20
+#PRMOEACTWeapon/Force
+12
+IBRS
+13A
+NoCargo?
+Invl
+SUS
+Invl NO
+1
+Type
+I
+Name
+PELLHAM  DARIUS 
+Race
+W
+Sex
+M
+DOB
+3/14/1999
+Invl
+SUS
+Invl NO
+2
+Type
+I
+Name
+PELLHAM  MARISOL ANN
+Race
+W
+Sex
+F
+DOB
+11/2/2001
+Person Summary
+Involved Officer on Call
+9001::Thistlew
+ood; Rhea
+Axon Camera-In Officer Order
+Not 
+Applicable::Not 
+applicable-DRU 
+or desk officer 
+report
+Vehicle Units
+NA
+Was Vehi. Pursued
+No
+Beat
+N99
+Reporting Officer
+Thistlewood 9001, R 9001
+Printed At
+06/18/2024 2:10:44 PM
+Page1 of 4
+FORT WORTH POLICE 
+DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+249990001
+Member#/Dept ID#
+Thistlewood 9001, R 9001
+Reporting Date
+06/16/2024 09:15:00 Sun
+Nature of Call
+MURDER/CAPITAL MURDER/CRIMINAL 
+NEGLIGENT HOMICIDE
+
+Invl
+VIC
+Invl NO
+1
+Type
+I
+Name
+Okafor  Benedikt 
+Race
+B
+Sex
+M
+DOB
+7/9/1980
+Invl
+VIC
+Invl NO
+2
+Type
+I
+Name
+Lindqvist  Maren 
+Race
+W
+Sex
+F
+DOB
+1/30/1992
+Summary Narrative
+On June 14, 2024, at 11:42 p.m., officers were dispatched to 4100 Example Ridge Rd in
+reference to a shooting. Officers arrived at 11:46 p.m. and located Benedikt Okafor with
+a gunshot wound to the chest. A second victim, Maren Lindqvist, received a graze wound to
+her right arm. Both victims were transported to a local hospital, where Okafor was
+pronounced deceased. I, Detective Thistlewood #9001, assumed responsibility for the
+investigation. For further details refer to the case file.
+Sgt. Q. Ambervale #9902
+Reporting Officer
+Thistlewood 9001, R 9001
+Printed At
+06/18/2024 2:10:44 PM
+Page2 of 4
+FORT WORTH POLICE 
+DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+249990001
+Member#/Dept ID#
+Thistlewood 9001, R 9001
+Reporting Date
+06/16/2024 09:15:00 Sun
+Nature of Call
+MURDER/CAPITAL MURDER/CRIMINAL 
+NEGLIGENT HOMICIDE
+
+SUSPECT 1: PELLHAM, DARIUS 
+AliasSex
+MALE
+Race
+WHITE
+DOB
+3/14/19
+99
+Age
+25
+Ethnicity
+N
+Res Status
+R 
+RESID
+ENT
+Juvenile?
+N
+Height
+511
+Weight
+175
+Hair Color
+BROWN
+Eye Color
+BLUE
+Sexual Assault
+No::No
+Arrested
+YES
+Written statement
+N::NO
+Alias DOB
+Alias Name
+  
+Suspect Actions
+Suspect 
+armed,PRPEX
+Suspect UsedSex Crime LocationWeapon used by Suspect
+Offense  PC 19.02(b) Murder
+UCR/NIBRS Code
+09A::09A 
+MURDER & 
+NON-
+NEGLIGENT 
+MANSLAUGHT
+ER
+Degree
+F1
+NCIC code
+09990030
+State Code
+PC 19.02(b)
+Reportabletrue
+Felony/Misdemeanor
+FELONY, 
+1ST DEGREE
+Offender Suspected of Using
+NOT APPLICABLE
+Premise/Location Type
+20 
+RESIDENCE/HO
+ME
+Attempted/Complete
+COMPLETED
+Weapon Used
+11 FIREARM
+Bias Motivated Crime
+88::88 NONE 
+(NO BIAS)
+PhotosComments
+UCR/NIBRS Code
+13A::13A 
+AGGRAVATED 
+ASSAULT
+Degree
+F2
+NCIC code
+13150005
+State Code
+PC 22.02(a)(2)
+Reportabletrue
+Felony/Misdemeanor
+FELONY, 
+2ND DEGREE
+Premise/Location Type
+20 
+RESIDENCE/HO
+ME
+Attempted/Complete
+COMPLETED
+Weapon Used
+12 HANDGUN
+Bias Motivated Crime
+88::88 NONE 
+(NO BIAS)
+PhotosComments
+Reporting Officer
+Thistlewood 9001, R 9001
+Printed At
+06/18/2024 2:10:44 PM
+Page3 of 4
+FORT WORTH POLICE 
+DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+249990001
+Member#/Dept ID#
+Thistlewood 9001, R 9001
+Reporting Date
+06/16/2024 09:15:00 Sun
+Nature of Call
+MURDER/CAPITAL MURDER/CRIMINAL 
+NEGLIGENT HOMICIDE
+
+Sex Crime Offense TypeDL State/DL #
+TX  99887766 
+Misc.Id TypeMisc. ID State/ Misc. ID No.
+  SID TX90000001 
+SSN
+90000123
+4
+SID Number
+FBI Number
+Place of Birth
+US
+Marital Status
+S 
+SINGLE
+Build
+AVERAGE 
+BUILD
+ClothingAddress
+88 SAMPLE OAK LN  FW::FORT WORTH 
+TX::TEXAS  76199::76199
+ApartmentBeatCouncil DistrictDivision
+Fort Worth
+Rep. AreaLatitudeLongitude
+Phone Type/ No.
+Phone 8175550142
+EmailSocial Media Adresses
+Comments
+Related Offense
+PC 19.02(b) Murder (09A F1) , PC 22.02(a)(2) Aggravated Assault bodily 
+injury w/Deadly Weapon (13A F2)  
+Reporting Officer
+Thistlewood 9001, R 9001
+Printed At
+06/18/2024 2:10:44 PM
+Page4 of 4
+FORT WORTH POLICE 
+DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+249990001
+Member#/Dept ID#
+Thistlewood 9001, R 9001
+Reporting Date
+06/16/2024 09:15:00 Sun
+Nature of Call
+MURDER/CAPITAL MURDER/CRIMINAL 
+NEGLIGENT HOMICIDE

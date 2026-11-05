@@ -1991,21 +1991,22 @@
                 // The format-agnostic fallback. AFTER the Arkansas recovery
                 // passes above — sweeping pre-recovery text would see a thin
                 // parse that those passes were about to fix.
-                const genericFound = _rmsMaybeGenericSweep(report, text, fileName,
-                    pageTexts ? { pageTexts } : null);
+                const genericFound = (report.splitReports && report.splitReports.length > 1) ? 0 :
+                    _rmsMaybeGenericSweep(report, text, fileName, pageTexts ? { pageTexts } : null);
 
-                if (report.personsInvolved) {
-                    report.personsInvolved.forEach((p, i) =>
-                        console.log(`[RMS Import]   Person ${i}: ${p.involvement} — ${p.name}`));
-                }
+                // A combined case packet is stored and routed per document.
+                const docs = _rmsExpandReport(report);
+
+                docs.forEach(d => (d.personsInvolved || []).forEach((p, i) =>
+                    console.log(`[RMS Import]   Person ${i}: ${p.involvement} — ${p.name}`)));
 
                 let populated = [];
 
                 // 1. Save to RMS Imports tab (full report, same as normal import)
                 const rmsImports = getRmsImports();
-                rmsImports.push(report);
+                docs.forEach(d => _rmsUpsertImport(rmsImports, d));
                 saveRmsImports(rmsImports);
-                populated.push('RMS Imports');
+                populated.push(docs.length > 1 ? `RMS Imports (${docs.length} documents)` : 'RMS Imports');
 
                 /* 2-5. Route persons and vehicles into the case tabs.
                  *
@@ -2015,10 +2016,13 @@
                  * learned to read one, so a case created FROM a report lost
                  * fields that the same report imported INTO an open case kept.
                  * One router now serves both entry points. */
-                populated = populated.concat(routeRmsPersonsToTabs(report));
+                const routeDocs = _rmsRouteOrder(docs);
+                populated = populated.concat(_rmsMergePopulated(
+                    routeDocs.reduce((a, d) => a.concat(routeRmsPersonsToTabs(d)), [])));
 
-                if (report.provisionalPersons && report.provisionalPersons.length) {
-                    const n = report.provisionalPersons.length;
+                const nProv = docs.reduce((a, d) => a + ((d.provisionalPersons || []).length), 0);
+                if (nProv) {
+                    const n = nProv;
                     viperToast(`${n} person block${n !== 1 ? 's' : ''} had no readable name — ` +
                         `${n !== 1 ? 'they are' : 'it is'} listed under "Name Not Read" on the RMS Imports tab`, 'warning', 6000);
                 }
@@ -2032,8 +2036,10 @@
 
                 // Backfill Overview fields (Location of Occurrence, Offenses)
                 // that the report already carries. Only-if-blank.
-                const overviewFilled = _rmsBackfillCaseOverview(report);
-                if (overviewFilled.length) populated = populated.concat(overviewFilled);
+                for (const d of routeDocs) {
+                    const overviewFilled = _rmsBackfillCaseOverview(d);
+                    if (overviewFilled.length) populated = populated.concat(overviewFilled);
+                }
 
                 // Show result
                 if (populated.length > 0) {
@@ -45519,8 +45525,148 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 employerPhone: p.employmentPhone || '',
                 nameUnverified: !p.name,
                 rmsSourcePage: p.sourcePage || '',
+                rmsKey: p.rmsKey || '',
                 rmsSource: src
             };
+        }
+
+        /* ── Several documents about one incident ─────────────────────────
+         *
+         * Fort Worth's INFORM printouts come as separate PDFs (offense report,
+         * supplements, arrest reports, officer reports) or as one combined
+         * case packet. The parser splits a packet into `splitReports`; each is
+         * stored and routed as its own report. */
+        function _rmsExpandReport(report) {
+            if (!report) return [];
+            return (Array.isArray(report.splitReports) && report.splitReports.length > 1)
+                ? report.splitReports : [report];
+        }
+
+        // Offense reports first: they carry the incident location, the
+        // offences and the authoritative person roles.
+        function _rmsRouteOrder(docs) {
+            const isOff = r => !!(r && r.fw && r.fw.kind === 'offense');
+            return docs.filter(isOff).concat(docs.filter(r => !isOff(r)));
+        }
+
+        /* The same printed document arriving twice (a supplement imported on
+         * its own and again inside the packet) replaces the earlier copy.
+         * Two different documents from one packet share a file name and a
+         * report number, so those alone are no longer the identity. */
+        function _rmsDocKey(r) {
+            if (!r) return '';
+            if (r.fw && r.fw.kind) {
+                return ['fw', r.fw.kind, r.reportNumber || '', r.supplementNo || '',
+                    r.fw.documentNo || '', r.fw.reportingOfficer || ''].join('|');
+            }
+            return '';
+        }
+        function _rmsUpsertImport(list, report) {
+            const key = _rmsDocKey(report);
+            let idx = -1;
+            if (key) idx = list.findIndex(r => _rmsDocKey(r) === key);
+            if (idx === -1) {
+                idx = list.findIndex(r => r.reportNumber === report.reportNumber &&
+                    r.fileName === report.fileName &&
+                    (r.splitIndex === undefined ? null : r.splitIndex) ===
+                    (report.splitIndex === undefined ? null : report.splitIndex) &&
+                    (!key || !_rmsDocKey(r)));
+            }
+            if (idx !== -1) list[idx] = report; else list.push(report);
+            return idx === -1;
+        }
+
+        // "Suspects (2)" + "Suspects (1)" → "Suspects (3)"; order kept.
+        function _rmsMergePopulated(items) {
+            const order = [], sums = {};
+            for (const it of items) {
+                const m = /^(.*?)\s*\((\d+)\)$/.exec(String(it));
+                const label = m ? m[1] : String(it);
+                if (!(label in sums)) { order.push(label); sums[label] = m ? 0 : null; }
+                if (m) sums[label] += Number(m[2]);
+            }
+            return order.map(l => sums[l] === null ? l : `${l} (${sums[l]})`);
+        }
+
+        /* A person the parser could key (name + DOB, Fort Worth) is filed
+         * once per case, however many documents mention them. When the key
+         * is already on a Suspect / Victim / Witness / Involved record, the
+         * new read only FILLS BLANKS there and is not filed again.
+         *
+         * One exception: someone first filed under Involved Persons (a
+         * supplement lists everyone as "Other") who a later document names
+         * as a suspect, victim or witness moves to that tab — but only an
+         * RMS-made record nobody has annotated (no notes, no relationship).
+         * Returns the persons still to be routed. */
+        const _RMS_PERSON_TABS = ['suspects', 'victims', 'witnesses', 'involvedPersons'];
+        function _rmsTabFor(inv) {
+            inv = String(inv || '');
+            if (/SUSPECT|ARRESTED|DEFENDANT/i.test(inv)) return 'suspects';
+            if (/REPORTING\s*PARTY|INFORMANT|PARENT|GUARDIAN|VICTIM'S/i.test(inv)) return 'involvedPersons';
+            if (/VICTIM/i.test(inv)) return 'victims';
+            if (/WITNESS/i.test(inv)) return 'witnesses';
+            return 'involvedPersons';
+        }
+        function _rmsFillBlanks(target, from) {
+            let n = 0;
+            for (const k of Object.keys(from)) {
+                if (k === 'nameUnverified' || k === 'rmsSource' || k === 'rmsSourcePage') continue;
+                const v = from[k];
+                if (typeof v !== 'string' || !v.trim()) continue;
+                if (target[k] === undefined || target[k] === null || String(target[k]).trim() === '') {
+                    target[k] = v; n++;
+                }
+            }
+            return n;
+        }
+        function _rmsMergeKnownPersons(caseId, people, populated) {
+            if (!people.some(p => p && p.rmsKey)) return people;
+            const store = {}, dirty = {};
+            for (const t of _RMS_PERSON_TABS) store[t] = _lsParse(`${t}_${caseId}`, []);
+            const find = key => {
+                for (const t of _RMS_PERSON_TABS) {
+                    const i = store[t].findIndex(e => e && e.rmsKey === key);
+                    if (i !== -1) return { tab: t, idx: i };
+                }
+                return null;
+            };
+            const rest = [];
+            let updated = 0;
+            for (const p of people) {
+                if (!p || !p.rmsKey) { rest.push(p); continue; }
+                const hit = find(p.rmsKey);
+                if (!hit) { rest.push(p); continue; }
+                const rec = store[hit.tab][hit.idx];
+                const want = _rmsTabFor(p.involvement);
+                if (hit.tab === 'involvedPersons' && want !== 'involvedPersons' && rec.rmsSource &&
+                    !String(rec.notes || '').trim() && !String(rec.relationship || '').trim()) {
+                    // Move: carry what the earlier record already had.
+                    const q = Object.assign({}, p);
+                    const back = { name: 'name', dob: 'dob', dl: 'dlNumber', dlState: 'dlState', sex: 'sex',
+                        height: 'height', weight: 'weight', hair: 'hairColor', eyes: 'eyeColor',
+                        address: 'address', phone: 'phone' };
+                    for (const k of Object.keys(back)) {
+                        if (!String(q[k] || '').trim() && String(rec[back[k]] || '').trim()) q[k] = rec[back[k]];
+                    }
+                    store.involvedPersons.splice(hit.idx, 1);
+                    dirty.involvedPersons = true;
+                    rest.push(q);
+                    continue;
+                }
+                const filled = _rmsFillBlanks(rec, _rmsPersonCommon(p, rec.rmsSource || ''));
+                if (hit.tab === 'suspects') {
+                    const ids = Array.isArray(rec.identifiers) ? rec.identifiers : (rec.identifiers = []);
+                    const add = _rmsSplitPhones(p.phone).map(v => ({ type: 'phone', value: v, provider: '' }));
+                    if (p.ssn) add.push({ type: 'ssn', value: p.ssn, provider: 'RMS Import' });
+                    for (const a of add) {
+                        if (!ids.some(x => x && x.type === a.type && x.value === a.value)) { ids.push(a); dirty.suspects = true; }
+                    }
+                }
+                if (filled) { dirty[hit.tab] = true; updated++; }
+            }
+            for (const t of Object.keys(dirty)) localStorage.setItem(`${t}_${caseId}`, JSON.stringify(store[t]));
+            if (updated) populated.push(`Updated persons (${updated})`);
+            return rest;
         }
 
         /* Duplicate detection was keyed on the name alone, which silently
@@ -45542,7 +45688,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const caseId = currentCase.id;
             const src = report.reportNumber || report.fileName || 'RMS Import';
             let populated = [];
-            const people = Array.isArray(report.personsInvolved) ? report.personsInvolved : [];
+            const people = _rmsMergeKnownPersons(caseId,
+                Array.isArray(report.personsInvolved) ? report.personsInvolved : [], populated);
 
             // Suspects
             const suspectPersons = people.filter(p =>
@@ -45628,22 +45775,39 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             // Vehicles
             if (report.vehicles && report.vehicles.length > 0) {
                 const existing = _lsParse(`recoveredVehicles_${caseId}`, []);
+                const norm = s => String(s || '').replace(/[\s-]+/g, '').toUpperCase();
+                let routedVeh = 0;
                 for (const v of report.vehicles) {
                     const makeModel = [v.year, v.make, v.model || v.type].filter(Boolean).join(' ').trim();
                     if (existing.some(e => e.rmsSource === src && e.makeModel === makeModel)) continue;
-                    existing.push({
+                    /* The same car in another document (a supplement, the
+                     * packet copy): matched on VIN, else plate. Fill blanks. */
+                    const twin = existing.find(e => e && e.rmsSource &&
+                        ((v.vin && norm(e.vin) === norm(v.vin)) ||
+                         (!v.vin && v.license && norm(e.licensePlate) === norm(v.license))));
+                    const notes = [
+                        v.status ? `Status: ${v.status}` : '',
+                        v.state ? `State: ${v.state}` : '',
+                        v.involvement ? `Involvement: ${v.involvement}` : '',
+                        v.notes || '',
+                        v.description || ''
+                    ].filter(Boolean).join(' | ');
+                    const rec = {
                         makeModel: makeModel,
                         licensePlate: v.license || '',
                         vin: v.vin || '',
                         color: v.colors || '',
                         year: v.year || '',
                         recoveryDate: '', recoveryLocation: '', photo: '',
-                        notes: v.status ? `Status: ${v.status}` + (v.state ? ` | State: ${v.state}` : '') : '',
+                        notes: notes,
                         rmsSource: src
-                    });
+                    };
+                    if (twin) { _rmsFillBlanks(twin, rec); continue; }
+                    existing.push(rec);
+                    routedVeh++;
                 }
                 localStorage.setItem(`recoveredVehicles_${caseId}`, JSON.stringify(existing));
-                populated.push(`Vehicles (${report.vehicles.length})`);
+                if (routedVeh) populated.push(`Vehicles (${routedVeh})`);
             }
 
             return populated;
@@ -45763,33 +45927,35 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     try {
                         let result = await window.electronAPI.extractPdfText(filePath);
                         result = await _rmsVisualOrderResult(filePath, result);
-                        const report = parseRmsReport(result.text, result.fileName,
+                        const parsed = parseRmsReport(result.text, result.fileName,
                             result.pages ? { pageTexts: result.pages } : null);
-                        report.pageCount = result.numPages;
-                        await _arRecoverRmsOcr(report, result.visualOrder ? null : filePath);
-                        // The format-agnostic fallback. AFTER the recovery pass
-                        // above — sweeping pre-recovery text would see a thin
-                        // parse that the OCR passes were about to fix.
-                        genericFound += _rmsMaybeGenericSweep(report, result.text, result.fileName,
-                            result.pages ? { pageTexts: result.pages } : null);
-                        if (report.provisionalPersons) unnamedBlocks += report.provisionalPersons.length;
-                        // Location of Occurrence / Offenses from the report's
-                        // offence row — only-if-blank. See
-                        // _rmsBackfillCaseOverview().
-                        overviewFilled = overviewFilled.concat(_rmsBackfillCaseOverview(report));
-
-                        // Check for duplicate
-                        const existingIdx = rmsImports.findIndex(r =>
-                            r.reportNumber === report.reportNumber && r.fileName === report.fileName);
-                        if (existingIdx !== -1) {
-                            rmsImports[existingIdx] = report; // replace
-                        } else {
-                            rmsImports.push(report);
+                        // A combined case packet comes back as several
+                        // documents; each is stored and routed on its own.
+                        const docs = _rmsExpandReport(parsed);
+                        const isPacket = docs.length > 1;
+                        for (const report of docs) {
+                            if (!isPacket) {
+                                report.pageCount = result.numPages;
+                                await _arRecoverRmsOcr(report, result.visualOrder ? null : filePath);
+                                // The format-agnostic fallback. AFTER the recovery pass
+                                // above — sweeping pre-recovery text would see a thin
+                                // parse that the OCR passes were about to fix. Never
+                                // for a split packet: its text is the whole packet.
+                                genericFound += _rmsMaybeGenericSweep(report, result.text, result.fileName,
+                                    result.pages ? { pageTexts: result.pages } : null);
+                            }
+                            if (report.provisionalPersons) unnamedBlocks += report.provisionalPersons.length;
+                            // Replace a duplicate, otherwise add
+                            _rmsUpsertImport(rmsImports, report);
+                            imported++;
                         }
-                        imported++;
-
-                        // Route persons to case tabs
-                        routeRmsPersonsToTabs(report);
+                        // Overview backfill (only-if-blank) and routing go
+                        // offense report first, so its location, offences and
+                        // person roles win over a supplement's.
+                        for (const report of _rmsRouteOrder(docs)) {
+                            overviewFilled = overviewFilled.concat(_rmsBackfillCaseOverview(report));
+                            routeRmsPersonsToTabs(report);
+                        }
                     } catch (err) {
                         console.error('Failed to parse:', filePath, err);
                     }
@@ -45919,6 +46085,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                     <div class="flex items-center gap-2 mb-1">
                                         <span class="text-xs font-mono px-2 py-0.5 rounded bg-viper-orange/20 text-viper-orange border border-viper-orange/30">${rpt.reportType || 'Report'}</span>
                                         ${rpt.supplementNo ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-600/30 text-gray-300 border border-gray-600">${rpt.supplementNo}</span>` : ''}
+                                        ${rpt.fw && rpt.fw.packetPart ? `<span class="text-xs px-2 py-0.5 rounded bg-gray-600/30 text-gray-300 border border-gray-600" title="One document of a combined case packet (PDF pages ${_esc(rpt.fw.pdfPages || '')})">Packet ${_esc(rpt.fw.packetPart)}</span>` : ''}
                                         ${genericRead ? `<span class="text-xs px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30" title="Format not recognised — read generically, nothing filed">🔎 GENERIC READ</span>` : ''}
                                     </div>
                                     <h3 class="text-lg font-bold text-white">#${rpt.reportNumber || 'Unknown'}</h3>
@@ -45958,10 +46125,16 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const num = String((rpt && rpt.reportNumber) || '').trim();
             const isSupplement = !!String((rpt && rpt.supplementNo) || '').trim();
             if (!isSupplement || !num || keys.every(k => out[k])) return out;
-            const base = (Array.isArray(list) ? list : []).find(r => r && r !== rpt &&
+            const cands = (Array.isArray(list) ? list : []).filter(r => r && r !== rpt &&
                 String(r.reportNumber || '').trim() === num &&
                 !String(r.supplementNo || '').trim() &&
                 keys.some(k => String(r[k] || '').trim()));
+            /* Fort Worth files arrest, officer and wanted-person documents
+             * under the incident number too, without a supplement number. An
+             * arrest report's location is where the ARREST happened, so a
+             * Fort Worth supplement only borrows from the Offense Report. */
+            const base = cands.find(r => r.fw && r.fw.kind === 'offense') ||
+                ((rpt && rpt.fw) ? null : cands[0]);
             if (!base) return out;
             let used = false;
             for (const k of keys) {

@@ -1,0 +1,333 @@
+
+
+Person Summary 
+Invl
+Subject
+Invl NO
+1
+Type
+I
+Name
+Vantree, Osric Lee
+Race
+W
+Sex
+M
+DOB
+2/2/2004
+Invl
+REP
+Invl NO
+1
+Type
+I
+Name
+BRIGHTWATER, JUNO Mae
+Race
+A
+Sex
+F
+DOB
+7/7/1985
+Administrative Information
+Involved Officer on Call
+9120::Wexle
+y; S 
+9120,9121::Ca
+rraway; P 
+9121
+Axon Camera-In Officer Order
+1 BC::1ST OFF 
+BODY CAM 
+RECORDED/UPLOAD
+ED W/RPT#,2 
+BC::2ND OFF 
+BODY CAM 
+RECORDED/UPLOAD
+ED W/RPT#
+Vehicle Units
+999-0042
+Dashboard Camera
+1 NA::1ST OFFICER VEH DASHBOARD 
+CAMERA NOT ACTIVATED
+Was Vehicle PursuedStart Time
+02:50 PM
+End Time
+02:58 PM
+Pursuit Beg. PointPursuit Ending PointDist. Traveled in milesDist. Travel in min.
+Speed of Patrol CarSpeed of purs. Veh.Primary UnitPrimary Off. NameType of Primary Veh.Prim. unit video Capt.Sec.Unit
+Sec. officer nameType of Sec.VehicleSec. Unit Video Capt.Additional Units Invol.Other Units Invol.pursuit
+Reason for Additional OfficersAir 1 Ava.Air 1 Util.Air 1 video capt.Injury accidentHostage Invol.
+was sus/ofcr/cit inj.
+    
+Tire Defl. Device Tire Defl. resultsPursuit revi. Supervisorswas force usedType of Force used
+Other Force Used DescribedWas Person Inj.Describe Injury during UOF incidentwere off. injnured
+Off. Injury descriptionRev. supervisor idUOF suppl. req.Needed detail in narrative
+Primary Reason force was used
+Agency
+Fort Worth Police 
+Department
+Report No
+OE9990042
+Supplement No.
+ORIG
+Reported Dt./ Reported Time
+03/11/2025 
+15:05:00
+Event Start/End Date
+03/11/2025 
+15:05:00  
+03/11/2025 
+14:58:00
+CAD Call NoInvest. by Out. AgencyNature of Call
+Criminal Trespass Warning report (no offense)  
+Location
+7700 SAMPLE MARKET AVE
+City
+FORT WORTH
+Zip
+76199
+Division
+Z990
+From Date and Time
+03/11/2025 14:52:00
+2nd Member#/ ID#Division
+Sample Division
+Council Dist.
+9
+AssignmentEntered By
+9120::Wexley 9120, S 9120
+Reporting Officer
+Wexley 9120, S 9120  
+Printed At
+3/12/2025 9:41:07 AM
+Page1 of 3
+FORT WORTH POLICE 
+DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+Fax 817-555-0101
+249990002
+Member#/Dept ID#
+Wexley 9120, S 9120
+Reporting Date
+03/11/2025 15:05:00 Tue
+nature of Call
+Criminal Trespass Warning report (no 
+offense)  
+
+Subject::Subject given a CT warning or other person/potential suspect 1: Vantree, Osric 
+Lee 
+Race
+WHITE
+Sex
+MALE
+DOB
+2/2/200
+4
+Age
+21
+Height
+510
+Weight
+165
+Hair Color
+BROWN
+Eye Color
+BLUE
+Hair Length
+Hair StyleSkin TypeGlassesBuildFace HairPlace Of Birth
+TX
+Marital Status
+S
+Alias
+SSNPhone Type/No.
+ 
+Misc ID/State/No.
+   
+Email
+Phone Type/No.
+ 
+Address
+12 EXAMPLE COURT, FORT WORTH TX 76199 
+Employer NameEmployer Phone Type/No.
+ 
+Email
+Occupation Address
+      
+Occupation Code/Description
+Nearest Relative relationshipName
+  
+Phone Type/No.
+ 
+Email
+Address
+    
+REP::Person Reporting Event 1: BRIGHTWATER, JUNO Mae 
+Race
+ASIAN
+Sex
+FEMALE
+DOB
+7/7/198
+5
+Age
+39
+Height
+504
+Weight
+120
+Hair Color
+BLACK
+Eye Color
+BROWN
+Hair Length
+Hair StyleSkin TypeGlassesBuildFace HairPlace Of BirthMarital Status
+M
+Alias
+SSNPhone Type/No.
+Phone 8175550199
+Misc ID/State/No.
+  
+Email
+Phone Type/No.
+Phone 8175550199
+Address
+40 SAMPLE BROOK DR., FORT WORTH TX 76199 
+Employer Name
+sample grocery
+Employer Phone Type/No.
+ 
+Email
+Reporting Officer
+Wexley 9120, S 9120  
+Printed At
+3/12/2025 9:41:07 AM
+Page2 of 3
+FORT WORTH POLICE 
+DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+Fax 817-555-0101
+249990002
+Member#/Dept ID#
+Wexley 9120, S 9120
+Reporting Date
+03/11/2025 15:05:00 Tue
+nature of Call
+Criminal Trespass Warning report (no 
+offense)  
+
+Narrative
+Officer S. Wexley #9120 responded to 7700 Sample Market Ave (Sample Grocery) shortly before 1500 hours on
+a call about a man who would not leave the store after closing time. The store manager, Brightwater, Juno,
+said the man, later identified as Vantree, Osric, had been asked several times to go and kept returning to
+the front counter. The manager asked that he be warned off the property.
+Vantree received a criminal trespass warning for the store and walked away on foot. Nobody was hurt and
+nothing was taken. Body camera video was saved to this report.
+Reporting Officer
+Wexley 9120, S 9120  
+Printed At
+3/12/2025 9:41:07 AM
+Page3 of 3
+FORT WORTH POLICE 
+DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+Fax 817-555-0101
+249990002
+Member#/Dept ID#
+Wexley 9120, S 9120
+Reporting Date
+03/11/2025 15:05:00 Tue
+nature of Call
+Criminal Trespass Warning report (no 
+offense)  
+
+Summary Narrative
+Person Summary 
+InvlInvl NOType
+I
+Name
+,  
+RaceSexDOB
+#Error
+Administrative Information
+Reported Date/ Reported TimeSupplement No.
+ORIG
+Report No
+OE9990042
+Agency
+Fort Worth Police Department
+CAD Call NoStatus
+Nature of Call
+LocationCityZip
+DivisionFrom Date and Time2nd Member#/ ID#Property?
+No
+Council Dist.
+Assignment
+Entered By
+9133::Fennimore 
+9133, M A 9133
+Approving Officer
+ 
+Approval Date
+ 
+Approval Time
+Involved Officer on CallAxon Camera-In Officer OrderVehicle UnitsDashboard Camera
+Reporting Officer
+Fennimore 9133, M A 9133  
+Printed At
+3/12/2025 9:47:30 AM
+Page1 of 2
+FORT WORTH POLICE 
+DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+Fax 817-555-0101
+249990002
+Member#/Dept ID#
+Fennimore 9133, M A 9133
+Reporting Date
+ 
+nature of Call
+
+ : ,   
+RaceSexDOB
+#Error
+AgeEthnicityJuvenile?
+HeightWeightHair ColorEye ColorSecual AssaultRes StatusOFN_INVL
+TypeAddress
+Map Coordinates
+ 
+Rep DistBeat
+Type
+Drivers License
+ID NoOLS
+Realted Offenses
+Narrative
+I, Detective M. Fennimore #9133, reviewed this report. The trespass warning is on file and the manager 
+asked for nothing further, so this report can be closed. 
+ 
+Sgt Oakhurst
+Reporting Officer
+Fennimore 9133, M A 9133  
+Printed At
+3/12/2025 9:47:30 AM
+Page2 of 2
+FORT WORTH POLICE 
+DEPARTMENT
+100 Sample Plaza
+Fort Worth, Texas 76199
+817-555-0100
+Fax 817-555-0101
+249990002
+Member#/Dept ID#
+Fennimore 9133, M A 9133
+Reporting Date
+ 
+nature of Call

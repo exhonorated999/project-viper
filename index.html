@@ -4095,28 +4095,37 @@
                 if (!caseNum || !synopsis || !rmsLocation) {
                     if (window.FwInformParser && window.FwInformParser.detect(text)) {
                         try {
-                            const fwReport = window.FwInformParser.parse(text, result.fileName);
-                            if (!caseNum && fwReport.reportNumber) caseNum = fwReport.reportNumber;
-                            if (!rmsLocation && fwReport.location) rmsLocation = fwReport.location;
-                            if (!rmsOffenses.length) {
-                                // Verbatim, statute first — the same shape the
-                                // Overview tab holds an offence in everywhere else.
-                                rmsOffenses = fwReport.offenses
-                                    .map(o => [o.statute, o.description].filter(Boolean).join(' '))
-                                    .filter(Boolean);
+                            /* A case packet holds several documents (arrest,
+                             * offense, supplements...). The Offense Report is
+                             * the one that carries the incident location and
+                             * offences, so it is read first when present. */
+                            const fwAll = window.FwInformParser.parseAll(text, result.fileName);
+                            const fwDocs = fwAll.filter(r => r.fw && r.fw.kind === 'offense')
+                                .concat(fwAll.filter(r => !(r.fw && r.fw.kind === 'offense')));
+                            for (const fwReport of fwDocs) {
+                                if (!caseNum && fwReport.reportNumber) caseNum = fwReport.reportNumber;
+                                if (!rmsLocation && fwReport.location) rmsLocation = fwReport.location;
+                                if (!rmsOffenses.length) {
+                                    // Verbatim, statute first — the same shape the
+                                    // Overview tab holds an offence in everywhere else.
+                                    rmsOffenses = (fwReport.offenses || [])
+                                        .map(o => [o.statute, o.description].filter(Boolean).join(' '))
+                                        .filter(Boolean);
+                                }
+                                if (!synopsis) {
+                                    synopsis = rmsOffenses.slice(0, 3).join('; ') ||
+                                        (fwReport.fw && fwReport.fw.natureOfCall) || '';
+                                }
+                                (fwReport.personsInvolved || []).forEach(p => {
+                                    const inv = String(p.involvement || '');
+                                    if (/SUSPECT|ARRESTED|DEFENDANT/i.test(inv)) detected.suspects = true;
+                                    else if (/VICTIM/i.test(inv) && !/VICTIM'S|PARENT|GUARDIAN/i.test(inv)) detected.victims = true;
+                                    else if (/WITNESS/i.test(inv)) detected.witnesses = true;
+                                    else detected.involvedPersons = true;
+                                });
+                                if ((fwReport.narratives || []).length) detected.rmsImports = true;
+                                if ((fwReport.vehicles || []).length) detected.vehicles = true;
                             }
-                            if (!synopsis) {
-                                synopsis = rmsOffenses.slice(0, 3).join('; ') ||
-                                    (fwReport.fw && fwReport.fw.natureOfCall) || '';
-                            }
-                            fwReport.personsInvolved.forEach(p => {
-                                const inv = String(p.involvement || '');
-                                if (/SUSPECT|ARRESTED|DEFENDANT/i.test(inv)) detected.suspects = true;
-                                else if (/VICTIM/i.test(inv) && !/VICTIM'S|PARENT|GUARDIAN/i.test(inv)) detected.victims = true;
-                                else if (/WITNESS/i.test(inv)) detected.witnesses = true;
-                                else detected.involvedPersons = true;
-                            });
-                            if (fwReport.narratives.length) detected.rmsImports = true;
                         } catch (fwErr) {
                             console.warn('[RMS Import] Fort Worth INFORM scan failed:', fwErr);
                         }

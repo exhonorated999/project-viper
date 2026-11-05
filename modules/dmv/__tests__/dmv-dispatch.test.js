@@ -205,6 +205,69 @@ ok('race is carried onto a newly created person on all four tabs',
 ok('a state ID card is called out on all four tabs',
     (RAW.match(/parsed\.dlClass === 'ID'/g) || []).length === 4,
     (RAW.match(/parsed\.dlClass === 'ID'/g) || []).length);
+ok('all four person importers read the PDF through _extractDmvPdf',
+    (PAGE.match(/const pdfResult = await _extractDmvPdf\(filePath\);/g) || []).length === 4,
+    (PAGE.match(/const pdfResult = await _extractDmvPdf\(filePath\);/g) || []).length);
+ok('all four person importers prefer the merged OCR read',
+    (PAGE.match(/const parsed = pdfResult\.dmvParsed \|\| parseDmvText\(pdfResult\.text\);/g) || []).length === 4,
+    (PAGE.match(/const parsed = pdfResult\.dmvParsed \|\| parseDmvText\(pdfResult\.text\);/g) || []).length);
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed\n');
-process.exit(fail ? 1 : 0);
+/* ------------------------------------------------------------------ */
+console.log('\n[an OCR-only Texas page gets a second, column-mode read]');
+
+const FX = n => fs.readFileSync(path.join(__dirname, '..', 'fixtures', n), 'utf8');
+const OCR_TXT = FX('tx-dps-search-results-ocr.synthetic.txt');
+const P4_TXT = FX('tx-dps-search-results-psm4.synthetic.txt');
+const SR_TXT = FX('tx-dps-search-results.synthetic.txt');
+
+function withApi(api) {
+    sandbox.electronAPI = api;
+    return sandbox._extractDmvPdf('C:\\x\\sample.pdf');
+}
+
+(async function () {
+    ok('the page defines _extractDmvPdf', typeof sandbox._extractDmvPdf === 'function');
+
+    let calls = [];
+    let r = await withApi({
+        extractPdfText: async () => ({ text: OCR_TXT, ocr: true, fileName: 'sample.pdf' }),
+        ocrPdfPagesSparse: async (f, pages, psm) => { calls.push([pages, psm]); return { ok: true, pages: { '1': P4_TXT } }; }
+    });
+    ok('the second read asks for page 1 in PSM 4', calls.length === 1 && calls[0][0][0] === 1 && calls[0][1] === '4', calls);
+    ok('the merged read is handed back', !!(r && r.dmvParsed), r && Object.keys(r));
+    ok('merged: class and sex come from the second read', r.dmvParsed.dlClass === 'C' && r.dmvParsed.sex === 'M', r.dmvParsed);
+    ok('merged: ethnicity comes from the first read', r.dmvParsed.ethnicity === 'UNKNOWN', r.dmvParsed.ethnicity);
+    ok('the original text and file name are kept', r.text === OCR_TXT && r.fileName === 'sample.pdf');
+
+    calls = [];
+    r = await withApi({
+        extractPdfText: async () => ({ text: SR_TXT, fileName: 'sample.pdf' }),
+        ocrPdfPagesSparse: async () => { calls.push(1); return { ok: true, pages: {} }; }
+    });
+    ok('a page with a real text layer gets no second read', calls.length === 0 && !r.dmvParsed, calls);
+
+    calls = [];
+    r = await withApi({
+        extractPdfText: async () => ({ text: 'CAL-PHOTO IMAGE RECORD FOR:\nAWAD RANIA T', ocr: true }),
+        ocrPdfPagesSparse: async () => { calls.push(1); return { ok: true, pages: {} }; }
+    });
+    ok('an OCR\'d page from another state gets no second read', calls.length === 0 && !r.dmvParsed, calls);
+
+    r = await withApi({
+        extractPdfText: async () => ({ text: OCR_TXT, ocr: true }),
+        ocrPdfPagesSparse: async () => { throw new Error('ocr failed'); }
+    });
+    ok('a failing second read falls back to the first read', !!r && r.text === OCR_TXT && !r.dmvParsed);
+
+    r = await withApi({
+        extractPdfText: async () => ({ text: OCR_TXT, ocr: true }),
+        ocrPdfPagesSparse: async () => ({ ok: false, pages: {} })
+    });
+    ok('an empty second read falls back to the first read', !!r && !r.dmvParsed);
+
+    r = await withApi({ extractPdfText: async () => null });
+    ok('nothing extracted gives nothing back', r === null);
+
+    console.log('\n' + pass + ' passed, ' + fail + ' failed\n');
+    process.exit(fail ? 1 : 0);
+})();

@@ -196,6 +196,46 @@
         return null;
     }
 
+    /*
+     * The newer "Search Results" page (Image Retrieval, v3.7 / v4.0) prints
+     * label and value on ONE line, and two fields side by side on most rows:
+     *
+     *      Ethnicity:NON-HISPANIC Sex:M
+     *      Height:508 Weight:190
+     *      Expiration Date:05292030 Restriction:
+     *
+     * Split such a line into its label/value pairs. A known label only counts
+     * at the start of the line or after whitespace, and only with its colon,
+     * so a value can never be cut in two by a word that merely looks like a
+     * label. Returns null when the line does not START with a known label.
+     */
+    var _LABEL_RE_SRC = LABELS.slice().sort(function (a, b) { return b.length - a.length; })
+        .map(function (l) { return l.replace(/ /g, '\\s+'); }).join('|');
+
+    function _canonLabel(s) {
+        var want = _trim(s).toLowerCase();
+        for (var i = 0; i < LABELS.length; i++) {
+            if (LABELS[i].toLowerCase() === want) return LABELS[i];
+        }
+        return null;
+    }
+
+    function _segments(line) {
+        var s = _s(line);
+        var re = new RegExp('(^|\\s)(' + _LABEL_RE_SRC + ')\\s*:', 'gi');
+        var hits = [], m;
+        while ((m = re.exec(s))) {
+            hits.push({ label: _canonLabel(m[2]), start: m.index + m[1].length, end: re.lastIndex });
+        }
+        if (!hits.length || s.slice(0, hits[0].start).trim()) return null;
+        var out = [];
+        for (var i = 0; i < hits.length; i++) {
+            var stop = i + 1 < hits.length ? hits[i + 1].start : s.length;
+            out.push({ label: hits[i].label, inline: _trim(s.slice(hits[i].end, stop)) });
+        }
+        return out;
+    }
+
     // Anything shaped like "Some Words:" is treated as a label for the
     // purpose of deciding whether the previous field was blank, even when
     // it is not a label this reader knows. That way a label added to the
@@ -250,7 +290,7 @@
         // would throw the whole record away.
         var start = -1;
         for (var a = 0; a < raw.length; a++) {
-            if (_labelOn(raw[a])) { start = a; break; }
+            if (_segments(raw[a])) { start = a; break; }
         }
         if (start < 0) return {};
 
@@ -262,23 +302,30 @@
 
         var fields = {};
         for (var j = 0; j < lines.length; j++) {
-            var hit = _labelOn(lines[j]);
-            if (!hit) continue;
-            if (hit.inline) {                         // "Expiration Date: 01022030"
-                if (!fields[hit.label]) fields[hit.label] = hit.inline;
-                continue;
+            var segs = _segments(lines[j]);
+            if (!segs) continue;
+            for (var g = 0; g < segs.length; g++) {
+                var hit = segs[g];
+                if (hit.inline) {                     // "Expiration Date: 01022030"
+                    if (!fields[hit.label]) fields[hit.label] = hit.inline;
+                    continue;
+                }
+                // A blank field that shares its row with another field is
+                // simply blank ("...05292030 Restriction:").  Only a label
+                // alone on its line can have its value on the next line.
+                if (segs.length > 1) continue;
+                // Vertical: the value is the next non-empty line, unless that
+                // line is itself a label — in which case this field is blank.
+                var val = '';
+                for (var k = j + 1; k < lines.length; k++) {
+                    var cand = lines[k].trim();
+                    if (!cand) continue;
+                    if (_segments(lines[k]) || _looksLikeLabel(lines[k])) break;
+                    val = _trim(cand);
+                    break;
+                }
+                if (val && !fields[hit.label]) fields[hit.label] = val;
             }
-            // Vertical: the value is the next non-empty line, unless that
-            // line is itself a label — in which case this field is blank.
-            var val = '';
-            for (var k = j + 1; k < lines.length; k++) {
-                var cand = lines[k].trim();
-                if (!cand) continue;
-                if (_labelOn(lines[k]) || _looksLikeLabel(lines[k])) break;
-                val = _trim(cand);
-                break;
-            }
-            if (val && !fields[hit.label]) fields[hit.label] = val;
         }
         return fields;
     }
@@ -291,7 +338,11 @@
      * street line where it belongs.
      */
     function splitAddress(raw) {
-        var full = _trim(raw);
+        // The Search Results page runs ZIP+4 together ("TX 761053108") and
+        // pads a missing extension with zeros ("TX 762440000").
+        var full = _trim(raw).replace(/\b([A-Z]{2})\s+(\d{5})(\d{4})$/i, function (_m, st, z5, z4) {
+            return st + ' ' + z5 + (z4 === '0000' ? '' : '-' + z4);
+        });
         var out = { address: '', addressCityStateZip: '' };
         if (!full) return out;
         var segs = full.split(',').map(function (x) { return _trim(x); })
@@ -329,37 +380,73 @@
     function parse(text) {
         var f = readFields(text);
         var addr = splitAddress(f['Address']);
-        var sex = _trim(f['Sex']).toUpperCase();
+        var sexTok = _first(f['Sex']).toUpperCase();
+        var eth = _trim(f['Ethnicity']).match(/^(NON-?\s?HISPANIC|HISPANIC|UNKNOWN)\b/i);
+        var cdl = _trim(f['CDL Flag']).match(/^([YN])\b/i);
+        var wt = _first(f['Weight']);
 
         return {
             name: _trim(f['Name']),
-            dob: parseDate(f['Date of Birth']),
+            dob: _date(f['Date of Birth']),
             dlNumber: _trim(f['DL Number']).replace(/\s+/g, ''),
             // The printout never names its own state; it does not have to.
             // It is only ever produced by Texas DPS.
             dlState: _trim(f['DL Number']) ? 'TX' : '',
-            dlClass: _trim(f['Class']).toUpperCase(),
-            dlExpires: parseDate(f['Expiration Date']),
-            imageDate: parseDate(f['Image Date']),
-            sex: /^[MF]$/.test(sex) ? sex : _trim(f['Sex']),
+            dlClass: _cleanClass(f['Class']),
+            dlExpires: _date(f['Expiration Date']),
+            imageDate: _date(f['Image Date']),
+            sex: /^[MF]$/.test(sexTok) ? sexTok : _trim(f['Sex']),
             race: _trim(f['Race']),
-            ethnicity: _trim(f['Ethnicity']),
-            height: parseHeight(f['Height']),
-            weight: /^\d{2,3}$/.test(_trim(f['Weight'])) ? _trim(f['Weight']) : '',
+            ethnicity: eth ? (/^NON/i.test(eth[1]) ? 'NON-HISPANIC' : eth[1].toUpperCase()) : _trim(f['Ethnicity']),
+            height: parseHeight(f['Height']) || parseHeight(_first(f['Height'])),
+            weight: /^\d{2,3}$/.test(wt) ? wt : '',
             hairColor: normalizeColor(f['Hair Color']),
             eyeColor: normalizeColor(f['Eye Color']),
             address: addr.address,
             addressCityStateZip: addr.addressCityStateZip,
             restriction: _trim(f['Restriction']),
-            cdlFlag: _trim(f['CDL Flag']),
+            cdlFlag: cdl ? cdl[1].toUpperCase() : _trim(f['CDL Flag']),
             endorsement: _trim(f['Endorsement'])
         };
+    }
+
+    function _first(v) { return _trim(v).split(' ')[0] || ''; }
+
+    // A date value, tolerating OCR noise after it ("01182031 |").
+    function _date(v) { return parseDate(v) || parseDate(_first(v)); }
+
+    // License class as printed. OCR reads a lone "C" on this page as "Cc";
+    // no Texas class is a doubled letter, so a doubled letter is one letter.
+    function _cleanClass(v) {
+        var c = _first(v).toUpperCase();
+        var m = c.match(/^([A-Z])\1$/);
+        return m ? m[1] : c;
+    }
+
+    /*
+     * Combine several reads of the SAME page (for example the text layer and
+     * an OCR pass, or two OCR passes with different page segmentation).
+     * The first read that has a field wins; later reads only fill blanks.
+     * Reads that are not a Texas DPS page are ignored.
+     */
+    function parseBest(texts) {
+        var out = null;
+        (texts || []).forEach(function (t) {
+            if (!t || !detect(t)) return;
+            var p = parse(t);
+            if (!out) { out = p; return; }
+            Object.keys(p).forEach(function (k) { if (!out[k] && p[k]) out[k] = p[k]; });
+        });
+        // The state goes with the number: never TX without a number.
+        if (out && !out.dlNumber) out.dlState = '';
+        return out;
     }
 
     return {
         LABELS: LABELS,
         detect: detect,
         parse: parse,
+        parseBest: parseBest,
         readFields: readFields,
         parseDate: parseDate,
         parseHeight: parseHeight,

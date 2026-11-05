@@ -18734,6 +18734,33 @@
             return null;
         }
 
+        // Read a DMV printout PDF for the person importers (suspect, victim,
+        // witness, other person).  Same as extractPdfText, plus one repair:
+        // the newer Texas DPS "Search Results" page is often saved with a
+        // font that has no text mapping, so it can only be OCR'd — and the
+        // whole-page OCR drops the rows beside the photo (Sex, Image Date,
+        // Class, Expiration, CDL Flag).  For such a page, read page 1 again
+        // in column mode (PSM 4), which keeps every row, and merge the two
+        // reads field by field.  `dmvParsed` is set only when that happened.
+        async function _extractDmvPdf(filePath) {
+            const res = await window.electronAPI.extractPdfText(filePath);
+            if (!res || !res.text || !res.ocr) return res;
+            const tx = _txDps();
+            if (!tx || !tx.detect(res.text) || typeof tx.parseBest !== 'function') return res;
+            if (!window.electronAPI.ocrPdfPagesSparse) return res;
+            try {
+                showToast('Reading the scanned DPS page again for the remaining fields…', 'info');
+                const again = await window.electronAPI.ocrPdfPagesSparse(filePath, [1], '4');
+                const p1 = again && again.ok && again.pages && again.pages['1'];
+                if (!p1) return res;
+                const best = tx.parseBest([p1, res.text]);
+                if (best) return { ...res, dmvParsed: best };
+            } catch (err) {
+                console.warn('[DMV] second OCR read failed:', err && err.message);
+            }
+            return res;
+        }
+
         // Open a stored DMV printout in the same popup we use for rap sheets.
         // `person` is the object that owns `dmvPrintout` (suspect / victim /
         // witness / involvedPerson).
@@ -19250,7 +19277,7 @@
                 if (!filePath) return;
 
                 showToast('Extracting text from PDF…', 'info');
-                const pdfResult = await window.electronAPI.extractPdfText(filePath);
+                const pdfResult = await _extractDmvPdf(filePath);
                 if (!pdfResult || !pdfResult.text) {
                     showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
                     return;
@@ -19265,7 +19292,7 @@
                     return;
                 }
 
-                const parsed = parseDmvText(pdfResult.text);
+                const parsed = pdfResult.dmvParsed || parseDmvText(pdfResult.text);
                 if (!parsed.name && !parsed.dlNumber && !parsed.dob) {
                     showToast('Could not identify DMV fields in this document. The format may not be supported.', 'error');
                     return;
@@ -19406,7 +19433,7 @@
                 if (!filePath) return;
 
                 showToast('Extracting text from PDF…', 'info');
-                const pdfResult = await window.electronAPI.extractPdfText(filePath);
+                const pdfResult = await _extractDmvPdf(filePath);
                 if (!pdfResult || !pdfResult.text) {
                     showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
                     return;
@@ -19421,7 +19448,7 @@
                     return;
                 }
 
-                const parsed = parseDmvText(pdfResult.text);
+                const parsed = pdfResult.dmvParsed || parseDmvText(pdfResult.text);
                 if (!parsed.name && !parsed.dlNumber && !parsed.dob) {
                     showToast('Could not identify DMV fields in this document.', 'error');
                     return;
@@ -19509,7 +19536,7 @@
                 if (!filePath) return;
 
                 showToast('Extracting text from PDF…', 'info');
-                const pdfResult = await window.electronAPI.extractPdfText(filePath);
+                const pdfResult = await _extractDmvPdf(filePath);
                 if (!pdfResult || !pdfResult.text) {
                     showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
                     return;
@@ -19524,7 +19551,7 @@
                     return;
                 }
 
-                const parsed = parseDmvText(pdfResult.text);
+                const parsed = pdfResult.dmvParsed || parseDmvText(pdfResult.text);
                 if (!parsed.name && !parsed.dlNumber && !parsed.dob) {
                     showToast('Could not identify DMV fields in this document.', 'error');
                     return;
@@ -19610,7 +19637,7 @@
                 if (!filePath) return;
 
                 showToast('Extracting text from PDF…', 'info');
-                const pdfResult = await window.electronAPI.extractPdfText(filePath);
+                const pdfResult = await _extractDmvPdf(filePath);
                 if (!pdfResult || !pdfResult.text) {
                     showToast('Could not extract text from the PDF. The file may be image-only.', 'error');
                     return;
@@ -19625,7 +19652,7 @@
                     return;
                 }
 
-                const parsed = parseDmvText(pdfResult.text);
+                const parsed = pdfResult.dmvParsed || parseDmvText(pdfResult.text);
                 if (!parsed.name && !parsed.dlNumber && !parsed.dob) {
                     showToast('Could not identify DMV fields in this document.', 'error');
                     return;

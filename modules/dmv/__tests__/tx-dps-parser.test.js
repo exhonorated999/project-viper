@@ -227,5 +227,81 @@ console.log('\n[enough was read to be worth offering]');
 ok('the fixture clears the host gate', !!(r.name || r.dlNumber || r.dob));
 ok('an empty page does not clear the host gate', !(empty.name || empty.dlNumber || empty.dob));
 
+/* ------------------------------------------------------------------ */
+console.log('\n[the newer "Search Results" page: label and value on one line]');
+
+// The Image Retrieval "Search Results" page (v3.7 / v4.0) prints the value
+// right after the label and two fields side by side on most rows. Before
+// this was handled, "Sex:M" ended up inside the ethnicity and Height,
+// Weight, Class, Expiration and Hair were lost.
+const fx = n => fs.readFileSync(path.join(__dirname, '..', 'fixtures', n), 'utf8');
+const SR = fx('tx-dps-search-results.synthetic.txt');
+ok('the Search Results page is recognised', TX.detect(SR) === true);
+const s = TX.parse(SR);
+ok('SR: license number', s.dlNumber === '90011223', s.dlNumber);
+ok('SR: state is TX', s.dlState === 'TX', s.dlState);
+ok('SR: name', s.name === 'ORLA BRIGID TANSEY', s.name);
+ok('SR: month-first date of birth', s.dob === '1991-09-14', s.dob);
+ok('SR: ethnicity does not swallow the sex field', s.ethnicity === 'NON-HISPANIC', s.ethnicity);
+ok('SR: sex from the right-hand column', s.sex === 'F', s.sex);
+ok('SR: height (507 = 5\'07")', s.height === '67', s.height);
+ok('SR: weight from the right-hand column', s.weight === '132', s.weight);
+ok('SR: eye colour', s.eyeColor === 'Green', s.eyeColor);
+ok('SR: hair colour from the right-hand column', s.hairColor === 'Red', s.hairColor);
+ok('SR: image date', s.imageDate === '2024-03-18', s.imageDate);
+ok('SR: class', s.dlClass === 'C', s.dlClass);
+ok('SR: expiration date', s.dlExpires === '2031-09-14', s.dlExpires);
+ok('SR: restriction from the right-hand column', s.restriction === 'A', s.restriction);
+ok('SR: CDL flag', s.cdlFlag === 'N', s.cdlFlag);
+ok('SR: blank endorsement stays blank', s.endorsement === '', s.endorsement);
+ok('SR: street line', s.address === '415 EXAMPLE RIDGE RD', s.address);
+ok('SR: run-together ZIP+4 is split', s.addressCityStateZip === 'FORT WORTH, TX 76199-0042', s.addressCityStateZip);
+
+const fr = TX.readFields('Expiration Date:05292030 Restriction:\nCDL Flag:N Endorsement:\n');
+ok('a blank field sharing a row does not take the next row as its value', !fr['Restriction'], fr);
+ok('the next row is still read', fr['CDL Flag'] === 'N', fr);
+const fe = TX.readFields('Ethnicity: Sex: F\n');
+ok('a blank left-hand field leaves the right-hand one intact', !fe['Ethnicity'] && fe['Sex'] === 'F', fe);
+const fw = TX.readFields('Name: SAMPLE CLASSY PERSON\nRace: WHITE\n');
+ok('a label word inside a value does not split it (no colon)', fw['Name'] === 'SAMPLE CLASSY PERSON', fw);
+
+ok('a padded ZIP extension is dropped',
+    TX.splitAddress('77 SAMPLE BROOK CIRCLE, KELLER, TX 761990000').addressCityStateZip === 'KELLER, TX 76199');
+ok('a real ZIP extension is kept',
+    TX.splitAddress('1 EXAMPLE ST, FORT WORTH, TX 761990042').addressCityStateZip === 'FORT WORTH, TX 76199-0042');
+
+/* ------------------------------------------------------------------ */
+console.log('\n[a page that could only be OCR\'d]');
+
+// Saved with a font that has no text mapping, the page can only be OCR'd.
+// Whole-page OCR drops the rows beside the photo and garbles "Sex: M";
+// a second, column-mode (PSM 4) read keeps every row. The host merges them.
+const OCR = fx('tx-dps-search-results-ocr.synthetic.txt');
+const P4 = fx('tx-dps-search-results-psm4.synthetic.txt');
+ok('the whole-page OCR read is recognised', TX.detect(OCR) === true);
+ok('the column-mode OCR read is recognised', TX.detect(P4) === true);
+const o = TX.parse(OCR);
+ok('OCR: name read', o.name === 'ROWAN ELLIS QUARTERMAINE', o.name);
+ok('OCR: ethnicity keeps only the word, not the OCR noise after it', o.ethnicity === 'UNKNOWN', o.ethnicity);
+ok('OCR: the garbled sex row gives no sex', o.sex === '', o.sex);
+ok('OCR: photo noise does not become a field', o.address === '77 SAMPLE BROOK CIRCLE', o.address);
+const p = TX.parse(P4);
+ok('PSM4: "Cc" is class C', p.dlClass === 'C', p.dlClass);
+ok('PSM4: sex', p.sex === 'M', p.sex);
+ok('PSM4: expiration date', p.dlExpires === '2029-12-02', p.dlExpires);
+ok('PSM4: blank ethnicity stays blank', p.ethnicity === '', p.ethnicity);
+const b = TX.parseBest([P4, OCR]);
+ok('merged: class from the column read', b.dlClass === 'C', b.dlClass);
+ok('merged: image date from the column read', b.imageDate === '2023-06-22', b.imageDate);
+ok('merged: CDL flag from the column read', b.cdlFlag === 'N', b.cdlFlag);
+ok('merged: ethnicity filled from the whole-page read', b.ethnicity === 'UNKNOWN', b.ethnicity);
+ok('merged: height', b.height === '73', b.height);
+ok('merged: license number + TX', b.dlNumber === '90044518' && b.dlState === 'TX', b);
+ok('merged: padded ZIP dropped', b.addressCityStateZip === 'KELLER, TX 76199', b.addressCityStateZip);
+ok('parseBest ignores reads that are not this page', TX.parseBest(['hello', CAL_PHOTO]) === null);
+ok('parseBest with one read equals parse', JSON.stringify(TX.parseBest([SR])) === JSON.stringify(s));
+ok('parseBest: the first read wins a conflict',
+    TX.parseBest([SR.replace('Weight:132', 'Weight:140'), SR]).weight === '140');
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed\n');
 process.exit(fail ? 1 : 0);

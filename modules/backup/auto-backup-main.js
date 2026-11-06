@@ -20,6 +20,15 @@
  *     Manual backups are never deleted.
  *   • A backup whose data holds no cases while the previous one did is
  *     refused, so a wiped profile can't rotate the good backups away.
+ *   • Secondary location (optional): every backup — manual or automatic —
+ *     is written once, then copied to the second folder and checked by
+ *     SHA-256. If one folder can't be reached the backup still goes to the
+ *     other one; the failure is recorded and shown, never silent.
+ *   • Besides the cases folder, a backup carries the case data VIPER keeps
+ *     in userData (USERDATA_ITEMS: Snapchat / DataPilot import stores, the
+ *     UC Chat database + photos, the Warrant Author library, the badge
+ *     used on reports, the audit log). Restore puts them back; the audit
+ *     log goes to a side folder so the live hash chain is never replaced.
  */
 
 const DEFAULTS = Object.freeze({
@@ -28,6 +37,8 @@ const DEFAULTS = Object.freeze({
     keep: 4,
     encrypt: false,
     intervalDays: 7,
+    secondaryEnabled: false,
+    secondaryFolder: '',
     lastAutoAt: null,
     lastAutoFile: null,
     lastBackupAt: null,
@@ -35,7 +46,31 @@ const DEFAULTS = Object.freeze({
     lastAttemptAt: null,
     lastError: null,
     lastCaseCount: null,
+    lastSecondaryAt: null,
+    lastSecondaryFile: null,
+    lastSecondaryError: null,
 });
+
+/**
+ * Case data kept in userData (outside the cases folder), stored in the
+ * backup under "userdata/<name>". type:
+ *   dir    — every file below it (".tmp"/".partial" leftovers skipped)
+ *   sqlite — a consistent snapshot of a live database (deps.sqlite[name])
+ *   audit  — audit.log + rotated audit.log.1..5 (restored to a side folder)
+ */
+const USERDATA_ITEMS = Object.freeze([
+    { name: 'snapchat-warrant-store', type: 'dir' },   // full Snapchat warrant imports
+    { name: 'datapilot-store', type: 'dir' },          // full DataPilot imports
+    { name: 'viper-uc.db', type: 'sqlite' },           // UC Chat operations
+    { name: 'uc_avatars', type: 'dir' },
+    { name: 'uc_photos', type: 'dir' },
+    { name: 'warrant-author', type: 'dir' },           // boilerplate library
+    { name: 'branding', type: 'dir' },                 // department badge on reports
+    { name: 'audit', type: 'audit' },
+    { name: 'restored-audit', type: 'dir' },           // audit logs from earlier restores
+]);
+const AUDIT_RE = /^audit\.log(\.\d{1,2})?$/;
+const SKIP_RE = /\.(tmp|partial)$|-backup-tmp-/i;
 
 const DAY = 24 * 60 * 60 * 1000;
 const RETRY_MS = 6 * 60 * 60 * 1000;          // after a failed attempt
@@ -83,7 +118,7 @@ function caseCountOf(data) {
  * every page load.
  */
 function isDue(cfg, now) {
-    if (!cfg || !cfg.enabled || !cfg.folder) return false;
+    if (!cfg || !cfg.enabled || !(cfg.folder || (cfg.secondaryEnabled && cfg.secondaryFolder))) return false;
     const interval = Math.max(1, Number(cfg.intervalDays) || 7) * DAY;
     const last = cfg.lastAutoAt ? Date.parse(cfg.lastAutoAt) : NaN;
     if (!isNaN(last) && now - last < interval) return false;
@@ -109,6 +144,11 @@ function createAutoBackup(deps) {
     const getCasesDir = deps.getCasesDir;
     const getSecurity = deps.getSecurity || (() => null);
     const makeArchiver = deps.archiver || (() => require('archiver'));
+    const crypto = deps.crypto || require('crypto');
+    const userDataDir = deps.userDataDir;
+    const userDataItems = Array.isArray(deps.userDataItems) ? deps.userDataItems : USERDATA_ITEMS;
+    // { 'viper-uc.db': { snapshot: async (dest) => bool, close: () => void } }
+    const sqlite = deps.sqlite || {};
     const configPath = path.join(deps.userDataDir, 'auto-backup.json');
 
     let running = null;               // promise of the backup in progress
@@ -135,6 +175,11 @@ function createAutoBackup(deps) {
         try { return !!folder && fs.statSync(folder).isDirectory(); } catch (_) { return false; }
     }
 
+    function samePlace(a, b) {
+        if (!a || !b) return false;
+        return path.resolve(a).replace(/[\\/]+$/, '').toLowerCase() === path.resolve(b).replace(/[\\/]+$/, '').toLowerCase();
+    }
+
     function getState() {
         const cfg = load();
         const t = now();
@@ -142,26 +187,46 @@ function createAutoBackup(deps) {
             due: isDue(cfg, t),
             nextDueAt: nextDueAt(cfg),
             folderExists: cfg.folder ? folderOk(cfg.folder) : false,
+            secondaryFolderExists: cfg.secondaryFolder ? folderOk(cfg.secondaryFolder) : false,
             running: !!running,
         });
     }
 
-    /** Accepts enabled, folder, keep, encrypt. Anything else is ignored. */
+    /**
+     * Accepts enabled, folder, keep, encrypt, secondaryEnabled,
+     * secondaryFolder. Anything else is ignored.
+     */
     function setConfig(patch) {
         patch = patch || {};
+        const cur = load();
         const out = {};
         if ('folder' in patch) out.folder = String(patch.folder || '').trim();
         if ('keep' in patch) out.keep = clampKeep(patch.keep);
         if ('encrypt' in patch) out.encrypt = patch.encrypt === true;
         if ('enabled' in patch) {
-            const folder = 'folder' in out ? out.folder : load().folder;
+            const folder = 'folder' in out ? out.folder : cur.folder;
             if (patch.enabled === true && !folder) throw new Error('Choose a backup folder first.');
             out.enabled = patch.enabled === true;
             // Turning it on clears an old error so it is tried right away.
             if (out.enabled) { out.lastError = null; out.lastAttemptAt = null; }
         }
         if ('folder' in out && !out.folder && !('enabled' in out)) out.enabled = false;
-        if ('folder' in out && out.folder && out.folder !== load().folder) { out.lastError = null; out.lastAttemptAt = null; }
+        if ('folder' in out && out.folder && out.folder !== cur.folder) { out.lastError = null; out.lastAttemptAt = null; }
+
+        if ('secondaryFolder' in patch) out.secondaryFolder = String(patch.secondaryFolder || '').trim();
+        if ('secondaryEnabled' in patch) {
+            const sf = 'secondaryFolder' in out ? out.secondaryFolder : cur.secondaryFolder;
+            if (patch.secondaryEnabled === true && !sf) throw new Error('Choose a secondary backup folder first.');
+            out.secondaryEnabled = patch.secondaryEnabled === true;
+        }
+        if ('secondaryFolder' in out && !out.secondaryFolder && !('secondaryEnabled' in out)) out.secondaryEnabled = false;
+        const primary = 'folder' in out ? out.folder : cur.folder;
+        const second = 'secondaryFolder' in out ? out.secondaryFolder : cur.secondaryFolder;
+        const secOn = 'secondaryEnabled' in out ? out.secondaryEnabled : cur.secondaryEnabled;
+        if (secOn && samePlace(primary, second)) {
+            throw new Error('The secondary backup folder must be different from the Backup Destination.');
+        }
+        if ('secondaryFolder' in out && out.secondaryFolder !== cur.secondaryFolder) out.lastSecondaryError = null;
         save(out);
         return getState();
     }
@@ -217,7 +282,51 @@ function createAutoBackup(deps) {
         } catch (_) { caseFolders = []; }
         for (const d of caseFolders) await _walk(path.join(casesDir, d.name), 'cases/' + d.name, files);
 
-        const archiver = makeArchiver();
+        // Case data kept in userData. Added raw (never decrypted or
+        // re-encrypted): these files are read back exactly as they were.
+        const userFiles = [];
+        const tmpFiles = [];
+        let userSkipped = 0;
+        if (userDataDir) {
+            for (const it of userDataItems) {
+                const full = path.join(userDataDir, it.name);
+                try {
+                    if (it.type === 'dir') {
+                        const got = [];
+                        await _walk(full, 'userdata/' + it.name, got);
+                        for (const g of got) if (!SKIP_RE.test(g.name)) userFiles.push(g);
+                    } else if (it.type === 'audit') {
+                        let names = [];
+                        try { names = await fs.promises.readdir(userDataDir); } catch (_) {}
+                        for (const n of names.filter(n => AUDIT_RE.test(n)).sort()) {
+                            userFiles.push({ full: path.join(userDataDir, n), name: 'userdata/audit/' + n });
+                        }
+                    } else if (it.type === 'sqlite') {
+                        if (!fs.existsSync(full)) continue;
+                        const snap = sqlite[it.name] && sqlite[it.name].snapshot;
+                        if (typeof snap === 'function') {
+                            // Consistent copy of a live (WAL) database.
+                            const tmp = full + '-backup-tmp-' + now() + '-' + crypto.randomBytes(3).toString('hex');
+                            tmpFiles.push(tmp);
+                            if (await snap(tmp)) userFiles.push({ full: tmp, name: 'userdata/' + it.name });
+                        } else {
+                            userFiles.push({ full, name: 'userdata/' + it.name });
+                            if (fs.existsSync(full + '-wal')) userFiles.push({ full: full + '-wal', name: 'userdata/' + it.name + '-wal' });
+                        }
+                    }
+                } catch (e) {
+                    userSkipped++;
+                    log('userdata skip', it.name, e && e.message);
+                }
+            }
+        }
+
+        let archiver;
+        try { archiver = makeArchiver(); }
+        catch (e) {
+            for (const t of tmpFiles) { try { await fs.promises.unlink(t); } catch (_) {} }
+            throw e;
+        }
         const archive = archiver('zip', { zlib: { level: 6 } });
         const out = fs.createWriteStream(partial);
         const closed = new Promise((res, rej) => { out.on('close', res); out.on('error', rej); });
@@ -237,6 +346,7 @@ function createAutoBackup(deps) {
         });
 
         let skipped = 0;
+        let userCount = 0;
         try {
             await add(Buffer.from(typeof data === 'string' ? data : JSON.stringify(data || {}), 'utf-8'), { name: 'viper_data.json' });
             for (const f of files) {
@@ -255,6 +365,18 @@ function createAutoBackup(deps) {
                     log('skip', f.name, e && e.message);
                 }
             }
+            let userAdded = 0;
+            for (const f of userFiles) {
+                try {
+                    await add(f.full, { name: f.name, store: STORE_EXT.test(f.name) });
+                    userAdded++;
+                } catch (e) {
+                    if (failure) throw failure;
+                    userSkipped++;
+                    log('skip', f.name, e && e.message);
+                }
+            }
+            userCount = userAdded;
             await archive.finalize();
             await closed;
             if (failure) throw failure;
@@ -269,8 +391,109 @@ function createAutoBackup(deps) {
             try { out.destroy(); } catch (_) {}
             try { await fs.promises.unlink(partial); } catch (_) {}
             throw e;
+        } finally {
+            for (const t of tmpFiles) { try { await fs.promises.unlink(t); } catch (_) {} }
         }
-        return { filePath, encrypted: seal, files: files.length - skipped, skipped };
+        return { filePath, encrypted: seal, files: files.length - skipped, skipped, userFiles: userCount, userSkipped };
+    }
+
+    /** SHA-256 of a file, streamed. */
+    function _sha256(file) {
+        return new Promise((res, rej) => {
+            const h = crypto.createHash('sha256');
+            const s = fs.createReadStream(file);
+            s.on('error', rej);
+            s.on('data', c => h.update(c));
+            s.on('end', () => res(h.digest('hex')));
+        });
+    }
+
+    /**
+     * Copy a finished backup into `folder` (same file name), via ".partial",
+     * then check it byte-for-byte by SHA-256 before the rename.
+     */
+    async function copyToSecondary(filePath, folder) {
+        if (!folderOk(folder)) {
+            throw new Error('The secondary backup folder can’t be reached: ' + folder + ' (is the drive connected / cloud folder synced?)');
+        }
+        const dest = path.join(folder, path.basename(filePath));
+        const partial = dest + '.partial';
+        try {
+            const want = await _sha256(filePath);
+            await new Promise((res, rej) => {
+                const r = fs.createReadStream(filePath);
+                const w = fs.createWriteStream(partial);
+                r.on('error', rej); w.on('error', rej);
+                w.on('close', res);
+                r.pipe(w);
+            });
+            const got = await _sha256(partial);
+            if (got !== want) throw new Error('The copy in the secondary folder did not match the backup (checksum differs).');
+            await fs.promises.rename(partial, dest);
+            return { filePath: dest, sha256: want };
+        } catch (e) {
+            try { await fs.promises.unlink(partial); } catch (_) {}
+            throw e;
+        }
+    }
+
+    /**
+     * One backup, every location. Writes to the Backup Destination and copies
+     * to the secondary folder (when on). If the primary can't be reached the
+     * backup is written straight into the secondary folder instead. Throws
+     * only when no copy could be made.
+     * Returns { ok, filePath, encrypted, files, skipped, userFiles,
+     *   userSkipped, primaryError, secondary: null | { filePath, error } }.
+     */
+    async function backupNow({ folder, data, encrypt, kind }) {
+        const cfg = load();
+        kind = kind === 'auto' ? 'auto' : 'manual';
+        const secFolder = cfg.secondaryEnabled && cfg.secondaryFolder && !samePlace(cfg.secondaryFolder, folder)
+            ? cfg.secondaryFolder : null;
+
+        let r = null, primaryError = null;
+        if (folder && folderOk(folder)) {
+            try { r = await writeBackup({ folder, data, encrypt, kind }); }
+            catch (e) {
+                // Locked Field Security fails everywhere — don't retry it.
+                if (/locked/i.test((e && e.message) || '')) throw e;
+                primaryError = (e && e.message) || String(e);
+            }
+        } else {
+            primaryError = folder
+                ? 'The backup folder can’t be reached: ' + folder + ' (is the drive connected?)'
+                : 'No Backup Destination is set.';
+        }
+
+        let secondary = null;
+        if (secFolder) {
+            try {
+                if (r) {
+                    const c = await copyToSecondary(r.filePath, secFolder);
+                    secondary = { filePath: c.filePath, error: null };
+                } else {
+                    if (!folderOk(secFolder)) {
+                        throw new Error('The secondary backup folder can’t be reached: ' + secFolder + ' (is the drive connected / cloud folder synced?)');
+                    }
+                    r = await writeBackup({ folder: secFolder, data, encrypt, kind });
+                    secondary = { filePath: r.filePath, error: null };
+                }
+            } catch (e) {
+                secondary = { filePath: null, error: (e && e.message) || String(e) };
+            }
+        }
+
+        if (!r) throw new Error(primaryError + (secondary && secondary.error ? ' — ' + secondary.error : ''));
+
+        // "Last backup" points at the primary copy when there is one.
+        const mainFile = primaryError ? null : r.filePath;
+        record(mainFile || r.filePath, kind);
+        if (secFolder) {
+            save(secondary && !secondary.error
+                ? { lastSecondaryAt: new Date(now()).toISOString(), lastSecondaryFile: secondary.filePath, lastSecondaryError: null }
+                : { lastSecondaryError: secondary.error });
+        }
+        return Object.assign({ ok: true }, r, { primaryError, secondary });
     }
 
     /** Delete the oldest automatic backups in `folder`, keeping `keep`. */
@@ -312,19 +535,25 @@ function createAutoBackup(deps) {
             const attemptAt = new Date(now()).toISOString();
             save({ lastAttemptAt: attemptAt });
             try {
-                if (!folderOk(cfg.folder)) {
-                    throw new Error('The backup folder can’t be reached: ' + cfg.folder + ' (is the drive connected?)');
+                const secOn = !!(cfg.secondaryEnabled && cfg.secondaryFolder);
+                if (!folderOk(cfg.folder) && !(secOn && folderOk(cfg.secondaryFolder))) {
+                    throw new Error('The backup folder can’t be reached: ' + (cfg.folder || '(none)')
+                        + (secOn ? ' — nor the secondary folder: ' + cfg.secondaryFolder : '')
+                        + ' (is the drive connected?)');
                 }
                 const count = caseCountOf(data);
                 if (count === 0 && Number(cfg.lastCaseCount) > 0) {
                     throw new Error('No cases were found in VIPER, so the automatic backup was skipped to keep your earlier backups safe.');
                 }
-                const r = await writeBackup({ folder: cfg.folder, data, encrypt: cfg.encrypt, kind: 'auto' });
-                record(r.filePath, 'auto');
-                save({ lastError: null, lastCaseCount: count });
-                const removed = await prune(cfg.folder, cfg.keep);
-                log('done', r.filePath, r.files + ' files', removed.length ? 'pruned ' + removed.length : '');
-                return Object.assign({ ok: true, cases: count, pruned: removed.length }, r);
+                const r = await backupNow({ folder: cfg.folder, data, encrypt: cfg.encrypt, kind: 'auto' });
+                // A copy was made; a location that failed is still reported.
+                const warn = [r.primaryError, r.secondary && r.secondary.error].filter(Boolean).join(' — ');
+                save({ lastError: warn || null, lastCaseCount: count });
+                let removed = [];
+                if (!r.primaryError) removed = removed.concat(await prune(cfg.folder, cfg.keep));
+                if (r.secondary && !r.secondary.error) removed = removed.concat(await prune(cfg.secondaryFolder, cfg.keep));
+                log('done', r.filePath, r.files + ' files', removed.length ? 'pruned ' + removed.length : '', warn);
+                return Object.assign({ ok: true, cases: count, pruned: removed.length, warning: warn || null }, r);
             } catch (e) {
                 const msg = (e && e.message) || String(e);
                 save({ lastError: msg });
@@ -372,8 +601,10 @@ function createAutoBackup(deps) {
             if (!folders.some(x => x.k === k)) folders.push({ f: path.resolve(f), k });
         };
         addF(cfg.folder);
+        if (cfg.secondaryFolder) addF(cfg.secondaryFolder);
         if (cfg.lastBackupFile) addF(path.dirname(cfg.lastBackupFile));
         if (cfg.lastAutoFile) addF(path.dirname(cfg.lastAutoFile));
+        if (cfg.lastSecondaryFile) addF(path.dirname(cfg.lastSecondaryFile));
         (Array.isArray(extraFolders) ? extraFolders : []).forEach(addF);
 
         const seen = new Set();
@@ -390,13 +621,141 @@ function createAutoBackup(deps) {
                 try { const d = await _describe(full); if (d) out.push(d); } catch (_) {}
             }
         }
-        for (const lf of [cfg.lastBackupFile, cfg.lastAutoFile]) {
+        for (const lf of [cfg.lastBackupFile, cfg.lastAutoFile, cfg.lastSecondaryFile]) {
             if (!lf || seen.has(String(lf).toLowerCase())) continue;
             seen.add(String(lf).toLowerCase());
             try { const d = await _describe(lf); if (d) out.push(d); } catch (_) {}
         }
         out.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
         return { backups: out, searched: folders.map(x => x.f) };
+    }
+
+    /** base + rel, or null when rel would land outside base (zip-slip). */
+    function _inside(base, rel) {
+        rel = String(rel || '').replace(/\\/g, '/');
+        if (!rel || rel.startsWith('/') || /^[a-z]:/i.test(rel) || rel.split('/').some(p => p === '..')) return null;
+        const root = path.resolve(base);
+        const dest = path.resolve(root, rel);
+        return dest.toLowerCase().startsWith(root.toLowerCase() + path.sep) ? dest : null;
+    }
+
+    async function _writeAtomic(dest, buf) {
+        await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+        const tmp = dest + '.restore-tmp';
+        await fs.promises.writeFile(tmp, buf);
+        try { await fs.promises.rename(tmp, dest); }
+        catch (e) { try { await fs.promises.unlink(tmp); } catch (_) {} throw e; }
+    }
+
+    /**
+     * Restore a .vbak (manual or automatic). Case files go back under the
+     * cases folder (re-encrypted when Field Security is on); userdata/…
+     * entries go back into userData, except the audit log, which lands in
+     * userData/restored-audit/<time>/ so the live hash chain is untouched.
+     * Returns { jsonData, filesRestored, filesReEncrypted, filesPlaintext,
+     *   outerEncrypted, userDataRestored, auditRestoredTo, blocked }.
+     */
+    async function restoreBackup(backupPath) {
+        const AdmZip = deps.AdmZip || require('adm-zip');
+        const security = getSecurity();
+        let raw = await fs.promises.readFile(backupPath);
+
+        const outerEncrypted = !!(security && security.isEncryptedBuffer(raw));
+        if (outerEncrypted) {
+            if (!security.isUnlocked()) {
+                throw new Error(
+                    'This backup file is encrypted (sealed under Field Security). ' +
+                    'Unlock Field Security with the password or recovery key that ' +
+                    'was active when this backup was created, then try again.');
+            }
+            try { raw = security.decryptBuffer(raw); }
+            catch (_) {
+                throw new Error(
+                    'Could not unwrap the encrypted backup envelope — the current ' +
+                    'Field Security key does not match the one used to create this ' +
+                    'backup.  Use the Recovery panel with the original security.json.');
+            }
+        }
+
+        const zip = new AdmZip(raw);
+        const entries = zip.getEntries();
+        const jsonEntry = entries.find(e => e.entryName === 'viper_data.json');
+        if (!jsonEntry) throw new Error('Invalid backup: missing viper_data.json');
+        const jsonData = jsonEntry.getData().toString('utf-8');
+
+        const casesDir = getCasesDir();
+        const reEncrypt = !!(security && security.isEnabled() && security.isUnlocked());
+        let filesRestored = 0, filesReEncrypted = 0, filesPlaintext = 0;
+        let userDataRestored = 0, blocked = 0;
+        let auditDir = null;
+        const sqliteEntries = new Map();      // item name → { main, wal }
+
+        for (const entry of entries) {
+            if (entry.isDirectory) continue;
+            const name = String(entry.entryName).replace(/\\/g, '/');
+
+            if (name.startsWith('cases/')) {
+                const dest = _inside(casesDir, name.slice('cases/'.length));
+                if (!dest) { blocked++; log('restore blocked', name); continue; }
+                let buf = entry.getData();
+                const already = !!(security && security.isEncryptedBuffer(buf));
+                if (reEncrypt && !already) {
+                    try { buf = security.encryptBuffer(buf); filesReEncrypted++; }
+                    catch (e) { log('re-encrypt failed', dest, e && e.message); }
+                } else if (!already) {
+                    filesPlaintext++;
+                }
+                await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+                await fs.promises.writeFile(dest, buf);
+                filesRestored++;
+                continue;
+            }
+
+            if (!name.startsWith('userdata/') || !userDataDir) continue;
+            const rel = name.slice('userdata/'.length);
+            const top = rel.split('/')[0];
+            const item = userDataItems.find(i => i.name === top || (i.type === 'sqlite' && top === i.name + '-wal'));
+            if (!item) { blocked++; log('restore unknown userdata', name); continue; }
+
+            if (item.type === 'audit') {
+                const base = rel.slice(top.length + 1);
+                if (!AUDIT_RE.test(base)) { blocked++; continue; }
+                if (!auditDir) auditDir = path.join(userDataDir, 'restored-audit', fileStamp(new Date(now())));
+                const dest = _inside(auditDir, base);
+                if (!dest) { blocked++; continue; }
+                await _writeAtomic(dest, entry.getData());
+                userDataRestored++;
+            } else if (item.type === 'sqlite') {
+                if (rel !== item.name && rel !== item.name + '-wal') { blocked++; continue; }
+                const s = sqliteEntries.get(item.name) || {};
+                s[rel === item.name ? 'main' : 'wal'] = entry.getData();
+                sqliteEntries.set(item.name, s);
+            } else {
+                const dest = _inside(userDataDir, rel);
+                if (!dest || !dest.toLowerCase().startsWith(path.resolve(userDataDir, top).toLowerCase() + path.sep)) {
+                    blocked++; continue;
+                }
+                await _writeAtomic(dest, entry.getData());
+                userDataRestored++;
+            }
+        }
+
+        // Databases: close the live handle, swap the file, drop stale WAL/SHM.
+        for (const [n, s] of sqliteEntries) {
+            if (!s.main) continue;
+            const dest = path.join(userDataDir, n);
+            try { if (sqlite[n] && typeof sqlite[n].close === 'function') sqlite[n].close(); }
+            catch (e) { log('close failed', n, e && e.message); }
+            for (const ext of ['-wal', '-shm']) { try { await fs.promises.unlink(dest + ext); } catch (_) {} }
+            await _writeAtomic(dest, s.main);
+            userDataRestored++;
+            if (s.wal) { await _writeAtomic(dest + '-wal', s.wal); userDataRestored++; }
+        }
+
+        return {
+            jsonData, filesRestored, filesReEncrypted, filesPlaintext, outerEncrypted,
+            userDataRestored, auditRestoredTo: auditDir, blocked,
+        };
     }
 
     /** Wire the IPC channels. */
@@ -407,7 +766,7 @@ function createAutoBackup(deps) {
         ipcMain.handle('backup-list', (e, args) => listBackups(args && args.folders));
     }
 
-    return { load, save, getState, setConfig, record, writeBackup, prune, runAuto, listBackups, register };
+    return { load, save, getState, setConfig, record, writeBackup, copyToSecondary, backupNow, prune, runAuto, listBackups, restoreBackup, register };
 }
 
-module.exports = { createAutoBackup, isDue, nextDueAt, stampOf, caseCountOf, clampKeep, DEFAULTS, AUTO_RE, ANY_RE };
+module.exports = { createAutoBackup, isDue, nextDueAt, stampOf, caseCountOf, clampKeep, DEFAULTS, AUTO_RE, ANY_RE, USERDATA_ITEMS };

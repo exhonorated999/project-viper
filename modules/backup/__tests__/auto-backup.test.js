@@ -65,6 +65,7 @@ function setup(opts) {
         getSecurity: () => sec,
         now: () => clock.t,
         log: (...a) => logs.push(a.join(' ')),
+        sqlite: opts.sqlite,
     });
     return { root, userData, cases, dest, sec, clock, ab, logs };
 }
@@ -358,6 +359,314 @@ const DATA0 = JSON.stringify({ viperCases: '[]', viperSettings: '{}' });
         ok(/Last automatic backup: .*\(4 days ago\) · Next: .*\(in 3 days\)/.test(s1), 'status with last + next', s1);
         ok(/Next: due now/.test(UI.statusText({ enabled: true, lastAutoAt: new Date(2026, 9, 1).toISOString(), nextDueAt: new Date(2026, 9, 8).toISOString() }, now)), 'status overdue');
         ok(/Backing up now/.test(UI.statusText({ enabled: true, running: true }, now)), 'status running');
+    }
+
+    const sha = f => require('crypto').createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+    const autosIn = d => fs.readdirSync(d).filter(n => M.AUTO_RE.test(n)).sort();
+
+    // ─────────────────────────────────────────────────────────────
+    console.log('\n11. Secondary location — config');
+    {
+        const s = setup();
+        const sec2 = path.join(s.root, 'OneDrive', 'VIPER Backups');
+        fs.mkdirSync(sec2, { recursive: true });
+        eq([s.ab.getState().secondaryEnabled, s.ab.getState().secondaryFolder], [false, ''], 'off by default');
+        try { s.ab.setConfig({ secondaryEnabled: true }); ok(false, 'enable without folder throws'); }
+        catch (e) { ok(/secondary backup folder first/i.test(e.message), 'enable without folder throws', e.message); }
+        s.ab.setConfig({ folder: s.dest });
+        for (const same of [s.dest, s.dest + path.sep, s.dest.toUpperCase()]) {
+            try { s.ab.setConfig({ secondaryFolder: same, secondaryEnabled: true }); ok(false, 'same folder refused: ' + same); }
+            catch (e) { ok(/must be different/i.test(e.message), 'same folder refused: ' + path.basename(same) + (same.endsWith(path.sep) ? ' (trailing slash)' : ''), e.message); }
+        }
+        eq(s.ab.getState().secondaryEnabled, false, 'refused change not saved');
+        const st = s.ab.setConfig({ secondaryFolder: sec2, secondaryEnabled: true });
+        eq([st.secondaryEnabled, st.secondaryFolder, st.secondaryFolderExists], [true, sec2, true], 'secondary on');
+        try { s.ab.setConfig({ folder: sec2 }); ok(false, 'primary moved onto secondary refused'); }
+        catch (e) { ok(/must be different/i.test(e.message), 'primary moved onto secondary refused'); }
+        eq(s.ab.getState().folder, s.dest, 'primary unchanged');
+        s.ab.setConfig({ secondaryEnabled: false });
+        eq([s.ab.getState().secondaryEnabled, s.ab.getState().secondaryFolder], [false, sec2], 'off keeps the folder for next time');
+        s.ab.setConfig({ secondaryEnabled: true });
+        ok(s.ab.getState().secondaryEnabled, 're-enable with remembered folder');
+        s.ab.setConfig({ secondaryFolder: '' });
+        eq(s.ab.getState().secondaryEnabled, false, 'clearing the folder turns it off');
+        ok(M.isDue({ enabled: true, folder: '', secondaryEnabled: true, secondaryFolder: 'Y:\\S' }, T0), 'due with only a secondary folder');
+        ok(!M.isDue({ enabled: true, folder: '', secondaryEnabled: false, secondaryFolder: 'Y:\\S' }, T0), 'not due with a disabled secondary only');
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    console.log('\n12. Secondary location — every backup in both places');
+    {
+        const s = setup();
+        const sec2 = path.join(s.root, 'Second');
+        fs.mkdirSync(sec2);
+        s.ab.setConfig({ folder: s.dest, enabled: true, keep: 2, secondaryFolder: sec2, secondaryEnabled: true });
+        const r = await s.ab.runAuto({ data: DATA2 });
+        ok(r.ok && !r.primaryError && !r.warning, 'weekly ok', r);
+        ok(r.secondary && r.secondary.filePath && !r.secondary.error, 'secondary copy reported', r.secondary);
+        eq(path.dirname(r.filePath), s.dest, 'primary file in Backup Destination');
+        eq([path.dirname(r.secondary.filePath), path.basename(r.secondary.filePath)], [sec2, path.basename(r.filePath)], 'same name in the secondary folder');
+        eq(sha(r.secondary.filePath), sha(r.filePath), 'identical bytes');
+        eq(new AdmZip(r.secondary.filePath).getEntry('viper_data.json').getData().toString(), DATA2, 'secondary copy restorable');
+        eq([fs.readdirSync(s.dest).filter(n => /partial/.test(n)), fs.readdirSync(sec2).filter(n => /partial/.test(n))], [[], []], 'no .partial left');
+        let st = s.ab.getState();
+        eq([st.lastBackupFile, st.lastAutoFile, st.lastSecondaryFile, st.lastSecondaryError, st.lastError], [r.filePath, r.filePath, r.secondary.filePath, null, null], 'state');
+        ok(!!st.lastSecondaryAt, 'lastSecondaryAt set');
+
+        // Manual backup also goes to both, under the manual name.
+        s.clock.t += 3600e3;
+        const m = await s.ab.backupNow({ folder: s.dest, data: DATA2, kind: 'manual' });
+        ok(/^VIPER_Backup_/.test(path.basename(m.filePath)) && m.secondary && fs.existsSync(m.secondary.filePath), 'manual → both', m);
+        st = s.ab.getState();
+        eq([st.lastBackupFile, st.lastAutoFile], [m.filePath, r.filePath], 'manual does not touch lastAutoFile');
+
+        // Rotation applies in both folders; manual backups stay.
+        for (let w = 1; w <= 3; w++) {
+            s.clock.t = T0 + w * 7 * DAY;
+            ok((await s.ab.runAuto({ data: DATA2 })).ok, 'week ' + (w + 1));
+        }
+        eq(autosIn(s.dest), autosIn(sec2), 'same automatic backups in both folders');
+        eq(autosIn(sec2).length, 2, 'secondary pruned to keep');
+        ok(fs.existsSync(m.filePath) && fs.existsSync(m.secondary.filePath), 'manual backups kept in both');
+
+        // Restore list sees both folders.
+        const L = await s.ab.listBackups([]);
+        ok(L.searched.some(f => f.toLowerCase() === sec2.toLowerCase()), 'secondary folder searched', L.searched);
+        eq(L.backups.filter(b => path.dirname(b.path) === sec2).length, 3, 'secondary copies listed');
+
+        // A secondary folder the same as the destination of a one-off manual backup isn't copied onto itself.
+        const self = await s.ab.backupNow({ folder: sec2, data: DATA2, kind: 'manual' });
+        eq(self.secondary, null, 'manual backup made INTO the secondary folder → no self-copy');
+
+        // copyToSecondary on its own.
+        const other = path.join(s.root, 'Other');
+        fs.mkdirSync(other);
+        const c = await s.ab.copyToSecondary(m.filePath, other);
+        ok(fs.existsSync(c.filePath) && c.sha256 === sha(m.filePath), 'copyToSecondary copies + returns the checksum');
+        await throwsAsync(() => s.ab.copyToSecondary(m.filePath, path.join(s.root, 'Nope')), /can’t be reached/, 'copyToSecondary to a missing folder throws');
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    console.log('\n13. Secondary location — one place unreachable');
+    {
+        // Primary unplugged → still backed up to the secondary.
+        const a = setup();
+        const usb = path.join(a.root, 'USB'); fs.mkdirSync(usb);
+        const sec2 = path.join(a.root, 'Second'); fs.mkdirSync(sec2);
+        a.ab.setConfig({ folder: usb, enabled: true, secondaryFolder: sec2, secondaryEnabled: true });
+        fs.rmdirSync(usb);
+        const ra = await a.ab.runAuto({ data: DATA2 });
+        ok(ra.ok, 'primary missing → still ok', ra);
+        eq(path.dirname(ra.filePath || ''), sec2, 'written straight into the secondary folder');
+        ok(/can’t be reached/.test(ra.primaryError || '') && /can’t be reached/.test(ra.warning || ''), 'primary failure reported', ra);
+        let st = a.ab.getState();
+        eq([st.lastAutoFile, st.lastSecondaryFile, st.lastError === ra.warning, st.due], [ra.filePath, ra.filePath, true, false], 'state: backed up, warning kept, not due');
+        eq(autosIn(sec2).length, 1, 'one file in secondary');
+
+        // Secondary unplugged → primary only, warning.
+        const b = setup();
+        const usb2 = path.join(b.root, 'USB2'); fs.mkdirSync(usb2);
+        b.ab.setConfig({ folder: b.dest, enabled: true, secondaryFolder: usb2, secondaryEnabled: true });
+        fs.rmdirSync(usb2);
+        eq(b.ab.getState().secondaryFolderExists, false, 'state shows secondary missing');
+        const rb = await b.ab.runAuto({ data: DATA2 });
+        ok(rb.ok && path.dirname(rb.filePath) === b.dest, 'secondary missing → primary ok', rb);
+        ok(rb.secondary && /secondary backup folder can’t be reached/.test(rb.secondary.error || ''), 'secondary error reported', rb.secondary);
+        st = b.ab.getState();
+        ok(/secondary/.test(st.lastSecondaryError || '') && st.lastSecondaryFile === null, 'lastSecondaryError recorded', st);
+        // Back again → error cleared on next success.
+        fs.mkdirSync(usb2);
+        b.clock.t += 7 * DAY;
+        const rb2 = await b.ab.runAuto({ data: DATA2 });
+        ok(rb2.ok && !rb2.warning && fs.existsSync(rb2.secondary.filePath), 'drive back → copied', rb2);
+        eq([b.ab.getState().lastSecondaryError, b.ab.getState().lastError], [null, null], 'errors cleared');
+
+        // Both gone → failure, retry later.
+        const c = setup();
+        const u1 = path.join(c.root, 'U1'); const u2 = path.join(c.root, 'U2');
+        fs.mkdirSync(u1); fs.mkdirSync(u2);
+        c.ab.setConfig({ folder: u1, enabled: true, secondaryFolder: u2, secondaryEnabled: true });
+        fs.rmdirSync(u1); fs.rmdirSync(u2);
+        const rc = await c.ab.runAuto({ data: DATA2 });
+        ok(!rc.ok && /U1/.test(rc.error) && /U2/.test(rc.error), 'both missing → error naming both', rc);
+        await throwsAsync(() => c.ab.backupNow({ folder: u1, data: DATA2, kind: 'manual' }), /can’t be reached/, 'manual with both missing throws');
+
+        // Locked: nothing anywhere.
+        const l = setup();
+        const s2 = path.join(l.root, 'Second'); fs.mkdirSync(s2);
+        l.ab.setConfig({ folder: l.dest, enabled: true, secondaryFolder: s2, secondaryEnabled: true });
+        l.sec.unlocked = false;
+        const rl = await l.ab.runAuto({ data: DATA2 });
+        ok(!rl.ok && /locked/i.test(rl.error), 'locked → error', rl);
+        eq([fs.readdirSync(l.dest), fs.readdirSync(s2)], [[], []], 'nothing written in either folder');
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    console.log('\n14. Case data kept in userData');
+    function seedUserData(ud) {
+        const w = (rel, body) => { const f = path.join(ud, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body); };
+        w('snapchat-warrant-store/snapchat_1.json', '{"SYNTHETIC":"snap"}');
+        w('datapilot-store/datapilot_1.json', '{"SYNTHETIC":"dp"}');
+        w('datapilot-store/datapilot_2.json.tmp', 'half written');
+        w('uc_photos/3/face.synthetic.jpg', Buffer.alloc(300, 9));
+        w('uc_avatars/p1.synthetic.png', Buffer.alloc(50, 3));
+        w('warrant-author/library.json', '{"SYNTHETIC":"lib"}');
+        w('branding/badge.png', Buffer.alloc(80, 1));
+        w('audit.log', '{"seq":1,"SYNTHETIC":true}\n');
+        w('audit.log.1', '{"seq":0}\n');
+        w('audit.logger.txt', 'not an audit file');
+        w('security.json', '{"SYNTHETIC":"never backed up"}');
+        w('viper-uc.db', 'RAW-DB');
+        w('viper-uc.db-wal', 'RAW-WAL');
+        w('models/big.bin', 'not backed up');
+    }
+    const UD_ENTRIES = [
+        'userdata/audit/audit.log', 'userdata/audit/audit.log.1',
+        'userdata/branding/badge.png',
+        'userdata/datapilot-store/datapilot_1.json',
+        'userdata/snapchat-warrant-store/snapchat_1.json',
+        'userdata/uc_avatars/p1.synthetic.png',
+        'userdata/uc_photos/3/face.synthetic.jpg',
+        'userdata/viper-uc.db',
+        'userdata/warrant-author/library.json',
+    ];
+    let udBackup = null;
+    {
+        const snaps = [];
+        const s = setup({ sqlite: { 'viper-uc.db': { snapshot: async (dest) => { snaps.push(dest); fs.writeFileSync(dest, 'SNAPSHOT-DB'); return true; } } } });
+        seedUserData(s.userData);
+        s.ab.setConfig({ folder: s.dest, enabled: true });
+        const r = await s.ab.runAuto({ data: DATA2 });
+        ok(r.ok, 'backup ok', r);
+        const zip = new AdmZip(r.filePath);
+        const ud = zip.getEntries().map(e => e.entryName).filter(n => n.startsWith('userdata/')).sort();
+        eq(ud, UD_ENTRIES, 'userdata entries (no .tmp, security.json, models, look-alike files)');
+        eq([r.userFiles, r.userSkipped], [UD_ENTRIES.length, 0], 'userdata counts');
+        eq(zip.getEntry('userdata/viper-uc.db').getData().toString(), 'SNAPSHOT-DB', 'database from the consistent snapshot');
+        ok(!zip.getEntry('userdata/viper-uc.db-wal'), 'no raw WAL when a snapshot is used');
+        eq(zip.getEntry('userdata/datapilot-store/datapilot_1.json').getData().toString(), '{"SYNTHETIC":"dp"}', 'DataPilot store intact');
+        ok(snaps.length === 1 && !fs.existsSync(snaps[0]), 'snapshot temp file removed');
+        eq(fs.readdirSync(s.userData).filter(n => /backup-tmp/.test(n)), [], 'no temp files left in userData');
+        eq(zip.getEntry('cases/26-000123/notes.synthetic.txt').getData().toString(), 'SYNTHETIC note text', 'cases still there');
+        udBackup = { file: r.filePath, s };
+
+        // Without a snapshot function: raw file + WAL.
+        const n = setup();
+        seedUserData(n.userData);
+        n.ab.setConfig({ folder: n.dest, enabled: true });
+        const rn = await n.ab.runAuto({ data: DATA2 });
+        const zn = new AdmZip(rn.filePath);
+        eq([zn.getEntry('userdata/viper-uc.db').getData().toString(), zn.getEntry('userdata/viper-uc.db-wal').getData().toString()], ['RAW-DB', 'RAW-WAL'], 'raw db + WAL fallback');
+
+        // Snapshot says "no database" → left out; snapshot throws → skipped, backup still made.
+        const f = setup({ sqlite: { 'viper-uc.db': { snapshot: async () => false } } });
+        seedUserData(f.userData);
+        f.ab.setConfig({ folder: f.dest, enabled: true });
+        const rf = await f.ab.runAuto({ data: DATA2 });
+        ok(rf.ok && !new AdmZip(rf.filePath).getEntry('userdata/viper-uc.db'), 'snapshot false → not included');
+        const t = setup({ sqlite: { 'viper-uc.db': { snapshot: async () => { throw new Error('SQLITE_BUSY'); } } } });
+        seedUserData(t.userData);
+        t.ab.setConfig({ folder: t.dest, enabled: true });
+        const rt = await t.ab.runAuto({ data: DATA2 });
+        ok(rt.ok && rt.userSkipped === 1 && !new AdmZip(rt.filePath).getEntry('userdata/viper-uc.db'), 'snapshot error → skipped, backup still made', rt);
+        eq(fs.readdirSync(t.userData).filter(n => /backup-tmp/.test(n)), [], 'temp removed after a snapshot error');
+
+        // No database at all → nothing, no error.
+        const e = setup({ sqlite: { 'viper-uc.db': { snapshot: async () => { throw new Error('should not be called'); } } } });
+        e.ab.setConfig({ folder: e.dest, enabled: true });
+        const re = await e.ab.runAuto({ data: DATA2 });
+        eq([re.ok, re.userFiles, re.userSkipped], [true, 0, 0], 'empty userData → nothing extra');
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    console.log('\n15. Restore');
+    {
+        // Onto a fresh install (new userData, empty cases), Field Security on.
+        let closed = 0;
+        const d = setup({ sqlite: { 'viper-uc.db': { close: () => { closed++; } } } });
+        fs.rmSync(path.join(d.cases, '26-000123'), { recursive: true, force: true });
+        fs.writeFileSync(path.join(d.userData, 'audit.log'), '{"seq":99,"LIVE":true}\n');
+        fs.writeFileSync(path.join(d.userData, 'viper-uc.db'), 'OLD-DB');
+        fs.writeFileSync(path.join(d.userData, 'viper-uc.db-wal'), 'STALE-WAL');
+        fs.writeFileSync(path.join(d.userData, 'viper-uc.db-shm'), 'STALE-SHM');
+        const res = await d.ab.restoreBackup(udBackup.file);
+        eq(res.jsonData, DATA2, 'jsonData returned');
+        eq([res.filesRestored, res.filesReEncrypted, res.filesPlaintext, res.outerEncrypted, res.blocked], [3, 3, 0, false, 0], 'case file counts');
+        const note = fs.readFileSync(path.join(d.cases, '26-000123', 'notes.synthetic.txt'));
+        ok(d.sec.isEncryptedBuffer(note) && d.sec.decryptBuffer(note).toString() === 'SYNTHETIC note text', 'case file re-encrypted under Field Security');
+        eq(fs.readFileSync(path.join(d.userData, 'datapilot-store', 'datapilot_1.json'), 'utf8'), '{"SYNTHETIC":"dp"}', 'DataPilot store restored (raw)');
+        eq(fs.readFileSync(path.join(d.userData, 'snapchat-warrant-store', 'snapchat_1.json'), 'utf8'), '{"SYNTHETIC":"snap"}', 'Snapchat store restored');
+        eq(fs.readFileSync(path.join(d.userData, 'uc_photos', '3', 'face.synthetic.jpg')).length, 300, 'UC photo restored');
+        eq(fs.readFileSync(path.join(d.userData, 'warrant-author', 'library.json'), 'utf8'), '{"SYNTHETIC":"lib"}', 'Warrant Author library restored');
+        eq(fs.readFileSync(path.join(d.userData, 'viper-uc.db'), 'utf8'), 'SNAPSHOT-DB', 'database replaced');
+        ok(!fs.existsSync(path.join(d.userData, 'viper-uc.db-wal')) && !fs.existsSync(path.join(d.userData, 'viper-uc.db-shm')), 'stale WAL/SHM removed');
+        eq(closed, 1, 'live database closed first');
+        eq(fs.readFileSync(path.join(d.userData, 'audit.log'), 'utf8'), '{"seq":99,"LIVE":true}\n', 'live audit log untouched');
+        ok(res.auditRestoredTo && res.auditRestoredTo.startsWith(path.join(d.userData, 'restored-audit')), 'audit to side folder', res.auditRestoredTo);
+        eq(fs.readdirSync(res.auditRestoredTo).sort(), ['audit.log', 'audit.log.1'], 'both audit files in side folder');
+        eq(res.userDataRestored, UD_ENTRIES.length, 'userDataRestored count');
+        eq(fs.readdirSync(d.userData).filter(n => /restore-tmp/.test(n)), [], 'no restore temp files');
+
+        // The side folder is carried by later backups.
+        d.ab.setConfig({ folder: d.dest, enabled: true });
+        const again = await d.ab.runAuto({ data: DATA2 });
+        ok(new AdmZip(again.filePath).getEntries().some(e => /^userdata\/restored-audit\/.+\/audit\.log$/.test(e.entryName)), 'restored audit kept in the next backup');
+
+        // Encrypted outer file.
+        const e = setup();
+        e.ab.setConfig({ folder: e.dest, enabled: true, encrypt: true });
+        const re = await e.ab.runAuto({ data: DATA2 });
+        const er = await e.ab.restoreBackup(re.filePath);
+        ok(er.outerEncrypted && er.jsonData === DATA2, 'sealed backup restores when unlocked');
+        e.sec.unlocked = false;
+        await throwsAsync(() => e.ab.restoreBackup(re.filePath), /encrypted \(sealed/, 'sealed backup while locked → clear error');
+
+        // Plain restore with no Field Security keeps files plain.
+        const p = setup({ security: null });
+        const rp = await p.ab.restoreBackup(udBackup.file);
+        eq([rp.filesReEncrypted, rp.filesPlaintext], [0, 3], 'no security → plaintext restore');
+
+        // Not a VIPER backup.
+        const bad = path.join(d.root, 'not-viper.vbak');
+        const bz = new AdmZip(); bz.addFile('readme.txt', Buffer.from('x')); bz.writeZip(bad);
+        await throwsAsync(() => d.ab.restoreBackup(bad), /missing viper_data\.json/, 'missing viper_data.json → error');
+
+        // Hostile entry names never leave their folder.
+        const h = setup();
+        const hz = new AdmZip();
+        hz.addFile('viper_data.json', Buffer.from(DATA0));
+        hz.addFile('cases/26-1/ok.synthetic.txt', Buffer.from('fine'));
+        const evil = ['cases/../escape1.txt', 'userdata/../escape2.txt', 'userdata/datapilot-store/../../escape3.txt',
+            'userdata/unknown-store/x.txt', 'userdata/audit/../../escape4.txt', 'userdata/audit/notes.txt', 'userdata/viper-uc.db/x'];
+        // adm-zip tidies "../" on add, so write "QQ" and patch the bytes to
+        // ".." afterwards (same length; CRCs cover data, not names).
+        for (const n of evil) hz.addFile(n.replace(/\.\./g, 'QQ'), Buffer.from('EVIL'));
+        const hostile = path.join(h.root, 'hostile.vbak');
+        fs.writeFileSync(hostile, Buffer.from(hz.toBuffer().toString('latin1').replace(/QQ/g, '..'), 'latin1'));
+        const names = new AdmZip(hostile).getEntries().map(x => x.entryName);
+        ok(evil.every(n => names.includes(n)), 'hostile names kept as written', names);
+        const rh = await h.ab.restoreBackup(hostile);
+        const leaked = ['escape1.txt', 'escape2.txt', 'escape3.txt', 'escape4.txt'].filter(n =>
+            fs.existsSync(path.join(h.root, n)) || fs.existsSync(path.join(h.userData, n)) || fs.existsSync(path.join(h.cases, n)) || fs.existsSync(path.join(path.dirname(h.root), n)));
+        eq(leaked, [], 'no file written outside its folder');
+        ok(!fs.existsSync(path.join(h.userData, 'unknown-store')), 'unknown userdata folder not created');
+        eq(fs.readFileSync(path.join(h.cases, '26-1', 'ok.synthetic.txt'), 'utf8').length > 0, true, 'normal entry restored');
+        eq(rh.blocked, evil.length, 'every hostile entry blocked');
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    console.log('\n16. Renderer — extra keys + secondary status');
+    {
+        const store = { _k: ['viperCases', 'pendingRmsImport_7', 'traceSearchAuditLog', 'genlogsActivityLog', 'otherApp'],
+            _v: { viperCases: '[1]', pendingRmsImport_7: '{}', traceSearchAuditLog: '[]', genlogsActivityLog: '[]', otherApp: 'x' } };
+        const ls = { get length() { return store._k.length; }, key: i => store._k[i], getItem: k => store._v[k] };
+        eq(Object.keys(UI.collect(ls, [])).sort(), ['genlogsActivityLog', 'pendingRmsImport_7', 'traceSearchAuditLog', 'viperCases'], 'pending RMS import + tool logs included');
+        const now = new Date(2026, 10, 6, 12, 0, 0).getTime();
+        eq(UI.secondaryText({ secondaryEnabled: false, secondaryFolder: 'X' }, now), '', 'off → empty');
+        ok(/No copy yet/.test(UI.secondaryText({ secondaryEnabled: true, secondaryFolder: 'X', secondaryFolderExists: true }, now)), 'before first copy');
+        ok(/Last copy: .*\(yesterday\)/.test(UI.secondaryText({ secondaryEnabled: true, secondaryFolder: 'X', secondaryFolderExists: true, lastSecondaryAt: new Date(2026, 10, 5, 9).toISOString() }, now)), 'last copy');
+        ok(/^Last copy failed: nope/.test(UI.secondaryText({ secondaryEnabled: true, secondaryFolder: 'X', lastSecondaryError: 'nope' }, now)), 'failure shown');
+        ok(/not reachable/.test(UI.secondaryText({ secondaryEnabled: true, secondaryFolder: 'X', secondaryFolderExists: false }, now)), 'unreachable shown');
     }
 
     console.log('\nauto-backup: ' + pass + ' passed, ' + fail + ' failed');

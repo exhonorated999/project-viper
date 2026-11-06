@@ -3939,183 +3939,19 @@ ipcMain.handle('restore-backup', async (event, { backupPath }) => {
 
 // --- Full ZIP Backup (localStorage + case files) ---
 ipcMain.handle('create-backup-zip', async (event, { backupPath, data, encrypt }) => {
-  // v3.8.7 redesign — backups now default to a fully PLAINTEXT shape so
-  // they survive a Field Security reset.  The old behavior (encrypted
-  // outer envelope + raw VIPENC inner files) made a backup useless if
-  // the user later disabled+re-enabled security or lost their key,
-  // because the master key chain that unlocked the .vbak was the same
-  // one needed to read the case files inside it.
-  //
-  // New rules:
-  //   • Every inner file is added DECRYPTED.  If Field Security is
-  //     locked we refuse rather than ship VIPENC bytes the restorer
-  //     can't unwrap.
-  //   • Outer envelope is plaintext unless the caller explicitly opts
-  //     in with encrypt:true.  Even then, inner files are still
-  //     plaintext — only one layer of crypto, not two.
-  //   • Restore re-applies VIPENC on the way back to disk if Field
-  //     Security is enabled+unlocked at restore time, so cases land in
-  //     the right shape for the current install regardless of how the
-  //     backup was sealed.
-  const AdmZip = require('adm-zip');
-  const zip = new AdmZip();
-  const wantEncrypt = encrypt === true;       // default: plaintext outer
-
-  // Refuse to back up while encrypted-but-locked.  We can't decrypt
-  // the inner files without the master key, and shipping VIPENC bytes
-  // labelled as a plain backup would lie to the user.
-  if (security && security.isEnabled() && !security.isUnlocked()) {
-    throw new Error('Field Security is locked — unlock before creating a backup');
-  }
-  const canDecryptInner = !!(security && security.isUnlocked());
-
-  // 1. Add localStorage data as JSON
-  const jsonBuf = Buffer.from(data, 'utf-8');
-  zip.addFile('viper_data.json', jsonBuf);
-
-  // 2. Add all case folders from casesDir, decrypting on the fly when
-  //    Field Security is on.  Read + decrypt + add buffer instead of
-  //    addLocalFile so we never ship VIPENC bytes inside the ZIP.
-  const addDirRecursive = (dirPath, zipPrefix) => {
-    if (!fs.existsSync(dirPath)) return;
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        addDirRecursive(fullPath, zipPrefix + '/' + entry.name);
-      } else if (entry.isFile()) {
-        try {
-          let buf = fs.readFileSync(fullPath);
-          if (canDecryptInner && security.isEncryptedBuffer(buf)) {
-            buf = security.decryptBuffer(buf);
-          }
-          zip.addFile(zipPrefix + '/' + entry.name, buf);
-        } catch (e) {
-          // Skip unreadable files; surface in the return payload so
-          // the renderer can warn the user.  Don't abort — partial
-          // backup is better than no backup.
-          console.error('[backup] skip', fullPath, e.message);
-        }
-      }
-    }
-  };
-
-  if (fs.existsSync(casesDir)) {
-    const caseFolders = fs.readdirSync(casesDir, { withFileTypes: true })
-      .filter(d => d.isDirectory());
-    for (const folder of caseFolders) {
-      addDirRecursive(path.join(casesDir, folder.name), 'cases/' + folder.name);
-    }
-  }
-
-  // 3. Write ZIP file
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const filePath = path.join(backupPath, `VIPER_Backup_${timestamp}.vbak`);
-
-  if (wantEncrypt && security && security.isEnabled() && security.isUnlocked()) {
-    // Opt-in: seal the (already-plaintext-internally) ZIP under VIPENC.
-    const zipBuf = zip.toBuffer();
-    fs.writeFileSync(filePath, security.encryptBuffer(zipBuf));
-  } else {
-    // Default path: portable plaintext ZIP — restorable on any install,
-    // even after disable+re-enable cycles or key loss.
-    zip.writeZip(filePath);
-  }
-
-  // Remember it so Restore can offer it without a file search.
-  try { _autoBackup.record(filePath, 'manual'); } catch (e) { console.error('[backup] record', e.message); }
-
-  return { filePath, encrypted: wantEncrypt };
+  // Same writer as the automatic backup (modules/backup/auto-backup-main.js):
+  // streamed, inner files DECRYPTED (restorable after a Field Security
+  // reset; encrypt:true seals only the outer file), plus the case data kept
+  // in userData, then copied to the secondary backup folder when that is on.
+  // Refuses while Field Security is locked. Remembers the file for Restore.
+  return _autoBackup.backupNow({ folder: backupPath, data, encrypt: encrypt === true, kind: 'manual' });
 });
 
 ipcMain.handle('restore-backup-zip', async (event, { backupPath }) => {
-  const AdmZip = require('adm-zip');
-  let raw = fs.readFileSync(backupPath);
-
-  // v3.8.7: Detect an encrypted outer envelope BEFORE trying to parse
-  // as a ZIP.  Surfaces a friendly error when the user disabled
-  // security and is trying to restore an old encrypted backup, instead
-  // of "Invalid backup: not a ZIP" further down the line.
-  const outerEncrypted = !!(security && security.isEncryptedBuffer(raw));
-  if (outerEncrypted) {
-    if (!security || !security.isUnlocked()) {
-      throw new Error(
-        'This backup file is encrypted (sealed under Field Security). ' +
-        'Unlock Field Security with the password or recovery key that ' +
-        'was active when this backup was created, then try again.'
-      );
-    }
-    try {
-      raw = security.decryptBuffer(raw);
-    } catch (e) {
-      throw new Error(
-        'Could not unwrap the encrypted backup envelope — the current ' +
-        'Field Security key does not match the one used to create this ' +
-        'backup.  Use the Recovery panel with the original security.json.'
-      );
-    }
-  }
-
-  const zip = new AdmZip(raw);
-  const entries = zip.getEntries();
-
-  // 1. Extract localStorage JSON
-  const jsonEntry = entries.find(e => e.entryName === 'viper_data.json');
-  if (!jsonEntry) throw new Error('Invalid backup: missing viper_data.json');
-  const jsonData = jsonEntry.getData().toString('utf-8');
-
-  // 2. Extract case files to casesDir.  v3.8.7: if Field Security is
-  //    currently enabled+unlocked, re-encrypt plaintext inner files on
-  //    the way back to disk so they land in VIPENC format consistent
-  //    with the current install — this is what makes plaintext backups
-  //    portable across reset cycles.  If a file in the ZIP is already
-  //    VIPENC (legacy encrypted-inner backup), we leave it as-is —
-  //    SecurityManager will auto-decrypt on read with the current key.
-  const reEncryptOnRestore =
-    !!(security && security.isEnabled() && security.isUnlocked());
-
-  let filesRestored = 0;
-  let filesReEncrypted = 0;
-  let filesPlaintext = 0;
-  for (const entry of entries) {
-    if (entry.entryName.startsWith('cases/') && !entry.isDirectory) {
-      // cases/CASENUMBER/Evidence/file.jpg → casesDir/CASENUMBER/Evidence/file.jpg
-      const relativePath = entry.entryName.slice('cases/'.length);
-      const destPath = path.join(casesDir, relativePath);
-      const destDir = path.dirname(destPath);
-      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-
-      let buf = entry.getData();
-      const alreadyEncrypted = security && security.isEncryptedBuffer(buf);
-
-      if (reEncryptOnRestore && !alreadyEncrypted) {
-        try {
-          buf = security.encryptBuffer(buf);
-          filesReEncrypted++;
-        } catch (e) {
-          console.error('[restore] re-encrypt failed', destPath, e.message);
-        }
-      } else if (alreadyEncrypted) {
-        // Pre-3.8.7 backup with VIPENC inner files.  Leave as-is; works
-        // iff current masterKey matches the one used at backup time.
-        // If not, the file will appear locked on read — handled by
-        // existing locked-read UX.
-      } else {
-        filesPlaintext++;
-      }
-
-      fs.writeFileSync(destPath, buf);
-      filesRestored++;
-    }
-  }
-
-  return {
-    jsonData,
-    filesRestored,
-    filesReEncrypted,
-    filesPlaintext,
-    outerEncrypted,
-  };
+  // modules/backup/auto-backup-main.js restoreBackup: case files (re-encrypted
+  // when Field Security is on), userData case stores, UC Chat DB, audit log
+  // to a side folder. Entries that would land outside their folder are refused.
+  return _autoBackup.restoreBackup(backupPath);
 });
 
 ipcMain.handle('select-backup-file', async () => {
@@ -4138,6 +3974,14 @@ const _autoBackup = require('./modules/backup/auto-backup-main.js').createAutoBa
   userDataDir: app.getPath('userData'),
   getCasesDir: () => casesDir,
   getSecurity: () => security,
+  // Consistent snapshot of the live UC Chat database; closed before a
+  // restore swaps the file (reopens on next use).
+  sqlite: {
+    'viper-uc.db': {
+      snapshot: (dest) => require('./modules/uc-chat/uc-chat-db.js').snapshotTo(dest),
+      close: () => require('./modules/uc-chat/uc-chat-db.js').closeDb(),
+    },
+  },
 });
 _autoBackup.register(ipcMain);
 

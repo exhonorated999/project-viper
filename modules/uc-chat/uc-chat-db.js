@@ -166,4 +166,22 @@ function getDb() {
   return _db;
 }
 
-module.exports = { getDb, getAvatarsDir, getPhotosRoot };
+/**
+ * Consistent copy of the live database into `dest` (for backups). Uses the
+ * SQLite online backup API, so the WAL is folded in. False when there is
+ * no database yet.
+ */
+async function snapshotTo(dest) {
+  const dbPath = path.join(app.getPath('userData'), 'viper-uc.db');
+  if (!_db && !fs.existsSync(dbPath)) return false;
+  await getDb().backup(dest);
+  return true;
+}
+
+/** Close the handle (before a restore swaps the file). Reopens on next use. */
+function closeDb() {
+  if (!_db) return;
+  try { _db.close(); } finally { _db = null; }
+}
+
+module.exports = { getDb, getAvatarsDir, getPhotosRoot, snapshotTo, closeDb };

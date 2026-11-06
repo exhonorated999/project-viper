@@ -21,10 +21,17 @@
     const START_DELAY = 45 * 1000;
     const CHECK_EVERY = 30 * 60 * 1000;
 
+    /**
+     * Keys outside the "viper…" / case-store families that still hold case
+     * work: an RMS import waiting for its case page, and the activity logs
+     * of the trace-search and general-logs tools.
+     */
+    const EXTRA_PREFIXES = Object.freeze(['pendingRmsImport_', 'traceSearchAuditLog', 'genlogsActivityLog']);
+
     /** Same key selection as Settings › Create Backup. */
     function collect(storage, prefixes2) {
         const out = {};
-        const pre = Array.isArray(prefixes2) ? prefixes2 : [];
+        const pre = (Array.isArray(prefixes2) ? prefixes2 : []).concat(EXTRA_PREFIXES);
         for (let i = 0; i < storage.length; i++) {
             const key = storage.key(i);
             if (key == null) continue;
@@ -80,6 +87,20 @@
         return parts.join(' · ');
     }
 
+    /** Status line for the secondary backup folder. */
+    function secondaryText(st, now) {
+        if (!st || !st.secondaryEnabled || !st.secondaryFolder) return '';
+        if (st.lastSecondaryError) return 'Last copy failed: ' + st.lastSecondaryError;
+        const parts = [];
+        if (st.secondaryFolderExists === false) parts.push('Folder not reachable right now — backups still go to the Backup Destination.');
+        if (st.lastSecondaryAt) {
+            parts.push('Last copy: ' + new Date(st.lastSecondaryAt).toLocaleString() + ' (' + relDays(st.lastSecondaryAt, now) + ')');
+        } else {
+            parts.push('No copy yet — the next backup (manual or automatic) is saved here too.');
+        }
+        return parts.join(' · ');
+    }
+
     function toast(msg, type, ms) {
         const w = typeof window !== 'undefined' ? window : {};
         if (typeof w.viperToast === 'function') return w.viperToast(esc(msg), type, ms);
@@ -107,7 +128,12 @@
                 try { w.localStorage.setItem('viperLastBackupDate', new Date().toISOString()); } catch (_) {}
                 if (!opts.quiet) {
                     toast('Weekly backup saved — ' + r.cases + ' case' + (r.cases === 1 ? '' : 's') +
-                        (r.skipped ? ' (' + r.skipped + ' file' + (r.skipped === 1 ? '' : 's') + ' could not be read)' : '') + '.', 'success', 5000);
+                        (r.skipped ? ' (' + r.skipped + ' file' + (r.skipped === 1 ? '' : 's') + ' could not be read)' : '') +
+                        (r.secondary && !r.secondary.error && !r.primaryError ? ', copied to the secondary folder' : '') + '.', 'success', 5000);
+                }
+                // Saved, but one of the two places failed: say which.
+                if (r.warning) {
+                    toast('Backup saved, but not everywhere: ' + r.warning + ' (Settings › Backup & Restore)', 'warning', 10000);
                 }
             } else if (r && r.error) {
                 // Once per page session per message; main retries in 6 hours.
@@ -138,5 +164,5 @@
 
     if (typeof window !== 'undefined' && typeof document !== 'undefined') boot();
 
-    return { collect, check, boot, statusText, relDays, fmtSize, esc, START_DELAY, CHECK_EVERY };
+    return { collect, check, boot, statusText, secondaryText, relDays, fmtSize, esc, EXTRA_PREFIXES, START_DELAY, CHECK_EVERY };
 });

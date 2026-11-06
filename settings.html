@@ -3611,6 +3611,32 @@
                         </div>
                     </div>
 
+                    <!-- Secondary backup location -->
+                    <div class="mb-6 p-3 bg-viper-dark/60 border border-gray-700/50 rounded-lg">
+                        <label class="flex items-start gap-3 cursor-pointer select-none">
+                            <input type="checkbox" id="secondaryBackupToggle" onchange="toggleSecondaryBackup(this.checked)" class="mt-0.5 w-4 h-4 accent-viper-cyan cursor-pointer">
+                            <div class="flex-1">
+                                <div class="text-sm text-gray-200 font-medium">Add secondary backup</div>
+                                <div class="text-[11px] text-gray-500 leading-relaxed mt-0.5">
+                                    Every backup — the ones you create and the automatic weekly ones — is also saved to a second folder, for example an external drive or a OneDrive / network folder.
+                                    Each copy is checked against the original. If one folder can’t be reached, the backup still goes to the other and VIPER tells you.
+                                </div>
+                            </div>
+                        </label>
+                        <div id="secondaryBackupRow" class="hidden mt-3">
+                            <div class="flex gap-2">
+                                <input type="text" id="secondaryBackupPath" readonly
+                                    class="flex-1 px-4 py-2 bg-viper-dark border border-gray-600 rounded-lg focus:outline-none text-white"
+                                    placeholder="Select secondary backup folder...">
+                                <button type="button" onclick="browseSecondaryBackup()"
+                                    class="px-6 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">
+                                    Browse
+                                </button>
+                            </div>
+                            <div id="secondaryBackupStatus" class="mt-2 text-xs text-gray-400"></div>
+                        </div>
+                    </div>
+
                     <!-- Backup Progress -->
                     <div id="backupProgress" class="hidden mb-6">
                         <div class="bg-viper-dark rounded-lg p-4">
@@ -3668,7 +3694,7 @@
                             <div class="flex-1">
                                 <div id="autoBackupLabel" class="text-sm text-gray-200 font-medium">Automatic weekly backup — Off</div>
                                 <div class="text-[11px] text-gray-500 leading-relaxed mt-0.5">
-                                    Once a week VIPER backs up every case, its files and your settings to the Backup Destination above, in the background while you work.
+                                    Once a week VIPER backs up every case, its files and your settings to the Backup Destination above (and the secondary folder, when that is on), in the background while you work.
                                     If VIPER was closed when a backup was due, it runs shortly after the next start. Older <em>automatic</em> backups are removed once there are more than you keep; backups you create yourself are never removed.
                                 </div>
                             </div>
@@ -5730,10 +5756,18 @@
         // after the profile data is lost — which is when a restore happens.
         let _autoBackupState = null;
 
+        /** Error text without Electron's "Error invoking remote method …" prefix. */
+        function _ipcMsg(e) {
+            return String((e && e.message) || e || '').replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+        }
+
         async function saveBackupFolder(folder) {
             if (!window.electronAPI || !window.electronAPI.autoBackupSet) return;
             try { _autoBackupState = await window.electronAPI.autoBackupSet({ folder: folder || '' }); renderAutoBackupUI(); }
-            catch (e) { console.warn('[auto-backup] save folder', e); }
+            catch (e) {
+                console.warn('[auto-backup] save folder', e);
+                if (/secondary/i.test((e && e.message) || '')) showNotification(_ipcMsg(e), 'error');
+            }
         }
 
         function renderAutoBackupUI() {
@@ -5774,6 +5808,70 @@
             if (lf) {
                 lf.textContent = st.lastBackupFile ? st.lastBackupFile : '';
                 lf.classList.toggle('hidden', !st.lastBackupFile);
+            }
+            renderSecondaryBackupUI();
+        }
+
+        function renderSecondaryBackupUI() {
+            const st = _autoBackupState;
+            if (!st) return;
+            const on = !!(st.secondaryEnabled && st.secondaryFolder);
+            const box = document.getElementById('secondaryBackupToggle');
+            if (box) box.checked = on;
+            const row = document.getElementById('secondaryBackupRow');
+            if (row) row.classList.toggle('hidden', !on);
+            const p = document.getElementById('secondaryBackupPath');
+            if (p) p.value = st.secondaryFolder || '';
+            const s = document.getElementById('secondaryBackupStatus');
+            if (s) {
+                s.textContent = window.ViperAutoBackup && ViperAutoBackup.secondaryText ? ViperAutoBackup.secondaryText(st, Date.now()) : '';
+                const bad = on && (st.lastSecondaryError || st.secondaryFolderExists === false);
+                s.className = 'mt-2 text-xs ' + (bad ? 'text-amber-300' : 'text-gray-400');
+            }
+        }
+
+        /** Pick the second folder; it must not be the Backup Destination. */
+        async function _pickSecondaryFolder() {
+            const folder = await window.electronAPI.selectBackupDirectory();
+            if (!folder) return null;
+            const primary = (document.getElementById('backupPath')?.value || (_autoBackupState && _autoBackupState.folder) || '').trim();
+            const norm = f => String(f || '').replace(/[\\/]+$/, '').toLowerCase();
+            if (primary && norm(primary) === norm(folder)) {
+                showNotification('Choose a different folder from the Backup Destination — a second copy in the same place doesn’t protect anything.', 'error');
+                return null;
+            }
+            return folder;
+        }
+
+        async function toggleSecondaryBackup(checked) {
+            if (!window.electronAPI || !window.electronAPI.autoBackupSet) return;
+            if (!_autoBackupState) await loadAutoBackupUI();
+            try {
+                if (checked) {
+                    let folder = _autoBackupState && _autoBackupState.secondaryFolder;
+                    if (!folder) folder = await _pickSecondaryFolder();
+                    if (!folder) { renderSecondaryBackupUI(); const b = document.getElementById('secondaryBackupToggle'); if (b) b.checked = false; return; }
+                    _autoBackupState = await window.electronAPI.autoBackupSet({ secondaryFolder: folder, secondaryEnabled: true });
+                    showNotification('Secondary backup is on. Every backup will also be saved to ' + folder + '.', 'success');
+                } else {
+                    _autoBackupState = await window.electronAPI.autoBackupSet({ secondaryEnabled: false });
+                    showNotification('Secondary backup is off. Backups already in that folder were kept.', 'info');
+                }
+            } catch (e) {
+                showNotification('Could not change the secondary backup: ' + _ipcMsg(e), 'error');
+            }
+            renderAutoBackupUI();
+        }
+
+        async function browseSecondaryBackup() {
+            if (!window.electronAPI || !window.electronAPI.autoBackupSet) return;
+            try {
+                const folder = await _pickSecondaryFolder();
+                if (!folder) return;
+                _autoBackupState = await window.electronAPI.autoBackupSet({ secondaryFolder: folder, secondaryEnabled: true });
+                renderAutoBackupUI();
+            } catch (e) {
+                showNotification('Could not save the secondary folder: ' + _ipcMsg(e), 'error');
             }
         }
 
@@ -5951,12 +6049,16 @@
                 // hand-maintained and had fallen six stores behind: Field Work,
                 // X, Discord, DataPilot, Cellebrite and Flock were all missing,
                 // so a full backup silently did not contain them.
-                const backupData = {};
-                const pattern2Prefixes = window.CaseStores.prefixes2();
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    if (key.startsWith('viper') || pattern2Prefixes.some(p => key.startsWith(p))) {
-                        backupData[key] = localStorage.getItem(key);
+                const backupData = window.ViperAutoBackup
+                    ? ViperAutoBackup.collect(localStorage, window.CaseStores.prefixes2())
+                    : {};
+                if (!window.ViperAutoBackup) {
+                    const pattern2Prefixes = window.CaseStores.prefixes2();
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (key.startsWith('viper') || pattern2Prefixes.some(p => key.startsWith(p))) {
+                            backupData[key] = localStorage.getItem(key);
+                        }
                     }
                 }
 
@@ -5989,19 +6091,26 @@
 
                 setTimeout(() => {
                     document.getElementById('backupProgress').classList.add('hidden');
+                    const sec = result && result.secondary;
+                    const where = (result && result.primaryError)
+                        ? ' — saved to the secondary folder only'
+                        : (sec && !sec.error ? ' — also saved to the secondary folder' : '');
                     showNotification(
-                        wasEncrypted
+                        (wasEncrypted
                             ? 'Backup created (encrypted — requires current Field Security key to restore)'
-                            : 'Backup created (plaintext — portable across installs)',
+                            : 'Backup created (plaintext — portable across installs)') + where,
                         'success'
                     );
+                    if (result && result.primaryError) showNotification('The Backup Destination could not be used: ' + result.primaryError, 'warning');
+                    if (sec && sec.error) showNotification('The secondary copy was not saved: ' + sec.error, 'warning');
+                    loadAutoBackupUI();
                     backupButton.disabled = false;
                     backupButton.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg> Create Backup';
                 }, 1000);
 
             } catch (error) {
                 console.error('Error creating backup:', error);
-                showNotification('Failed to create backup: ' + error, 'error');
+                showNotification('Failed to create backup: ' + _ipcMsg(error), 'error');
                 document.getElementById('backupButton').disabled = false;
                 document.getElementById('backupProgress').classList.add('hidden');
             }
@@ -6119,7 +6228,11 @@
                     // New ZIP backup format — extracts case files + returns localStorage JSON
                     const result = await window.electronAPI.restoreBackupZip({ backupPath: selected });
                     data = JSON.parse(result.jsonData);
-                    showNotification(`Restoring ${Object.keys(data).length} settings + ${result.filesRestored} case files...`, 'info');
+                    showNotification(`Restoring ${Object.keys(data).length} settings + ${result.filesRestored} case files`
+                        + (result.userDataRestored ? ` + ${result.userDataRestored} import/app data files` : '') + '...', 'info');
+                    if (result.auditRestoredTo) {
+                        showNotification('The audit log from the backup was saved beside the current one (' + result.auditRestoredTo + '); the current audit log was not changed.', 'info');
+                    }
                 } else {
                     // Legacy .json backup (localStorage only)
                     const backupRaw = await window.electronAPI.restoreBackup({ backupPath: selected });
@@ -6139,7 +6252,7 @@
 
             } catch (error) {
                 console.error('Error restoring backup:', error);
-                showNotification('Failed to restore backup: ' + error, 'error');
+                showNotification('Failed to restore backup: ' + _ipcMsg(error), 'error');
             }
         }
 

@@ -2775,7 +2775,10 @@ const CASE_ATTACHMENT_DIRS = Object.freeze({
   notes:          'Notes',
   consentSearch:  'Consent Searches',
   vehicles:       'Vehicles',
-  photos:         'Photos'
+  photos:         'Photos',
+  // Original RMS report PDFs, copied in at import (case-source-keep below).
+  // Same folder the old RMS text dump used.
+  rmsReports:     'RMS_Reports'
 });
 
 function _caseAttachmentDir(caseNumber, kind) {
@@ -2876,6 +2879,21 @@ ipcMain.handle('case-attachment-delete', async (_e, payload) => {
     return { success: false, error: err.message };
   }
 });
+
+// ── Imported source files (an RMS report PDF, …) kept with the case ──
+// Importers parsed a file and forgot it; the original now gets copied into
+// the case folder (allow-listed kind → folder, original name, " (n)" on a
+// clash, same file twice = one copy, encrypted under Field Security). See
+// modules/_shared/case-source-store.js. Read back with case-attachment-read.
+const _caseSourceStore = require('./modules/_shared/case-source-store.js').create({
+  fs, path,
+  getCasesDir: () => casesDir,
+  getSecurity: () => security,
+  safeCaseNumber: _safeCaseNumber,
+  sanitizeName: _sanitizeAttachmentName,
+  dirs: CASE_ATTACHMENT_DIRS
+});
+ipcMain.handle('case-source-keep', async (_e, payload) => _caseSourceStore.keep(payload));
 
 // ── Case record photos/documents (cases/{caseNumber}/Attachments/) ───
 // The disk half of modules/_shared/case-blobs.js, which keeps suspect /

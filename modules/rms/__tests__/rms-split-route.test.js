@@ -76,6 +76,21 @@ ok('non-Fort-Worth reports keep the old rule (number + file)', legacy.length ===
 api._rmsUpsertImport(legacy, { reportNumber: '6', fileName: 'x.pdf' });
 ok('a different number is a new import', legacy.length === 2);
 
+console.log('\n── kept source PDF on re-import');
+const kept = [{ reportNumber: '7', fileName: 'y.pdf', sourceFile: { kind: 'rmsReports', fileName: 'y.pdf', sha256: 'aa' } }];
+api._rmsUpsertImport(kept, { reportNumber: '7', fileName: 'y.pdf', v: 2 });
+ok('a re-import whose copy failed keeps the earlier PDF link', kept.length === 1 && kept[0].v === 2 &&
+    kept[0].sourceFile && kept[0].sourceFile.sha256 === 'aa', kept[0]);
+api._rmsUpsertImport(kept, { reportNumber: '7', fileName: 'y.pdf', v: 3, sourceFile: { kind: 'rmsReports', fileName: 'y (1).pdf', sha256: 'bb' } });
+ok('a re-import with its own copy uses that copy', kept[0].v === 3 && kept[0].sourceFile.sha256 === 'bb');
+const fresh = [];
+api._rmsUpsertImport(fresh, { reportNumber: '8', fileName: 'z.pdf' });
+ok('a new import without a copy gets none', fresh.length === 1 && !fresh[0].sourceFile);
+const pk = [doc('supplement', { splitIndex: 3, supplementNo: '001', fileName: 'packet.pdf', sourceFile: { kind: 'rmsReports', fileName: 'packet.pdf', sha256: 'cc' } })];
+api._rmsUpsertImport(pk, doc('supplement', { supplementNo: '001', fileName: 'supp-only.pdf' }));
+ok('the same document from a different file does not borrow the packet PDF', pk.length === 1 &&
+    pk[0].fileName === 'supp-only.pdf' && !pk[0].sourceFile, pk[0].sourceFile);
+
 console.log('\n── populated merge');
 const m = api._rmsMergePopulated(['Suspects (2)', 'Victims (1)', 'Suspects (1)', 'RMS Imports']);
 ok('counts summed per tab', m[0] === 'Suspects (3)' && m[1] === 'Victims (1)' && m[2] === 'RMS Imports', m);

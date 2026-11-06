@@ -85,6 +85,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   caseAttachmentSave: (data) => ipcRenderer.invoke('case-attachment-save', data),
   caseAttachmentRead: (data) => ipcRenderer.invoke('case-attachment-read', data),
   caseAttachmentDelete: (data) => ipcRenderer.invoke('case-attachment-delete', data),
+  // Copy an imported source file (RMS report PDF, …) into the case folder.
+  // {caseNumber, kind, sourcePath} → {success, fileName, size, sha256, encrypted, reused}
+  caseSourceKeep: (data) => ipcRenderer.invoke('case-source-keep', data),
   // Case record photos/documents (modules/_shared/case-blobs.js). SYNC on
   // purpose — they run underneath localStorage.getItem/setItem. Never throw:
   // an IPC failure comes back as a result, so the data simply stays inline.

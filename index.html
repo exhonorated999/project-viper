@@ -4272,7 +4272,9 @@
                 }
 
                 // Store for case creation
-                pendingRmsData = { text: result.text, pageTexts: result.pages || null, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages, arAltPages, arBandPages, rmsLocation, rmsOffenses };
+                pendingRmsData = { text: result.text, pageTexts: result.pages || null, fileName: result.fileName, detected, caseNum, synopsis, arSparsePages, arAltPages, arBandPages, rmsLocation, rmsOffenses,
+                    // The case opens and copies the original PDF into its folder.
+                    sourcePath: chosenPath };
 
                 // Auto-fill form fields
                 if (caseNum) {
@@ -4804,7 +4806,10 @@
                         // processPendingRmsImport has no file path.
                         arSparsePages: pendingRmsData.arSparsePages || null,
                         arAltPages: pendingRmsData.arAltPages || null,
-                        arBandPages: pendingRmsData.arBandPages || null
+                        arBandPages: pendingRmsData.arBandPages || null,
+                        // Where the PDF is, so the case can keep a copy of it
+                        // in cases/<n>/RMS_Reports/.
+                        sourcePath: pendingRmsData.sourcePath || null
                     };
                     try {
                         localStorage.setItem('pendingRmsImport_' + newCase.id, JSON.stringify(rmsHandoff));

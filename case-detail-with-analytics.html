@@ -1943,7 +1943,7 @@
             if (!raw) return;
 
             try {
-                const { text, fileName, pageTexts, arSparsePages, arAltPages, arBandPages } = JSON.parse(raw);
+                const { text, fileName, pageTexts, arSparsePages, arAltPages, arBandPages, sourcePath } = JSON.parse(raw);
                 localStorage.removeItem(key); // consume immediately
 
                 // Parse using the full RMS parser
@@ -2006,9 +2006,14 @@
                 let populated = [];
 
                 // 1. Save to RMS Imports tab (full report, same as normal import)
+                // The original PDF is copied right after (async); the token
+                // marks which stored documents came from it.
+                const srcToken = sourcePath ? ('src-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)) : '';
+                if (srcToken) docs.forEach(d => { d.rmsSrcToken = srcToken; });
                 const rmsImports = getRmsImports();
                 docs.forEach(d => _rmsUpsertImport(rmsImports, d));
                 saveRmsImports(rmsImports);
+                if (srcToken) _rmsKeepSourceLater(sourcePath, srcToken);
                 populated.push(docs.length > 1 ? `RMS Imports (${docs.length} documents)` : 'RMS Imports');
 
                 /* 2-5. Route persons and vehicles into the case tabs.
@@ -45702,6 +45707,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     (report.splitIndex === undefined ? null : report.splitIndex) &&
                     (!key || !_rmsDocKey(r)));
             }
+            // A re-import of the SAME file whose PDF copy failed keeps the
+            // earlier copy's link. (The same document arriving in a different
+            // file — a supplement on its own after the packet — does not: its
+            // page numbers belong to the new file.)
+            if (idx !== -1 && !report.sourceFile && list[idx] && list[idx].sourceFile &&
+                    list[idx].fileName === report.fileName) {
+                report.sourceFile = list[idx].sourceFile;
+            }
             if (idx !== -1) list[idx] = report; else list.push(report);
             return idx === -1;
         }
@@ -46042,6 +46055,115 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
         }
 
+        /* ── The original PDF goes with the case ────────────────────────
+         *
+         * A parsed report is a READING of the PDF, not the PDF. The original
+         * is copied into cases/<n>/RMS_Reports/ (encrypted under Field
+         * Security, same file twice = one copy) and the stored report keeps
+         * `sourceFile` {kind, fileName, size, sha256, encrypted, savedAt}.
+         * Every document split from one packet shares the packet's file.
+         * Removing an import never deletes the PDF. */
+        async function _rmsKeepSource(filePath) {
+            const api = window.electronAPI;
+            if (!filePath || !currentCase || !currentCase.caseNumber) return { error: 'No case open' };
+            if (!api || typeof api.caseSourceKeep !== 'function') return { error: 'Not available in this version' };
+            try {
+                const r = await api.caseSourceKeep({ caseNumber: currentCase.caseNumber, kind: 'rmsReports', sourcePath: filePath });
+                if (!r || !r.success) return { error: (r && r.error) || 'The PDF could not be copied' };
+                const file = { kind: 'rmsReports', fileName: r.fileName, size: r.size, sha256: r.sha256,
+                    encrypted: !!r.encrypted, savedAt: new Date().toISOString() };
+                if (!r.reused) {
+                    audit('rms_source_saved', { case_number: currentCase.caseNumber, case_id: currentCase.id,
+                        file_name: r.fileName, size: r.size, sha256: r.sha256, encrypted: !!r.encrypted });
+                }
+                return { file };
+            } catch (e) {
+                return { error: (e && e.message) || String(e) };
+            }
+        }
+
+        // Create-case-from-report: index.html had the file path, the case
+        // did not exist yet. The reports are already saved (synchronously);
+        // copy the PDF now and stamp the documents that came from it.
+        async function _rmsKeepSourceLater(filePath, token) {
+            const res = await _rmsKeepSource(filePath);
+            const list = getRmsImports();
+            let n = 0;
+            for (const r of list) {
+                if (!r || r.rmsSrcToken !== token) continue;
+                delete r.rmsSrcToken;
+                if (res.file) { r.sourceFile = Object.assign({}, res.file); n++; }
+            }
+            saveRmsImports(list);
+            rmsImports = list;
+            if (res.error) {
+                console.warn('[RMS Import] original PDF not kept:', res.error);
+                viperToast(`The report was imported, but the original PDF could not be saved to the case folder (${res.error}). ` +
+                    `Open the report and use "Attach original PDF" to add it.`, 'warning', 9000);
+            } else if (n && currentTab === 'rmsImport') {
+                renderTabContent('rmsImport');
+            }
+        }
+
+        function _rmsBytesUrl(b64, mime) {
+            const bin = atob(b64);
+            const buf = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+            return URL.createObjectURL(new Blob([buf], { type: mime }));
+        }
+
+        // Opens the kept PDF; a document split from a packet opens at its
+        // first page in the packet.
+        async function openRmsSourcePdf(index) {
+            const rpt = rmsImports[index];
+            const sf = rpt && rpt.sourceFile;
+            if (!sf || !sf.fileName) return;
+            const api = window.electronAPI;
+            if (!api || typeof api.caseAttachmentRead !== 'function') return;
+            const r = await api.caseAttachmentRead({ caseNumber: currentCase.caseNumber, kind: sf.kind || 'rmsReports', fileName: sf.fileName });
+            if (!r || !r.success) {
+                viperToast('Could not open the original PDF: ' + ((r && r.error) || 'unknown error'), 'error');
+                return;
+            }
+            const page = parseInt(String((rpt.fw && rpt.fw.pdfPages) || '').split('-')[0], 10);
+            const url = _rmsBytesUrl(r.dataBase64, 'application/pdf');
+            const win = window.open('', '_blank');
+            if (!win) { viperToast('Popup blocked — allow popups to view this document', 'error'); return; }
+            const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            const frag = (page > 1 ? '#page=' + page + '&' : '#') + 'toolbar=1&navpanes=0';
+            win.document.write(
+                '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(sf.fileName) + '</title>' +
+                '<style>html,body{margin:0;height:100%;background:#1a1a1a}iframe{width:100%;height:100vh;border:none;display:block}</style>' +
+                '</head><body><iframe ' + _S + '="' + esc(url + frag) + '" type="application/pdf"></iframe></body></html>');
+            win.document.close();
+        }
+
+        // Older imports (before the PDF was kept) or a copy that failed.
+        // The chosen file is given to this document and to every document
+        // split from the same packet that has none yet.
+        async function attachRmsSourcePdf(index) {
+            const rpt = rmsImports[index];
+            if (!rpt) return;
+            const paths = await window.electronAPI.selectRmsFiles();
+            if (!paths || !paths.length) return;
+            const res = await _rmsKeepSource(paths[0]);
+            if (res.error) { viperToast('The PDF could not be saved to the case folder: ' + res.error, 'error'); return; }
+            const packet = rpt.splitIndex !== undefined && rpt.splitIndex !== null;
+            let n = 0;
+            rmsImports.forEach(r => {
+                if (r === rpt || (packet && !r.sourceFile && r.fileName === rpt.fileName &&
+                        r.splitIndex !== undefined && r.splitIndex !== null)) {
+                    r.sourceFile = Object.assign({}, res.file);
+                    n++;
+                }
+            });
+            saveRmsImports(rmsImports);
+            audit('rms_source_attached', { case_number: currentCase.caseNumber, case_id: currentCase.id,
+                report_number: rpt.reportNumber || '', file_name: res.file.fileName, sha256: res.file.sha256, documents: n });
+            viperToast(`Original PDF saved to the case folder (RMS_Reports\\${res.file.fileName})`, 'success');
+            renderTabContent('rmsImport');
+        }
+
         async function handleRmsImport() {
             try {
                 const filePaths = await window.electronAPI.selectRmsFiles();
@@ -46052,6 +46174,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 let unnamedBlocks = 0;
                 let genericFound = 0;
                 let overviewFilled = [];
+                const notKept = [];
 
                 for (const filePath of filePaths) {
                     try {
@@ -46063,7 +46186,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         // documents; each is stored and routed on its own.
                         const docs = _rmsExpandReport(parsed);
                         const isPacket = docs.length > 1;
+                        // Keep the original PDF with the case.
+                        const kept = docs.length ? await _rmsKeepSource(filePath) : null;
+                        if (kept && kept.error) {
+                            console.warn('[RMS Import] original PDF not kept:', filePath, kept.error);
+                            notKept.push(kept.error);
+                        }
                         for (const report of docs) {
+                            if (kept && kept.file) report.sourceFile = Object.assign({}, kept.file);
                             if (!isPacket) {
                                 report.pageCount = result.numPages;
                                 await _arRecoverRmsOcr(report, result.visualOrder ? null : filePath);
@@ -46102,6 +46232,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     loadInvolvedPersons();
                     loadRecoveredVehicles();
                     showToast(`Imported ${imported} RMS report${imported !== 1 ? 's' : ''} — persons routed to case tabs`, 'success');
+                    if (notKept.length) {
+                        showToast(`${notKept.length} original PDF${notKept.length !== 1 ? 's' : ''} could not be saved to the case folder (${notKept[0]}). Open the report and use "Attach original PDF" to add ${notKept.length !== 1 ? 'them' : 'it'}.`, 'warning');
+                    }
                     if (overviewFilled.length) {
                         showToast(`Case Overview updated from the report: ${overviewFilled.join(', ')}`, 'success');
                     }
@@ -46235,7 +46368,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             </div>
                             ${topOffense ? `<p class="text-xs text-gray-400 truncate mb-2">📋 ${topOffense.statute} — ${topOffense.description || ''}</p>` : ''}
                             ${officers ? `<p class="text-xs text-gray-500 truncate">👮 ${officers}</p>` : ''}
-                            <p class="text-xs text-gray-600 mt-2">Imported ${new Date(rpt.importedAt).toLocaleString()} · ${rpt.pageCount || '?'} pages</p>
+                            <p class="text-xs text-gray-600 mt-2">Imported ${new Date(rpt.importedAt).toLocaleString()} · ${rpt.pageCount || '?'} pages${rpt.sourceFile && rpt.sourceFile.fileName ? ` · <span class="text-gray-500" title="Saved in the case folder: RMS_Reports\\${_esc(rpt.sourceFile.fileName)}">PDF saved to case</span>` : ` · <span class="text-amber-400/80" title="No copy of the PDF in the case folder — open the report to attach it">PDF not saved</span>`}</p>
                         </div>`;
                     }).join('')}
                 </div>
@@ -46530,6 +46663,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             <p class="text-sm text-gray-500">${rpt.agencyName || ''} · ${rpt.reportDate || rpt.fromDateTime || ''} · ${rpt.supplementNo ? 'Supplement: ' + rpt.supplementNo : ''}</p>
                         </div>
                     </div>
+                    ${rpt.sourceFile && rpt.sourceFile.fileName ? `
+                    <button onclick="openRmsSourcePdf(${index})" class="px-4 py-2 bg-viper-dark border border-gray-700 hover:border-viper-orange/50 rounded-lg text-gray-300 hover:text-white text-sm transition-colors inline-flex items-center gap-2"
+                        title="Saved in the case folder: RMS_Reports\\${_esc(rpt.sourceFile.fileName)}${rpt.fw && rpt.fw.pdfPages ? ' — this document is on PDF page' + (String(rpt.fw.pdfPages).indexOf('-') !== -1 ? 's ' : ' ') + _esc(rpt.fw.pdfPages) : ''}">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        View original PDF
+                    </button>` : `
+                    <button onclick="attachRmsSourcePdf(${index})" class="px-4 py-2 bg-viper-dark border border-amber-500/40 hover:border-amber-400 rounded-lg text-amber-300 text-sm transition-colors inline-flex items-center gap-2"
+                        title="This import has no copy of its PDF in the case folder. Choose the original report PDF to save it with the case.">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+                        Attach original PDF
+                    </button>`}
                 </div>
                 ${genericNoticeHtml}
                 ${eventHtml}

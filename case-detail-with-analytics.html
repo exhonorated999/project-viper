@@ -11,6 +11,7 @@
          page code reads a suspects_/victims_/… key. -->
     <script src="modules/_shared/case-blobs.js"></script>
     <script src="modules/_shared/keep-focus.js"></script>
+    <script src="modules/_shared/viper-drop.js"></script>
     <script src="modules/_shared/video-thumbs.js"></script>
     <script src="modules/_shared/legacy-video.js"></script>
     <script src="modules/viper-ui.js"></script>
@@ -9986,7 +9987,7 @@
                                 <div id="evidenceUploadSection">
                                     <label id="evidenceUploadHeading" class="block text-sm font-medium text-gray-300 mb-2">Upload Files</label>
                                     <!-- Standard file/folder upload (hidden when Cellebrite selected) -->
-                                    <div id="standardUploadUI" class="relative">
+                                    <div id="standardUploadUI" class="relative" data-vdrop="evidence">
                                         <div class="flex space-x-3">
                                             <button type="button" onclick="selectEvidenceViaDialog('files')" class="flex-1 px-4 py-3 bg-viper-card/50 border-2 border-dashed border-gray-600 rounded-lg hover:border-viper-cyan transition-colors flex items-center justify-center space-x-2 text-gray-400 hover:text-viper-cyan">
                                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -10001,6 +10002,7 @@
                                                 <span id="evidencePickFolderLabel">Upload Folder</span>
                                             </button>
                                         </div>
+                                        <p class="text-xs text-gray-500 mt-1">Or drag files (or one folder) onto these buttons.</p>
                                     </div>
                                     <!-- Cellebrite folder picker (shown when Cellebrite selected) -->
                                     <div id="cellebriteUploadUI" class="hidden">
@@ -11522,6 +11524,43 @@
         async function selectEvidenceViaDialog(mode) {
             const result = await window.electronAPI.selectEvidenceFiles({ mode });
             if (!result) return;
+            _applyEvidenceSelection(result);
+        }
+
+        // Files / one folder dragged onto the Upload Files / Upload Folder
+        // buttons: same result shape as the dialog, so everything after
+        // (storage choice, encryption check, save) is unchanged.
+        async function _evidenceDrop(items) {
+            const dirs = items.filter(i => i.isDir && i.path);
+            const files = items.filter(i => !i.isDir && i.path);
+            if (!dirs.length && !files.length) {
+                viperToast('Could not read where the dropped file is stored — use Upload Files instead.', 'warning');
+                return;
+            }
+            if (dirs.length > 1 || (dirs.length && files.length)) {
+                viperToast('Drop one folder, or files only — not both at once.', 'warning');
+                return;
+            }
+            if (dirs.length) {
+                const r = await window.electronAPI.evidenceListFolder(dirs[0].path);
+                if (!r || !r.success) { viperToast((r && r.error) || 'That folder could not be read.', 'error'); return; }
+                _applyEvidenceSelection(r);
+                return;
+            }
+            _applyEvidenceSelection({
+                files: files.map(i => ({ name: i.file.name, path: i.path, relativePath: i.file.name, size: i.file.size })),
+            });
+        }
+        if (window.ViperDrop) {
+            ViperDrop.define('evidence', {
+                multiple: true,
+                folders: true,
+                paste: false, // evidence is copied from where it is stored; a clipboard image has no source file
+                onFiles: (files, zone, meta) => _evidenceDrop(meta.items || []),
+            });
+        }
+
+        function _applyEvidenceSelection(result) {
             if (!Array.isArray(result.files) || !result.files.length) {
                 viperToast('That folder has no files in it — nothing was selected.', 'warning');
                 return;
@@ -18369,7 +18408,7 @@
                                 <h3 class="text-lg font-bold text-viper-cyan mb-4">Personal Information</h3>
                                 <div class="flex gap-5">
                                     <div class="shrink-0">
-                                        <div class="w-48 h-48 rounded-lg overflow-hidden bg-viper-dark">
+                                        <div class="w-48 h-48 rounded-lg overflow-hidden bg-viper-dark" data-vdrop="inlinePhoto" data-vdrop-img="suspect-photo-${index}" data-vdrop-edit="startInlineEditSuspect" data-vdrop-arg="${index}" data-vdrop-hint="Drop a photo or press Ctrl+V to paste">
                                             <img id="suspect-photo-${index}" ${_S}="${suspect.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22400%22 viewBox=%220 0 400 400%22%3E%3Crect fill=%22%231a2332%22 width=%22400%22 height=%22400%22/%3E%3Cpath fill=%22%2300d9ff%22 d=%22M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${suspect.name || 'Suspect'}" class="w-full h-full object-cover">
                                         </div>
                                         ${isEditingInline ? `<input type="file" accept="image/*" onchange="handleInlineImageUpload(event, 'suspect-photo-${index}')" class="text-xs text-gray-400 mt-2 w-48">` : ''}
@@ -18394,7 +18433,7 @@
                                     ${renderEditableField('Address', 'address', suspect.address, index)}
                                     ${renderEditableField('City, State, ZIP', 'addressCityStateZip', suspect.addressCityStateZip, index)}
                                 </div>
-                                <div class="mt-4 w-full h-48 rounded-lg overflow-hidden bg-viper-dark ${!suspect.residencePhoto ? 'flex items-center justify-center border border-dashed border-gray-600' : ''}">
+                                <div class="mt-4 w-full h-48 rounded-lg overflow-hidden bg-viper-dark ${!suspect.residencePhoto ? 'flex items-center justify-center border border-dashed border-gray-600' : ''}" data-vdrop="inlinePhoto" data-vdrop-img="suspect-residence-${index}" data-vdrop-edit="startInlineEditSuspect" data-vdrop-arg="${index}" data-vdrop-hint="Drop a photo or press Ctrl+V to paste">
                                     <img id="suspect-residence-${index}" ${_S}="${suspect.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!suspect.residencePhoto ? 'hidden' : ''}">
                                     ${!suspect.residencePhoto ? `<p id="suspect-residence-placeholder-${index}" class="text-gray-500 text-sm">No residence photo</p>` : ''}
                                 </div>
@@ -19815,24 +19854,66 @@
         
         function handleInlineImageUpload(event, imgElementId) {
             const file = event.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
+            if (file) _stageInlinePhoto(imgElementId, file);
+        }
+
+        // Show a chosen / dropped / pasted photo in an inline-edit frame and
+        // keep it on img.dataset.newPhoto for the Save handler. Snips are
+        // full-resolution PNGs, so shrink like the modal upload does
+        // (shrinkImageDataUrl resolves with the original on any failure).
+        function _stageInlinePhoto(imgElementId, file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const raw = e.target.result;
+                const apply = (dataUrl) => {
                     const imgElement = document.getElementById(imgElementId);
-                    if (imgElement) {
-                        imgElement.src = e.target.result;
-                        imgElement.dataset.newPhoto = e.target.result;
-                        imgElement.classList.remove('hidden');
-                        // Hide placeholder text if present
-                        const placeholder = imgElement.parentElement?.querySelector('p[id$="-placeholder-"]') 
-                            || imgElement.parentElement?.querySelector('p');
-                        if (placeholder) placeholder.classList.add('hidden');
-                        // Remove dashed border styling from container
-                        imgElement.parentElement?.classList.remove('border-dashed', 'border-gray-600', 'flex', 'items-center', 'justify-center');
-                    }
+                    if (!imgElement) return;
+                    imgElement.src = dataUrl;
+                    imgElement.dataset.newPhoto = dataUrl;
+                    imgElement.classList.remove('hidden');
+                    // Hide placeholder text if present
+                    const placeholder = imgElement.parentElement?.querySelector('p[id$="-placeholder-"]')
+                        || imgElement.parentElement?.querySelector('p');
+                    if (placeholder) placeholder.classList.add('hidden');
+                    // Remove dashed border styling from container
+                    imgElement.parentElement?.classList.remove('border-dashed', 'border-gray-600', 'flex', 'items-center', 'justify-center');
                 };
-                reader.readAsDataURL(file);
-            }
+                if (!_CS || typeof _CS.shrinkImageDataUrl !== 'function') { apply(raw); return; }
+                _CS.shrinkImageDataUrl(raw).then((small) => apply(small || raw)).catch(() => apply(raw));
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Drop or paste a photo onto a person's photo / residence frame. In
+        // view mode this opens inline edit first; the photo is only kept when
+        // the officer clicks Save (same as choosing a file).
+        if (window.ViperDrop) {
+            ViperDrop.define('inlinePhoto', {
+                accept: 'image/*',
+                onFiles(files, zone) {
+                    const imgId = zone.getAttribute('data-vdrop-img');
+                    const startFn = zone.getAttribute('data-vdrop-edit');
+                    const arg = Number(zone.getAttribute('data-vdrop-arg'));
+                    const stage = () => {
+                        _stageInlinePhoto(imgId, files[0]);
+                        showToast('Photo added — click Save to keep it.', 'info');
+                    };
+                    if (!isEditingInline && startFn && typeof window[startFn] === 'function') {
+                        const before = document.getElementById(imgId);
+                        window[startFn](arg);
+                        // renderTabContent may finish on a later tick: wait
+                        // for the re-rendered (edit-mode) frame.
+                        let tries = 0;
+                        const wait = () => {
+                            const now = document.getElementById(imgId);
+                            if ((now && now !== before) || tries++ > 80) return stage();
+                            setTimeout(wait, 25);
+                        };
+                        return wait();
+                    }
+                    stage();
+                },
+            });
         }
         
         /*
@@ -20018,7 +20099,7 @@
                                 <div class="col-span-2">
                                     <label class="block text-sm text-gray-400 mb-1">Suspect Photo (URL or Data URL)</label>
                                     <input type="text" name="photo" value="${suspect.photo || ''}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
-                                    <p class="text-xs text-gray-500 mt-1">Or use file input below</p>
+                                    <p class="text-xs text-gray-500 mt-1">Or choose a file below — you can also drag a photo here or paste a snip (Ctrl+V)</p>
                                     <input type="file" accept="image/*" onchange="handleImageUpload(event, 'photo')" class="mt-2 text-sm text-gray-400">
                                 </div>
                                 <input type="text" name="name" placeholder="Full Name" value="${suspect.name || ''}" required class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
@@ -22063,7 +22144,7 @@
                             <h3 class="text-2xl font-bold text-viper-purple mb-6">Personal Information</h3>
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="col-span-1">
-                                    <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-purple/30">
+                                    <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-purple/30" data-vdrop="inlinePhoto" data-vdrop-img="victim-photo-${index}" data-vdrop-edit="startInlineEditVictim" data-vdrop-arg="${index}" data-vdrop-hint="Drop a photo or press Ctrl+V to paste">
                                         <img id="victim-photo-${index}" ${_S}="${victim.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22400%22 viewBox=%220 0 400 400%22%3E%3Crect fill=%22%231a2332%22 width=%22400%22 height=%22400%22/%3E%3Cpath fill=%22%239d4edd%22 d=%22M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${victim.name || 'Victim'}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
@@ -22104,7 +22185,7 @@
                                     ${renderEditableFieldVictim('City, State, ZIP', 'addressCityStateZip', victim.addressCityStateZip, index)}
                                 </div>
                                 <div class="col-span-1">
-                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!victim.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-purple/30'}">
+                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!victim.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-purple/30'}" data-vdrop="inlinePhoto" data-vdrop-img="victim-residence-${index}" data-vdrop-edit="startInlineEditVictim" data-vdrop-arg="${index}" data-vdrop-hint="Drop a photo or press Ctrl+V to paste">
                                         <img id="victim-residence-${index}" ${_S}="${victim.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!victim.residencePhoto ? 'hidden' : ''}">
                                         ${!victim.residencePhoto ? `<p class="text-gray-400 text-sm">No residence photo</p>` : ''}
                                     </div>
@@ -22373,7 +22454,7 @@
                                 <div class="col-span-2">
                                     <label class="block text-sm text-gray-400 mb-1">Victim Photo (URL or Data URL)</label>
                                     <input type="text" name="photo" value="${victim.photo || ''}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
-                                    <p class="text-xs text-gray-500 mt-1">Or use file input below</p>
+                                    <p class="text-xs text-gray-500 mt-1">Or choose a file below — you can also drag a photo here or paste a snip (Ctrl+V)</p>
                                     <input type="file" accept="image/*" onchange="handleImageUpload(event, 'photo')" class="mt-2 text-sm text-gray-400">
                                 </div>
                                 <input type="text" name="name" placeholder="Full Name" value="${victim.name || ''}" required class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
@@ -24434,7 +24515,7 @@
                             <h3 class="text-2xl font-bold text-viper-green mb-6">Personal Information</h3>
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="col-span-1">
-                                    <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-green/30">
+                                    <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-green/30" data-vdrop="inlinePhoto" data-vdrop-img="witness-photo-${index}" data-vdrop-edit="startInlineEditWitness" data-vdrop-arg="${index}" data-vdrop-hint="Drop a photo or press Ctrl+V to paste">
                                         <img id="witness-photo-${index}" ${_S}="${witness.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22400%22 viewBox=%220 0 400 400%22%3E%3Crect fill=%22%231a2332%22 width=%22400%22 height=%22400%22/%3E%3Cpath fill=%22%2300ff88%22 d=%22M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${witness.name || 'Witness'}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
@@ -24472,7 +24553,7 @@
                                     ${renderEditableFieldWitness('City, State, ZIP', 'addressCityStateZip', witness.addressCityStateZip, index)}
                                 </div>
                                 <div class="col-span-1">
-                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!witness.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-green/30'}">
+                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!witness.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-green/30'}" data-vdrop="inlinePhoto" data-vdrop-img="witness-residence-${index}" data-vdrop-edit="startInlineEditWitness" data-vdrop-arg="${index}" data-vdrop-hint="Drop a photo or press Ctrl+V to paste">
                                         <img id="witness-residence-${index}" ${_S}="${witness.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!witness.residencePhoto ? 'hidden' : ''}">
                                         ${!witness.residencePhoto ? `<p class="text-gray-400 text-sm">No residence photo</p>` : ''}
                                     </div>
@@ -24660,7 +24741,7 @@
                                 <div class="col-span-2">
                                     <label class="block text-sm text-gray-400 mb-1">Witness Photo (URL or Data URL)</label>
                                     <input type="text" name="photo" value="${witness.photo || ''}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
-                                    <p class="text-xs text-gray-500 mt-1">Or use file input below</p>
+                                    <p class="text-xs text-gray-500 mt-1">Or choose a file below — you can also drag a photo here or paste a snip (Ctrl+V)</p>
                                     <input type="file" accept="image/*" onchange="handleImageUpload(event, 'photo')" class="mt-2 text-sm text-gray-400">
                                 </div>
                                 <input type="text" name="name" placeholder="Full Name" value="${witness.name || ''}" required class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
@@ -25286,7 +25367,7 @@
                             <h3 class="text-2xl font-bold text-viper-green mb-6">Personal Information</h3>
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="col-span-1">
-                                    <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-green/30">
+                                    <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark border-2 border-viper-green/30" data-vdrop="inlinePhoto" data-vdrop-img="ip-photo-${index}" data-vdrop-edit="startInlineEditInvolvedPerson" data-vdrop-arg="${index}" data-vdrop-hint="Drop a photo or press Ctrl+V to paste">
                                         <img id="ip-photo-${index}" ${_S}="${person.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22400%22 height=%22400%22 viewBox=%220 0 400 400%22%3E%3Crect fill=%22%231a2332%22 width=%22400%22 height=%22400%22/%3E%3Cpath fill=%22%2300ff88%22 d=%22M200 100a60 60 0 110 120 60 60 0 010-120zm0 160c-50 0-100 25-100 50v40h200v-40c0-25-50-50-100-50z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${person.name || 'Person'}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
@@ -25327,7 +25408,7 @@
                                     ${renderEditableFieldIP('City, State, ZIP', 'addressCityStateZip', person.addressCityStateZip, index)}
                                 </div>
                                 <div class="col-span-1">
-                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!person.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-green/30'}">
+                                    <div class="aspect-video rounded-lg overflow-hidden bg-viper-dark ${!person.residencePhoto ? 'flex items-center justify-center border-2 border-dashed border-gray-600' : 'border-2 border-viper-green/30'}" data-vdrop="inlinePhoto" data-vdrop-img="ip-residence-${index}" data-vdrop-edit="startInlineEditInvolvedPerson" data-vdrop-arg="${index}" data-vdrop-hint="Drop a photo or press Ctrl+V to paste">
                                         <img id="ip-residence-${index}" ${_S}="${person.residencePhoto || ''}" alt="Residence" class="w-full h-full object-cover ${!person.residencePhoto ? 'hidden' : ''}">
                                         ${!person.residencePhoto ? `<p class="text-gray-400 text-sm">No residence photo</p>` : ''}
                                     </div>
@@ -26661,7 +26742,7 @@
                         <div class="glass-card rounded-xl p-6">
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div class="md:col-span-1">
-                                    <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark mb-4">
+                                    <div class="aspect-square rounded-lg overflow-hidden bg-viper-dark mb-4" data-vdrop="inlinePhoto" data-vdrop-img="missing-photo-${index}" data-vdrop-edit="startInlineEditMissingPerson" data-vdrop-arg="${index}" data-vdrop-hint="Drop a photo or press Ctrl+V to paste">
                                         <img id="missing-photo-${index}" ${_S}="${person.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%23ffa726%22 d=%22M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z%22 opacity=%220.3%22/%3E%3C/svg%3E'}" alt="${person.name}" class="w-full h-full object-cover">
                                     </div>
                                     ${isEditingInline ? `
@@ -40026,7 +40107,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const isPdfDrag = (e) => {
                     if (!e.dataTransfer) return false;
                     // dataTransfer.items doesn't expose names during dragover, but type === '' for files
-                    return Array.from(e.dataTransfer.items || []).some(it => it.kind === 'file');
+                    const fileItems = Array.from(e.dataTransfer.items || []).filter(it => it.kind === 'file');
+                    // An image-only drag is a photo for a frame/upload
+                    // (ViperDrop), not a DMV printout — no overlay for it.
+                    if (fileItems.length && fileItems.every(it => /^image\//i.test(it.type || ''))) return false;
+                    return fileItems.length > 0;
                 };
                 const showOverlay = () => {
                     if (!getTarget()) return;

@@ -11,6 +11,7 @@
          page code reads a suspects_/victims_/… key. -->
     <script src="modules/_shared/case-blobs.js"></script>
     <script src="modules/_shared/keep-focus.js"></script>
+<script src="modules/_shared/evidence-folder-name.js"></script>
     <script src="modules/_shared/viper-drop.js"></script>
     <script src="modules/_shared/video-thumbs.js"></script>
     <script src="modules/_shared/legacy-video.js"></script>
@@ -11783,6 +11784,26 @@
             return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
         }
         
+        // Folder under cases/<n>/Evidence/ for a new item: "<tag or prefix_timestamp> - <description>".
+        function _evFolderName(tag, description, prefix) {
+            const F = window.ViperEvidenceFolder;
+            if (F && typeof F.folderName === 'function') return F.folderName(tag, description, { prefix: prefix || 'evidence' });
+            return tag || `${prefix || 'evidence'}_${Date.now()}`;
+        }
+        // The folder an existing item's files live in (older items have no `folder`).
+        function _evFolderOf(ev) {
+            if (!ev) return '';
+            if (ev.folder) return ev.folder;
+            const p = ev.files && ev.files[0] && ev.files[0].path;
+            if (p) {
+                const parts = String(p).split(/[\\/]/);
+                const cn = currentCase && currentCase.caseNumber;
+                const i = parts.findIndex((s, k) => s === 'Evidence' && k > 0 && parts[k - 1] === cn);
+                if (i >= 0 && parts[i + 1] && i + 2 < parts.length) return parts[i + 1];
+            }
+            return ev.tag || '';
+        }
+
         async function saveEvidence(event) {
             event.preventDefault();
             
@@ -11869,7 +11890,7 @@
                     }
 
                     try {
-                        const evidenceTag = tag || `cellebrite_${Date.now()}`;
+                        const evidenceTag = _evFolderName(tag, description, 'cellebrite');
                         const result = await window.electronAPI.copyCellebriteFolder({
                             sourcePath: cellebriteFolderPath,
                             caseNumber: currentCase.caseNumber,
@@ -11883,6 +11904,7 @@
                             id: Date.now(),
                             type: 'cellebrite',
                             tag: tag,
+                            folder: evidenceTag,
                             discoverable: discoverable,
                             description: description,
                             location: location,
@@ -11946,7 +11968,7 @@
 
                         if (storageMode === 'copy') {
                             // Copy entire folder into cases/{caseNumber}/Evidence/{tag}/
-                            const safeTag = (tag || `datapilot_${Date.now()}`).trim();
+                            const safeTag = _evFolderName((tag || '').trim(), description, 'datapilot');
                             const progressModal = document.getElementById('uploadProgressModal');
                             if (progressModal) {
                                 progressModal.classList.add('show');
@@ -11992,6 +12014,7 @@
                             id: Date.now(),
                             type: 'datapilot',
                             tag: tag,
+                            ...(storageMode === 'copy' && finalFolderPath ? { folder: String(finalFolderPath).split(/[\\/]/).filter(Boolean).pop() } : {}),
                             discoverable: discoverable,
                             description: description,
                             location: location,
@@ -12134,7 +12157,7 @@
                         document.getElementById('uploadProgressPercent').textContent = '0%';
                     }
 
-                    const evidenceTag = tag || `evidence_${Date.now()}`;
+                    const evidenceTag = _evFolderName(tag, description, 'evidence');
                     const files = [];
                     let processedSize = 0;
 
@@ -12159,6 +12182,7 @@
                             id: Date.now(),
                             type: type,
                             tag: tag,
+                            folder: evidenceTag,
                             discoverable: discoverable,
                             description: description,
                             location: location,
@@ -12237,13 +12261,10 @@
                 let processedSize = 0;
                 
                 // Create case folder structure reference
-                const caseFolderPath = `Cases/${currentCase.caseNumber}`;
-                const evidenceFolderPath = `${caseFolderPath}/Evidence/${tag || Date.now()}`;
-                
                 const files = [];
                 
-                // Use Tauri to save files to disk
-                const evidenceTag = tag || `evidence_${Date.now()}`;
+                // Save files to disk under Evidence/<tag or evidence_ts> - <description>
+                const evidenceTag = _evFolderName(tag, description, 'evidence');
                 
                 for (let i = 0; i < evidenceFiles.length; i++) {
                     const file = evidenceFiles[i];
@@ -12294,6 +12315,7 @@
                     id: Date.now(),
                     type: type,
                     tag: tag,
+                    ...(files.length ? { folder: evidenceTag } : {}),
                     discoverable: discoverable,
                     description: description,
                     location: location,
@@ -13622,7 +13644,7 @@
                 const res = await window.electronAPI.whisperTranscribe({
                     mediaPath: file.path,
                     caseNumber: currentCase.caseNumber,
-                    evidenceTag: evidence.tag,
+                    evidenceTag: _evFolderOf(evidence) || evidence.tag,
                     model,
                     language: 'auto',
                     device: 'cpu',

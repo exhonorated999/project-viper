@@ -6853,10 +6853,18 @@ ipcMain.handle('select-evidence-files', async (event, { mode, filters: customFil
 // still has a ceiling; past it we refuse with a message that points the
 // officer at "Point to where it's stored" instead of failing obscurely.
 const EVIDENCE_ENCRYPT_MAX_BYTES = 1900 * 1024 * 1024;
+// Every evidence folder name from the renderer goes through this: the name now
+// carries the item's free-text description, so it must stay one safe segment.
+const _evidenceFolderLib = require('./modules/_shared/evidence-folder-name.js');
+function _evidenceFolder(tag) {
+  const f = _evidenceFolderLib.safeSegment(tag);
+  if (!f) throw new Error('Invalid evidence folder name');
+  return f;
+}
 ipcMain.handle('copy-evidence-file', async (event, { caseNumber, evidenceTag, sourcePath, relativePath }) => {
   try {
     const fileName = relativePath || path.basename(sourcePath);
-    const evidenceDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+    const evidenceDir = path.join(casesDir, caseNumber, 'Evidence', _evidenceFolder(evidenceTag));
     fs.mkdirSync(evidenceDir, { recursive: true });
 
     // Preserve subfolder structure
@@ -6963,7 +6971,7 @@ ipcMain.handle('evidence-release-files', async (event, { caseNumber, paths, keep
 ipcMain.handle('save-evidence-file', async (event, data) => {
   try {
     const { caseNumber, evidenceTag, fileName, fileData } = data;
-    const evidenceDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+    const evidenceDir = path.join(casesDir, caseNumber, 'Evidence', _evidenceFolder(evidenceTag));
     fs.mkdirSync(evidenceDir, { recursive: true });
 
     const filePath = path.join(evidenceDir, fileName);
@@ -11336,7 +11344,7 @@ ipcMain.handle('copy-cellebrite-folder', async (event, { sourcePath, caseNumber,
     // Uses the real case-data root. This used to re-declare casesDir as
     // userData/cases, so on a portable install or a moved case folder the
     // copy landed somewhere the DA export never looks.
-    const destDir = path.join(casesDir, caseNumber, 'Evidence', evidenceTag);
+    const destDir = path.join(casesDir, caseNumber, 'Evidence', _evidenceFolder(evidenceTag));
     fs.mkdirSync(destDir, { recursive: true });
 
     // Recursively enumerate source files
@@ -15418,7 +15426,7 @@ ipcMain.handle('datapilot-copy-to-evidence', async (event, { caseNumber, evidenc
     }
 
     // Sanitize tag for filesystem use
-    const safeTag = String(evidenceTag).replace(/[<>:"|?*\x00-\x1F]/g, '_').replace(/[\\/]/g, '_').trim() || `datapilot_${Date.now()}`;
+    const safeTag = _evidenceFolderLib.safeSegment(evidenceTag) || `datapilot_${Date.now()}`;
     const destRoot = path.join(casesDir, caseNumber, 'Evidence', safeTag);
     fs.mkdirSync(destRoot, { recursive: true });
 

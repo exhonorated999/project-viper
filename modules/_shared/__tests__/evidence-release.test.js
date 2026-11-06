@@ -148,7 +148,13 @@ const mainEnv = {
     setTimeout, setImmediate
 };
 mainEnv.globalThis = mainEnv;
+// Evidence folder names are cleaned by a helper the handlers share.
+mainEnv._evidenceFolderLib = require('../evidence-folder-name.js');
 vm.createContext(mainEnv);
+{
+    const a = MAIN.indexOf('function _evidenceFolder(');
+    vm.runInContext(MAIN.slice(a, MAIN.indexOf('\n}\n', a) + 3), mainEnv);
+}
 vm.runInContext(handler('save-da-export') + '\n' + handler('evidence-release-files'), mainEnv);
 const exportZip = HANDLERS['save-da-export'];
 const releaseFiles = HANDLERS['evidence-release-files'];

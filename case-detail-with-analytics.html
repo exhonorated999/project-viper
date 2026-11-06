@@ -40154,14 +40154,17 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 });
             } catch (_) {}
 
-            // ── Global PDF drop zone for DMV imports ─────────────
-            // Routes a dropped PDF to the right importer based on the active tab.
+            // ── Global PDF drop zone for DMV and RMS imports ─────
+            // Routes a dropped PDF to the right importer based on the active
+            // tab. The RMS tab takes every PDF dropped (same as choosing
+            // several in the Import dialog); the DMV tabs take the first.
             (function wireDmvDropZone() {
                 const TAB_ROUTERS = {
-                    suspects: (p) => importDmvPrintout(undefined, p),
-                    victims: (p) => importDmvVictim(undefined, p),
-                    witnesses: (p) => importDmvWitness(undefined, p),
-                    involvedPersons: (p) => importDmvInvolvedPerson(undefined, p),
+                    suspects: { label: 'DMV PDF', run: (paths) => importDmvPrintout(undefined, paths[0]) },
+                    victims: { label: 'DMV PDF', run: (paths) => importDmvVictim(undefined, paths[0]) },
+                    witnesses: { label: 'DMV PDF', run: (paths) => importDmvWitness(undefined, paths[0]) },
+                    involvedPersons: { label: 'DMV PDF', run: (paths) => importDmvInvolvedPerson(undefined, paths[0]) },
+                    rmsImport: { label: 'RMS report PDFs', multiple: true, run: (paths) => handleRmsImport(paths) },
                 };
                 const getTarget = () => TAB_ROUTERS[currentTab];
 
@@ -40169,7 +40172,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 overlay.id = 'dmvDropOverlay';
                 overlay.style.cssText = 'position:fixed;inset:0;z-index:9997;display:none;pointer-events:none;background:rgba(245,158,11,0.08);border:3px dashed rgba(245,158,11,0.7);box-sizing:border-box;';
                 overlay.innerHTML = `
-                  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:18px 28px;border-radius:14px;background:rgba(15,23,42,0.92);border:1px solid rgba(245,158,11,0.5);color:#fbbf24;font-weight:600;font-size:15px;letter-spacing:.02em;box-shadow:0 8px 32px rgba(0,0,0,.5);">
+                  <div id="dmvDropOverlayText" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:18px 28px;border-radius:14px;background:rgba(15,23,42,0.92);border:1px solid rgba(245,158,11,0.5);color:#fbbf24;font-weight:600;font-size:15px;letter-spacing:.02em;box-shadow:0 8px 32px rgba(0,0,0,.5);">
                     📄 Drop DMV PDF to import
                   </div>`;
                 document.body.appendChild(overlay);
@@ -40185,7 +40188,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     return fileItems.length > 0;
                 };
                 const showOverlay = () => {
-                    if (!getTarget()) return;
+                    const t = getTarget();
+                    if (!t) return;
+                    const txt = document.getElementById('dmvDropOverlayText');
+                    if (txt) txt.textContent = `📄 Drop ${t.label} to import`;
                     overlay.style.display = 'block';
                 };
                 const hideOverlay = () => { overlay.style.display = 'none'; };
@@ -40213,17 +40219,22 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     if (!router) return;
                     e.preventDefault();
                     const files = Array.from(e.dataTransfer.files || []);
-                    const pdf = files.find(f => /\.pdf$/i.test(f.name));
-                    if (!pdf) {
-                        if (typeof showToast === 'function') showToast('Drop a PDF file to import DMV data', 'warning');
+                    const pdfs = files.filter(f => /\.pdf$/i.test(f.name));
+                    if (!pdfs.length) {
+                        if (typeof showToast === 'function') showToast(`Drop a PDF file to import ${router.multiple ? 'RMS reports' : 'DMV data'}`, 'warning');
                         return;
                     }
-                    const filePath = pdf.path || (window.electronAPI && window.electronAPI.getPathForFile && window.electronAPI.getPathForFile(pdf));
-                    if (!filePath) {
+                    const pathOf = (f) => f.path || (window.electronAPI && window.electronAPI.getPathForFile && window.electronAPI.getPathForFile(f)) || '';
+                    const paths = (router.multiple ? pdfs : pdfs.slice(0, 1)).map(pathOf).filter(Boolean);
+                    if (!paths.length) {
                         if (typeof showToast === 'function') showToast('Could not resolve dropped file path', 'error');
                         return;
                     }
-                    router(filePath);
+                    const skipped = files.length - pdfs.length;
+                    if (router.multiple && skipped > 0 && typeof showToast === 'function') {
+                        showToast(`${skipped} file${skipped !== 1 ? 's were' : ' was'} skipped — only PDF reports can be imported here`, 'warning');
+                    }
+                    router.run(paths);
                 });
             })();
 
@@ -46270,9 +46281,13 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             renderTabContent('rmsImport');
         }
 
-        async function handleRmsImport() {
+        // droppedPaths: PDFs dragged onto the RMS tab (global drop zone);
+        // otherwise the Import dialog is shown.
+        async function handleRmsImport(droppedPaths) {
             try {
-                const filePaths = await window.electronAPI.selectRmsFiles();
+                const filePaths = (Array.isArray(droppedPaths) && droppedPaths.length)
+                    ? droppedPaths
+                    : await window.electronAPI.selectRmsFiles();
                 if (!filePaths || filePaths.length === 0) return;
 
                 showLoadingIndicator('Parsing RMS reports...');
@@ -46412,6 +46427,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             </svg>
                             Import RMS Report (.pdf)
                         </button>
+                        <p class="text-xs text-gray-500 mt-3">or drag and drop the PDF reports anywhere on this tab</p>
                     </div>
                 </div>`;
             }
@@ -46426,7 +46442,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         RMS Import
                         <span class="text-sm font-normal text-gray-400 ml-2">${rmsImports.length} report${rmsImports.length !== 1 ? 's' : ''}</span>
                     </h2>
-                    <button onclick="handleRmsImport()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange text-sm font-medium transition-colors inline-flex items-center gap-2">
+                    <button onclick="handleRmsImport()" title="Or drag and drop PDF reports onto this tab" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange rounded-lg text-viper-orange text-sm font-medium transition-colors inline-flex items-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                         </svg>

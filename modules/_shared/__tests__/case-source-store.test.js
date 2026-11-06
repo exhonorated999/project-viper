@@ -165,9 +165,16 @@ const rmsDir = path.join(casesDir, 'CASE-001', 'RMS_Reports');
   ok(/rmsReports:\s*'RMS_Reports'/.test(MAIN), '10 RMS_Reports is an allow-listed attachment folder (readable back)');
   ok(/dirs:\s*CASE_ATTACHMENT_DIRS/.test(MAIN), '10 store shares the attachment allow-list');
   ok(/caseSourceKeep:\s*\(data\)\s*=>\s*ipcRenderer\.invoke\('case-source-keep'/.test(PRE), '10 preload exposes caseSourceKeep');
-  const hi = CD.indexOf('async function handleRmsImport()');
+  const hi = CD.indexOf('async function handleRmsImport(');
   const hBody = CD.slice(hi, CD.indexOf('async function deleteRmsImport', hi));
   ok(/await _rmsKeepSource\(filePath\)/.test(hBody), '10 open-case import keeps the PDF');
+  ok(/async function handleRmsImport\(droppedPaths\)/.test(CD) && /Array\.isArray\(droppedPaths\) && droppedPaths\.length\)\s*\?\s*droppedPaths\s*:\s*await window\.electronAPI\.selectRmsFiles\(\)/.test(hBody),
+    '10 RMS import takes dropped paths, else shows the dialog');
+  ok(/rmsImport:\s*\{\s*label: 'RMS report PDFs', multiple: true, run: \(paths\) => handleRmsImport\(paths\)/.test(CD),
+    '10 PDFs dropped on the RMS tab go to handleRmsImport (all of them)');
+  ok(/suspects:\s*\{\s*label: 'DMV PDF', run: \(paths\) => importDmvPrintout\(undefined, paths\[0\]\)/.test(CD),
+    '10 DMV tabs still take only the first dropped PDF');
+  ok(/onclick="handleRmsImport\(\)"/.test(CD), '10 Import button still opens the dialog');
   ok(/report\.sourceFile = /.test(hBody), '10 every document gets sourceFile');
   const pi = CD.indexOf('function processPendingRmsImport()');
   const pBody = CD.slice(pi, pi + 6000);

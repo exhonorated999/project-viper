@@ -24,6 +24,7 @@
     <!-- The one authoritative list of where a case's data lives. Must load
          BEFORE case-snapshot.js and before the backup collector below. -->
     <script src="modules/_shared/case-stores.js"></script>
+    <script src="modules/backup/auto-backup.js"></script>
     <script src="case-snapshot.js"></script>
     <script src="libs/tailwindcss.js"></script>
     <link rel="stylesheet" href="modules/viper-skins.css">
@@ -3661,12 +3662,43 @@
                         </button>
                     </div>
 
+                    <!-- Automatic weekly backup -->
+                    <div class="mt-4 p-4 bg-viper-dark/60 border border-gray-700/50 rounded-lg">
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="flex-1">
+                                <div id="autoBackupLabel" class="text-sm text-gray-200 font-medium">Automatic weekly backup — Off</div>
+                                <div class="text-[11px] text-gray-500 leading-relaxed mt-0.5">
+                                    Once a week VIPER backs up every case, its files and your settings to the Backup Destination above, in the background while you work.
+                                    If VIPER was closed when a backup was due, it runs shortly after the next start. Older <em>automatic</em> backups are removed once there are more than you keep; backups you create yourself are never removed.
+                                </div>
+                            </div>
+                            <button id="autoBackupToggleBtn" type="button" onclick="toggleAutoBackup()" aria-label="Automatic weekly backup"
+                                class="relative w-14 h-7 rounded-full transition-colors bg-gray-600 flex-shrink-0">
+                                <div id="autoBackupToggleKnob" class="absolute w-5 h-5 bg-white rounded-full top-1 transition-transform translate-x-1"></div>
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-3 mt-3 text-xs text-gray-400">
+                            <label for="autoBackupKeep">Keep the newest</label>
+                            <select id="autoBackupKeep" onchange="saveAutoBackupKeep()" style="color-scheme: dark;"
+                                class="px-2 py-1 bg-viper-dark border border-gray-600 rounded text-gray-200 focus:outline-none focus:border-viper-cyan">
+                                <option value="2">2</option>
+                                <option value="4" selected>4</option>
+                                <option value="8">8</option>
+                                <option value="12">12</option>
+                            </select>
+                            <span>automatic backups</span>
+                        </div>
+                        <div id="autoBackupStatus" class="mt-2 text-xs text-gray-400"></div>
+                        <div id="autoBackupError" class="hidden mt-2 text-xs text-amber-300"></div>
+                    </div>
+
                     <!-- Last Backup Info -->
                     <div class="mt-4 p-3 bg-viper-dark rounded-lg">
                         <div class="text-xs text-gray-400">
                             <span>Last backup: </span>
                             <span id="lastBackupDate" class="text-gray-300">Never</span>
                         </div>
+                        <div id="lastBackupFile" class="hidden text-[11px] text-gray-500 mt-1 break-all"></div>
                     </div>
 
                     <!-- Disk Snapshot Recovery (v2.8.4+) -->
@@ -5684,12 +5716,121 @@
                 const selected = await window.electronAPI.selectBackupDirectory();
                 if (selected) {
                     document.getElementById('backupPath').value = selected;
+                    await saveBackupFolder(selected);
                 }
             } catch (error) {
                 console.error('Error selecting directory:', error);
                 showNotification('Failed to select directory', 'error');
             }
         }
+
+        // ─── Automatic weekly backup ─────────────────────────────────────
+        // Config lives in the main process (userData/auto-backup.json), not
+        // localStorage, so the folder and the last backup are still known
+        // after the profile data is lost — which is when a restore happens.
+        let _autoBackupState = null;
+
+        async function saveBackupFolder(folder) {
+            if (!window.electronAPI || !window.electronAPI.autoBackupSet) return;
+            try { _autoBackupState = await window.electronAPI.autoBackupSet({ folder: folder || '' }); renderAutoBackupUI(); }
+            catch (e) { console.warn('[auto-backup] save folder', e); }
+        }
+
+        function renderAutoBackupUI() {
+            const st = _autoBackupState;
+            if (!st) return;
+            const on = !!st.enabled;
+            const lbl = document.getElementById('autoBackupLabel');
+            const btn = document.getElementById('autoBackupToggleBtn');
+            const knob = document.getElementById('autoBackupToggleKnob');
+            if (lbl) lbl.textContent = 'Automatic weekly backup — ' + (on ? 'On' : 'Off');
+            if (btn) btn.className = 'relative w-14 h-7 rounded-full transition-colors flex-shrink-0 ' + (on ? 'bg-viper-green' : 'bg-gray-600');
+            if (knob) knob.className = 'absolute w-5 h-5 bg-white rounded-full top-1 transition-transform ' + (on ? 'translate-x-8' : 'translate-x-1');
+            const keep = document.getElementById('autoBackupKeep');
+            if (keep) {
+                const v = String(st.keep || 4);
+                if (![...keep.options].some(o => o.value === v)) keep.add(new Option(v, v));
+                keep.value = v;
+            }
+            const status = document.getElementById('autoBackupStatus');
+            if (status) status.textContent = window.ViperAutoBackup ? ViperAutoBackup.statusText(st, Date.now()) : '';
+            const err = document.getElementById('autoBackupError');
+            if (err) {
+                let msg = '';
+                if (on && st.folder && !st.folderExists) msg = 'The backup folder can’t be reached right now: ' + st.folder + '. Connect the drive or choose another folder.';
+                else if (on && st.lastError) msg = 'Last attempt did not complete: ' + st.lastError;
+                err.textContent = msg;
+                err.classList.toggle('hidden', !msg);
+            }
+            const pathInput = document.getElementById('backupPath');
+            if (pathInput && !pathInput.value && st.folder) pathInput.value = st.folder;
+            const enc = document.getElementById('backupEncryptToggle');
+            if (enc && !enc.dataset.loaded) { enc.checked = !!st.encrypt; enc.dataset.loaded = '1'; }
+            if (st.lastBackupAt) {
+                const d = document.getElementById('lastBackupDate');
+                if (d) d.textContent = new Date(st.lastBackupAt).toLocaleString() + (st.lastBackupFile && /AutoBackup/i.test(st.lastBackupFile) ? ' (automatic)' : '');
+            }
+            const lf = document.getElementById('lastBackupFile');
+            if (lf) {
+                lf.textContent = st.lastBackupFile ? st.lastBackupFile : '';
+                lf.classList.toggle('hidden', !st.lastBackupFile);
+            }
+        }
+
+        async function loadAutoBackupUI() {
+            if (!window.electronAPI || !window.electronAPI.autoBackupGet) return;
+            try { _autoBackupState = await window.electronAPI.autoBackupGet(); renderAutoBackupUI(); }
+            catch (e) { console.warn('[auto-backup] load', e); }
+        }
+
+        async function toggleAutoBackup() {
+            if (!_autoBackupState) await loadAutoBackupUI();
+            const next = !(_autoBackupState && _autoBackupState.enabled);
+            try {
+                if (next) {
+                    const input = document.getElementById('backupPath');
+                    let folder = (input && input.value.trim()) || (_autoBackupState && _autoBackupState.folder) || '';
+                    if (!folder) {
+                        folder = await window.electronAPI.selectBackupDirectory();
+                        if (!folder) { showNotification('Choose a Backup Destination for the weekly backup.', 'info'); return; }
+                        if (input) input.value = folder;
+                    }
+                    const enc = !!document.getElementById('backupEncryptToggle')?.checked;
+                    _autoBackupState = await window.electronAPI.autoBackupSet({ folder, encrypt: enc, enabled: true });
+                    renderAutoBackupUI();
+                    showNotification('Automatic weekly backup is on. The first backup starts in the background now.', 'success');
+                    // First one right away rather than in a week.
+                    if (_autoBackupState.due && window.ViperAutoBackup) {
+                        ViperAutoBackup.check().then(loadAutoBackupUI);
+                        setTimeout(loadAutoBackupUI, 400);
+                    }
+                } else {
+                    _autoBackupState = await window.electronAPI.autoBackupSet({ enabled: false });
+                    renderAutoBackupUI();
+                    showNotification('Automatic weekly backup is off. Existing backups were kept.', 'info');
+                }
+            } catch (e) {
+                showNotification('Could not change automatic backup: ' + (e.message || e), 'error');
+            }
+        }
+
+        async function saveAutoBackupKeep() {
+            const v = Number(document.getElementById('autoBackupKeep').value) || 4;
+            try { _autoBackupState = await window.electronAPI.autoBackupSet({ keep: v }); renderAutoBackupUI(); }
+            catch (e) { showNotification('Could not save: ' + (e.message || e), 'error'); }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const input = document.getElementById('backupPath');
+            if (input) input.addEventListener('change', () => saveBackupFolder(input.value.trim()));
+            const enc = document.getElementById('backupEncryptToggle');
+            if (enc) enc.addEventListener('change', async () => {
+                if (!window.electronAPI || !window.electronAPI.autoBackupSet) return;
+                try { _autoBackupState = await window.electronAPI.autoBackupSet({ encrypt: enc.checked }); } catch (_) {}
+            });
+            loadAutoBackupUI();
+        });
+        window.addEventListener('viper-auto-backup', () => loadAutoBackupUI());
 
         // ===== WiGLE ENCRYPTION HELPERS =====
         function encryptString(str) {
@@ -5844,6 +5985,7 @@
                 const now = new Date().toISOString();
                 localStorage.setItem('viperLastBackupDate', now);
                 document.getElementById('lastBackupDate').textContent = new Date(now).toLocaleString();
+                saveBackupFolder(backupPath);
 
                 setTimeout(() => {
                     document.getElementById('backupProgress').classList.add('hidden');
@@ -5866,16 +6008,114 @@
         }
 
         async function restoreBackup() {
-            if (!await viperConfirm('Restoring from backup will replace all current data. Are you sure you want to continue?')) {
-                return;
-            }
-
+            // Offer the newest backup VIPER knows about first, so nobody has
+            // to dig through folders for it. "Choose another file…" is still
+            // there for a backup that lives somewhere else.
+            let list = null;
             try {
-                const selected = await window.electronAPI.selectBackupFile();
-                if (!selected) return;
+                if (window.electronAPI.backupList) {
+                    const input = document.getElementById('backupPath');
+                    const extra = input && input.value.trim() ? [input.value.trim()] : [];
+                    list = await window.electronAPI.backupList({ folders: extra });
+                }
+            } catch (e) { console.warn('[restore] list', e); }
 
+            let selected;
+            if (list && list.backups && list.backups.length) {
+                selected = await pickBackupToRestore(list);
+                if (!selected) return;
+            } else {
+                if (!await viperConfirm('No backups were found in your backup folder, so choose the backup file yourself.\n\nRestoring from backup will replace all current data. Continue?')) {
+                    return;
+                }
+                selected = await window.electronAPI.selectBackupFile();
+                if (!selected) return;
+            }
+            await restoreBackupFile(selected);
+        }
+
+        /** Modal: newest backup preselected. Resolves a file path or null. */
+        function pickBackupToRestore(list) {
+            const A = window.ViperAutoBackup;
+            const esc = A ? A.esc : (s => String(s));
+            const size = A ? A.fmtSize : (n => n + ' B');
+            const rel = A ? (iso => A.relDays(iso, Date.now())) : (() => '');
+            // Usable backups first (newest on top); damaged/incomplete ones last.
+            const items = list.backups.filter(b => b.valid).concat(list.backups.filter(b => !b.valid)).slice(0, 12);
+            const firstOk = Math.max(0, items.findIndex(b => b.valid));
+            return new Promise(resolve => {
+                const wrap = document.createElement('div');
+                wrap.className = 'fixed inset-0 flex items-center justify-center p-4';
+                wrap.style.cssText = 'z-index:99996;background:rgba(0,0,0,.7);';
+                wrap.innerHTML = `
+                    <div class="w-full max-w-2xl rounded-xl border border-gray-700 bg-viper-dark text-gray-200 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="rbTitle">
+                        <div class="px-6 pt-5 pb-3 border-b border-gray-700/60">
+                            <h3 id="rbTitle" class="text-lg font-semibold">Restore from Backup</h3>
+                            <p class="text-xs text-gray-400 mt-1">The newest backup is selected. Restoring replaces the cases, files and settings in VIPER with the ones in the backup.</p>
+                        </div>
+                        <div class="px-6 py-4 max-h-[50vh] overflow-y-auto space-y-2" id="rbList">
+                            ${items.map((b, i) => `
+                                <label class="flex items-start gap-3 p-3 rounded-lg border ${i === firstOk ? 'border-viper-orange/60 bg-viper-orange/10' : 'border-gray-700/60'} ${b.valid ? 'cursor-pointer hover:border-viper-orange/60' : 'opacity-50'}" data-rb="${i}">
+                                    <input type="radio" name="rbPick" value="${i}" class="mt-1 accent-viper-orange" ${i === firstOk ? 'checked' : ''} ${b.valid ? '' : 'disabled'}>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="text-sm font-medium flex flex-wrap items-center gap-2">
+                                            <span>${esc(new Date(b.createdAt).toLocaleString())}</span>
+                                            <span class="text-xs text-gray-400">${esc(rel(b.createdAt))}</span>
+                                            ${i === firstOk ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-viper-orange/20 text-viper-orange">Latest</span>' : ''}
+                                            <span class="text-[10px] px-1.5 py-0.5 rounded ${b.auto ? 'bg-viper-green/15 text-viper-green' : 'bg-viper-purple/20 text-viper-purple'}">${b.auto ? 'Automatic' : 'Manual'}</span>
+                                            ${b.encrypted ? '<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">Encrypted</span>' : ''}
+                                            ${b.valid ? '' : '<span class="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-300">Damaged or incomplete</span>'}
+                                        </div>
+                                        <div class="text-[11px] text-gray-500 mt-0.5 break-all">${esc(b.name)} · ${esc(size(b.size))}</div>
+                                        <div class="text-[11px] text-gray-600 break-all">${esc(b.folder)}</div>
+                                    </div>
+                                </label>`).join('')}
+                        </div>
+                        <div class="px-6 py-4 border-t border-gray-700/60 flex flex-wrap items-center gap-3">
+                            <button type="button" data-act="other" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:text-white hover:border-gray-400 text-sm">Choose another file…</button>
+                            <div class="flex-1"></div>
+                            <button type="button" data-act="cancel" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:text-white text-sm">Cancel</button>
+                            <button type="button" data-act="ok" class="px-5 py-2 rounded-lg bg-viper-orange/20 hover:bg-viper-orange/30 border border-viper-orange text-viper-orange font-medium text-sm">Restore selected backup</button>
+                        </div>
+                    </div>`;
+                const done = (v) => {
+                    window.removeEventListener('keydown', onKey, true);
+                    wrap.remove();
+                    resolve(v);
+                };
+                const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); } };
+                window.addEventListener('keydown', onKey, true);
+                wrap.addEventListener('change', () => {
+                    wrap.querySelectorAll('[data-rb]').forEach(el => {
+                        const on = el.querySelector('input').checked;
+                        el.classList.toggle('border-viper-orange/60', on);
+                        el.classList.toggle('bg-viper-orange/10', on);
+                        el.classList.toggle('border-gray-700/60', !on);
+                    });
+                });
+                wrap.addEventListener('click', async (e) => {
+                    if (e.target === wrap) return done(null);
+                    const act = e.target.closest('[data-act]')?.dataset.act;
+                    if (act === 'cancel') return done(null);
+                    if (act === 'ok') {
+                        const r = wrap.querySelector('input[name="rbPick"]:checked');
+                        if (!r) return;
+                        return done(items[Number(r.value)].path);
+                    }
+                    if (act === 'other') {
+                        const f = await window.electronAPI.selectBackupFile();
+                        if (f) done(f);
+                    }
+                });
+                document.body.appendChild(wrap);
+                wrap.querySelector('[data-act="ok"]').focus();
+            });
+        }
+
+        async function restoreBackupFile(selected) {
+            try {
                 let data;
-                if (selected.endsWith('.vbak')) {
+                if (selected.toLowerCase().endsWith('.vbak')) {
                     // New ZIP backup format — extracts case files + returns localStorage JSON
                     const result = await window.electronAPI.restoreBackupZip({ backupPath: selected });
                     data = JSON.parse(result.jsonData);

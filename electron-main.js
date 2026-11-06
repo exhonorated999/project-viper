@@ -3998,6 +3998,9 @@ ipcMain.handle('create-backup-zip', async (event, { backupPath, data, encrypt })
     zip.writeZip(filePath);
   }
 
+  // Remember it so Restore can offer it without a file search.
+  try { _autoBackup.record(filePath, 'manual'); } catch (e) { console.error('[backup] record', e.message); }
+
   return { filePath, encrypted: wantEncrypt };
 });
 
@@ -4103,6 +4106,16 @@ ipcMain.handle('select-backup-file', async () => {
   if (result.canceled || !result.filePaths.length) return null;
   return result.filePaths[0];
 });
+
+// --- Automatic weekly backup + "latest backup" finder (modules/backup) ---
+// Config/state live in userData/auto-backup.json so they survive a
+// localStorage wipe (exactly when a restore is needed).
+const _autoBackup = require('./modules/backup/auto-backup-main.js').createAutoBackup({
+  userDataDir: app.getPath('userData'),
+  getCasesDir: () => casesDir,
+  getSecurity: () => security,
+});
+_autoBackup.register(ipcMain);
 
 // --- Report Pop-out Window ---
 ipcMain.handle('open-report-window', async (event, caseNumber) => {

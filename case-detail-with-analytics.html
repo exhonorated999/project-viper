@@ -40,6 +40,8 @@
          BEFORE case-snapshot.js and before the .vcase exporter: both read
          their key lists from it instead of carrying their own copies. -->
     <script src="modules/_shared/case-stores.js"></script>
+    <!-- Weekly automatic backup (runs in the background when due). -->
+    <script src="modules/backup/auto-backup.js"></script>
     <!-- How an imported record says where it came from. Display only — it
          writes nothing. Loads before the page script because every card
          renderer below asks it for a chip. -->

@@ -114,6 +114,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectBackupFile: () => ipcRenderer.invoke('select-backup-file'),
   restoreBackup: (data) => ipcRenderer.invoke('restore-backup', data),
   restoreBackupZip: (data) => ipcRenderer.invoke('restore-backup-zip', data),
+  autoBackupGet: () => ipcRenderer.invoke('auto-backup-get'),
+  autoBackupSet: (patch) => ipcRenderer.invoke('auto-backup-set', patch),
+  autoBackupRun: (args) => ipcRenderer.invoke('auto-backup-run', args),
+  backupList: (args) => ipcRenderer.invoke('backup-list', args),
 
   // Diagnostic Report (diagnostic-edition builds)
   isDiagnosticMode: () => ipcRenderer.invoke('is-diagnostic-mode'),

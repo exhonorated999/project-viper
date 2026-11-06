@@ -50,6 +50,8 @@
          BEFORE case-snapshot.js and before the .vcase importer: both read
          their key lists from it instead of carrying their own copies. -->
     <script src="modules/_shared/case-stores.js"></script>
+    <!-- Weekly automatic backup (runs in the background when due). -->
+    <script src="modules/backup/auto-backup.js"></script>
     <!-- Combining two detectives' work on one case. Resolves case-stores.js
          on every call rather than at load, but the import wizard reads
          CaseStores directly, so keep this below it regardless. -->

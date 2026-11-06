@@ -18420,6 +18420,7 @@
                                         ${renderEditableField('Date of Birth', 'dob', suspect.dob, index, 'date')}
                                         ${renderEditableField('Driver\'s License', 'dlNumber', suspect.dlNumber, index)}
                                         ${renderEditableField('DL State', 'dlState', suspect.dlState, index, 'state')}
+                                        ${renderEditableField('Sex', 'sex', suspect.sex, index)}
                                         ${renderEditableField('Height', 'height', suspect.height, index)}
                                         ${renderEditableField('Weight', 'weight', suspect.weight, index)}
                                         ${renderEditableField('Hair Color', 'hairColor', suspect.hairColor, index)}
@@ -19535,6 +19536,7 @@
                     if (parsed.dob && !victim.dob) victim.dob = parsed.dob;
                     if (parsed.dlNumber && !victim.dlNumber) victim.dlNumber = parsed.dlNumber;
                     if (parsed.dlState && !victim.dlState) victim.dlState = parsed.dlState;
+                    if (parsed.sex && !victim.sex) victim.sex = parsed.sex;
                     if (parsed.height && !victim.height) victim.height = parsed.height;
                     if (parsed.weight && !victim.weight) victim.weight = parsed.weight;
                     if (parsed.eyeColor && !victim.eyeColor) victim.eyeColor = parsed.eyeColor;
@@ -19553,7 +19555,7 @@
                         dlNumber: parsed.dlNumber || '', dlState: parsed.dlState || '', phone: '', phone2: '', email: '', email2: '',
                         height: parsed.height || '', weight: parsed.weight || '',
                         hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
-                        race: parsed.race || '',
+                        sex: parsed.sex || '', race: parsed.race || '',
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
                         residencePhoto: '', employerName: '', occupation: '',
                         employerAddress: '', employerPhone: '',
@@ -19638,6 +19640,7 @@
                     if (parsed.dob && !witness.dob) witness.dob = parsed.dob;
                     if (parsed.dlNumber && !witness.dlNumber) witness.dlNumber = parsed.dlNumber;
                     if (parsed.dlState && !witness.dlState) witness.dlState = parsed.dlState;
+                    if (parsed.sex && !witness.sex) witness.sex = parsed.sex;
                     if (parsed.height && !witness.height) witness.height = parsed.height;
                     if (parsed.weight && !witness.weight) witness.weight = parsed.weight;
                     if (parsed.eyeColor && !witness.eyeColor) witness.eyeColor = parsed.eyeColor;
@@ -19656,7 +19659,7 @@
                         dlNumber: parsed.dlNumber || '', dlState: parsed.dlState || '', phone: '', phone2: '', email: '', email2: '',
                         height: parsed.height || '', weight: parsed.weight || '',
                         hairColor: parsed.hairColor || '', eyeColor: parsed.eyeColor || '',
-                        race: parsed.race || '',
+                        sex: parsed.sex || '', race: parsed.race || '',
                         address: parsed.address || '', addressCityStateZip: parsed.addressCityStateZip || '',
                         residencePhoto: '', employerName: '', occupation: '',
                         employerAddress: '', employerPhone: '', statement: '',
@@ -19827,6 +19830,7 @@
             suspect.dob = document.getElementById(`field-dob-${index}`)?.value || '';
             suspect.dlNumber = document.getElementById(`field-dlNumber-${index}`)?.value || '';
             suspect.dlState = document.getElementById(`field-dlState-${index}`)?.value || '';
+            suspect.sex = document.getElementById(`field-sex-${index}`)?.value ?? (suspect.sex || '');
             suspect.height = document.getElementById(`field-height-${index}`)?.value || '';
             suspect.weight = document.getElementById(`field-weight-${index}`)?.value || '';
             suspect.hairColor = document.getElementById(`field-hairColor-${index}`)?.value || '';
@@ -20108,6 +20112,7 @@
                                 <input type="date" name="dob" placeholder="Date of Birth" value="${suspect.dob || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                                 <input type="text" name="dlNumber" placeholder="Driver's License Number" value="${suspect.dlNumber || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                                 ${_jurisdictionFormSelect('dlState', suspect.dlState, 'viper-cyan')}
+                                <input type="text" name="sex" placeholder="Sex" value="${suspect.sex || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                                 <input type="text" name="height" placeholder="Height (inches)" value="${suspect.height || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                                 <input type="text" name="weight" placeholder="Weight (lbs)" value="${suspect.weight || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
                                 <input type="text" name="hairColor" placeholder="Hair Color" value="${suspect.hairColor || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-cyan focus:outline-none">
@@ -20230,6 +20235,7 @@
                     dob: formData.get('dob'),
                     dlNumber: formData.get('dlNumber'),
                     dlState: formData.get('dlState'),
+                    sex: formData.get('sex') || '',
                     height: formData.get('height'),
                     weight: formData.get('weight'),
                     hairColor: formData.get('hairColor'),
@@ -22160,6 +22166,7 @@
                                     ${renderEditableFieldVictim('Date of Birth', 'dob', victim.dob, index, 'date')}
                                     ${renderEditableFieldVictim('Driver\'s License', 'dlNumber', victim.dlNumber, index)}
                                     ${renderEditableFieldVictim('DL State', 'dlState', victim.dlState, index, 'state')}
+                                    ${renderEditableFieldVictim('Sex', 'sex', victim.sex, index)}
                                     ${renderEditableFieldVictim('Height (inches)', 'height', victim.height, index)}
                                     ${renderEditableFieldVictim('Weight (lbs)', 'weight', victim.weight, index)}
                                     ${renderEditableFieldVictim('Hair Color', 'hairColor', victim.hairColor, index)}
@@ -22350,6 +22357,7 @@
             victim.dob = document.getElementById(`field-victim-dob-${index}`)?.value || '';
             victim.dlNumber = document.getElementById(`field-victim-dlNumber-${index}`)?.value || '';
             victim.dlState = document.getElementById(`field-victim-dlState-${index}`)?.value || '';
+            victim.sex = document.getElementById(`field-victim-sex-${index}`)?.value ?? (victim.sex || '');
             victim.height = document.getElementById(`field-victim-height-${index}`)?.value || '';
             victim.weight = document.getElementById(`field-victim-weight-${index}`)?.value || '';
             victim.hairColor = document.getElementById(`field-victim-hairColor-${index}`)?.value || '';
@@ -22463,6 +22471,7 @@
                                 <input type="date" name="dob" placeholder="Date of Birth" value="${victim.dob || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
                                 <input type="text" name="dlNumber" placeholder="Driver's License Number" value="${victim.dlNumber || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
                                 ${_jurisdictionFormSelect('dlState', victim.dlState, 'viper-purple')}
+                                <input type="text" name="sex" placeholder="Sex" value="${victim.sex || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
                                 <input type="text" name="height" placeholder="Height (inches)" value="${victim.height || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
                                 <input type="text" name="weight" placeholder="Weight (lbs)" value="${victim.weight || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
                                 <input type="text" name="hairColor" placeholder="Hair Color" value="${victim.hairColor || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-purple focus:outline-none">
@@ -22537,6 +22546,7 @@
                     dob: formData.get('dob'),
                     dlNumber: formData.get('dlNumber'),
                     dlState: formData.get('dlState'),
+                    sex: formData.get('sex') || '',
                     phone: formData.get('phone'),
                     phone2: formData.get('phone2'),
                     email: formData.get('email'),
@@ -24531,6 +24541,7 @@
                                     ${renderEditableFieldWitness('Date of Birth', 'dob', witness.dob, index, 'date')}
                                     ${renderEditableFieldWitness('Driver\'s License', 'dlNumber', witness.dlNumber, index)}
                                     ${renderEditableFieldWitness('DL State', 'dlState', witness.dlState, index, 'state')}
+                                    ${renderEditableFieldWitness('Sex', 'sex', witness.sex, index)}
                                     ${renderEditableFieldWitness('Height (inches)', 'height', witness.height, index)}
                                     ${renderEditableFieldWitness('Weight (lbs)', 'weight', witness.weight, index)}
                                     ${renderEditableFieldWitness('Hair Color', 'hairColor', witness.hairColor, index)}
@@ -24636,6 +24647,7 @@
             witness.dob = document.getElementById(`field-witness-dob-${index}`)?.value || '';
             witness.dlNumber = document.getElementById(`field-witness-dlNumber-${index}`)?.value || '';
             witness.dlState = document.getElementById(`field-witness-dlState-${index}`)?.value || '';
+            witness.sex = document.getElementById(`field-witness-sex-${index}`)?.value ?? (witness.sex || '');
             witness.height = document.getElementById(`field-witness-height-${index}`)?.value || '';
             witness.weight = document.getElementById(`field-witness-weight-${index}`)?.value || '';
             witness.hairColor = document.getElementById(`field-witness-hairColor-${index}`)?.value || '';
@@ -24750,6 +24762,7 @@
                                 <input type="date" name="dob" placeholder="Date of Birth" value="${witness.dob || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
                                 <input type="text" name="dlNumber" placeholder="Driver's License Number" value="${witness.dlNumber || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
                                 ${_jurisdictionFormSelect('dlState', witness.dlState, 'viper-green')}
+                                <input type="text" name="sex" placeholder="Sex" value="${witness.sex || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
                                 <input type="text" name="height" placeholder="Height (inches)" value="${witness.height || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
                                 <input type="text" name="weight" placeholder="Weight (lbs)" value="${witness.weight || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
                                 <input type="text" name="hairColor" placeholder="Hair Color" value="${witness.hairColor || ''}" class="bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">
@@ -24830,6 +24843,7 @@
                     dob: formData.get('dob'),
                     dlNumber: formData.get('dlNumber'),
                     dlState: formData.get('dlState'),
+                    sex: formData.get('sex') || '',
                     phone: formData.get('phone'),
                     phone2: formData.get('phone2'),
                     email: formData.get('email'),
@@ -24849,7 +24863,9 @@
                 };
                 
                 if (isEdit) {
-                    witnesses[editIndex] = witnessData;
+                    // MERGE, don't replace (same as the victim form): fields
+                    // this form doesn't show (race, DMV printout…) must survive.
+                    witnesses[editIndex] = Object.assign({}, witnesses[editIndex], witnessData);
                 } else {
                     witnesses.push(witnessData);
                 }

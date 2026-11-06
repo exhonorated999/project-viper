@@ -254,6 +254,9 @@ const tempBefore = new Set(fs.readdirSync(os.tmpdir()).filter(n => /^viper-zip-/
         saveCyberTips: t => { saved = t; },
         renderTabContent() {},
         parseCyberTip: (text, fileName) => ({ reportNumber: (text.match(/Report (\d+)/) || [])[1] || '', fileName }),
+        // Keeping the original is covered in case-source-store.test.js;
+        // here it simply reports "already with the case".
+        _keepImportSource: async () => ({ inCase: true }),
     };
     vm.createContext(ienv);
     vm.runInContext([

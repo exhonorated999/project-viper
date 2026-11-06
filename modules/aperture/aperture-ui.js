@@ -925,12 +925,23 @@ class ApertureUI {
         if (!fileInput.files || !fileInput.files.length) { alert('Please select a file'); return; }
 
         const file = fileInput.files[0];
+        const api = window.electronAPI || {};
+        const filePath = file.path || (typeof api.getPathForFile === 'function' ? api.getPathForFile(file) : '');
         try {
-            await this.module.importFile(file.path, file.name, sourceName);
+            const result = await this.module.importFile(filePath, file.name, sourceName);
             this.hideImportDialog();
             this.refreshAll();
-            if (typeof showNotification === 'function') {
-                showNotification('Email data imported successfully', 'success');
+            const say = typeof window.viperToast === 'function' ? window.viperToast
+                : (typeof showNotification === 'function' ? showNotification : null);
+            if (say) {
+                if (result && result.sourceKeepError) {
+                    say('Email data imported, but the original file could not be saved to the case folder ('
+                        + result.sourceKeepError + ')', 'warning', 9000);
+                } else {
+                    say(result && result.sourceFile
+                        ? 'Email data imported — original saved to the case folder (Email Sources)'
+                        : 'Email data imported successfully', 'success');
+                }
             }
         } catch (error) {
             alert('Import failed: ' + error.message);

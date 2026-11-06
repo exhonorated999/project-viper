@@ -69,7 +69,7 @@ function lift(name) {
 }
 const LIFTED = ['_cdrEsc', 'autoDetectCdrColumns', 'showColumnMappingModal', 'renderColumnMappingField',
     'closeColumnMappingModal', 'submitColumnMapping', 'processCDRData', 'parseTimestamp', 'normalizeCallType',
-    'calculateCDRStatistics', 'groupRecordsByHour', 'parseCDRFile'];
+    'calculateCDRStatistics', 'groupRecordsByHour', 'parseCDRFile', '_cdrFilePath', '_cdrKeepSource'];
 
 function makeTab() {
     const sb = {

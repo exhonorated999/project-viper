@@ -42,7 +42,7 @@ function sanitizeName(n) {
   return (b === '.' || b === '..' || !b) ? null : b;
 }
 const store = S.create({ fs, path, getCasesDir: () => casesDir, getSecurity: () => sec,
-  safeCaseNumber, sanitizeName, dirs: { rmsReports: 'RMS_Reports' }, maxEncryptBytes: 1000 });
+  safeCaseNumber, sanitizeName, dirs: { rmsReports: 'RMS_Reports', cyberTips: 'CyberTips', cdrSources: 'CDR/Original Files' }, maxEncryptBytes: 1000 });
 
 const sha = b => crypto.createHash('sha256').update(b).digest('hex');
 function src(name, text) { const p = path.join(srcDir, name); fs.writeFileSync(p, text); return p; }
@@ -133,6 +133,28 @@ const rmsDir = path.join(casesDir, 'CASE-001', 'RMS_Reports');
   // ── 9. folderFor ──────────────────────────────────────────────────────
   eq(store.folderFor('CASE-001', 'rmsReports').dir, path.resolve(rmsDir), '9 folderFor');
 
+  // ── 9b. path in the result; ifInCase:'skip'; two-level folder ────────
+  sec.enabled = false; sec.unlocked = true;
+  const ct = src('CyberTip 1234.synthetic.zip', 'PK synthetic cybertip zip');
+  r = await store.keep({ caseNumber: 'CASE-003', kind: 'cyberTips', sourcePath: ct, ifInCase: 'skip' });
+  ok(r.success && !r.inCase, '9b a file outside the case is copied even with ifInCase');
+  eq(r.path, path.join(path.resolve(casesDir), 'CASE-003', 'CyberTips', 'CyberTip 1234.synthetic.zip'), '9b result carries the kept path');
+  r = await store.keep({ caseNumber: 'CASE-003', kind: 'cyberTips', sourcePath: ct });
+  ok(r.reused && r.path && fs.existsSync(r.path), '9b a reused copy carries its path too');
+  const evDir = path.join(casesDir, 'CASE-003', 'Evidence', 'E1'); fs.mkdirSync(evDir, { recursive: true });
+  const inEv = path.join(evDir, 'Report.synthetic.pdf'); fs.writeFileSync(inEv, '%PDF-1.4 synthetic in evidence');
+  r = await store.keep({ caseNumber: 'CASE-003', kind: 'cyberTips', sourcePath: inEv, ifInCase: 'skip' });
+  ok(r.success && r.inCase, '9b a file already in this case is not copied (ifInCase)');
+  eq(r.path, path.resolve(inEv), '9b inCase result points at the file itself');
+  ok(!fs.existsSync(path.join(casesDir, 'CASE-003', 'CyberTips', 'Report.synthetic.pdf')), '9b no second copy made');
+  r = await store.keep({ caseNumber: 'CASE-004', kind: 'cyberTips', sourcePath: inEv, ifInCase: 'skip' });
+  ok(r.success && !r.inCase, '9b another case\'s file IS copied');
+  r = await store.keep({ caseNumber: 'CASE-003', kind: 'cyberTips', sourcePath: inEv });
+  ok(r.success && !r.inCase, '9b without ifInCase the file is copied as before');
+  const cdr = src('Carrier Return.synthetic.csv', 'SYNTHETIC,Conn Date\n1,2');
+  r = await store.keep({ caseNumber: 'CASE-003', kind: 'cdrSources', sourcePath: cdr });
+  ok(r.success && fs.existsSync(path.join(casesDir, 'CASE-003', 'CDR', 'Original Files', 'Carrier Return.synthetic.csv')), '9b two-level folder (CDR/Original Files)');
+
   // ── 10. wiring (source contracts) ────────────────────────────────────
   const root = path.join(__dirname, '..', '..', '..');
   const MAIN = fs.readFileSync(path.join(root, 'electron-main.js'), 'utf8');
@@ -154,6 +176,37 @@ const rmsDir = path.join(casesDir, 'CASE-001', 'RMS_Reports');
   ok(/openRmsSourcePdf\(\$\{index\}\)/.test(CD) && /attachRmsSourcePdf\(\$\{index\}\)/.test(CD), '10 detail view offers view / attach');
   const di = CD.indexOf('async function deleteRmsImport');
   ok(!/caseAttachmentDelete/.test(CD.slice(di, di + 600)), '10 removing an import never deletes the PDF');
+
+  // ── 11. wiring: CyberTip, CDR / .ampcase, Aperture, DA export ────────
+  const AD = fs.readFileSync(path.join(root, 'modules', 'aperture', 'aperture-data.js'), 'utf8');
+  const AM = fs.readFileSync(path.join(root, 'modules', 'aperture', 'aperture-module.js'), 'utf8');
+  ok(/cyberTips:\s*'CyberTips'/.test(MAIN) && /cdrSources:\s*'CDR\/Original Files'/.test(MAIN) && /emailSources:\s*'Email Sources'/.test(MAIN),
+    '11 new kinds are allow-listed');
+  ok(/async function _keepImportSource\(kind, filePath, module\)/.test(CD) && /ifInCase: 'skip'/.test(CD), '11 renderer helper skips files already in the case');
+  const ci = CD.indexOf('async function _importCyberTipFiles(items)');
+  const cBody = CD.slice(ci, CD.indexOf('async function _cyberTipExpandZips', ci));
+  ok(/if \(!it\.evidenceTag\)/.test(cBody) && /_keepImportSource\('cyberTips', it\.path, 'cybertip'\)/.test(cBody), '11 CyberTip keeps picked files, not Evidence ones');
+  ok(/keptByPath\.has\(it\.path\)/.test(cBody), '11 one copy per file (a ZIP of many tips is kept once)');
+  ok(/parsed\.sourceFile = /.test(cBody) && /parsed\.sourceOriginalPath = it\.path/.test(cBody), '11 the tip records the kept copy and where it came from');
+  ok(cBody.indexOf('sourceFingerprint') < cBody.indexOf("_keepImportSource('cyberTips'"), '11 fingerprint is taken from the original first');
+  ok(/sourcePath: _cdrFilePath\(file\)/.test(CD) && /sourcePath: pend\.sourcePath/.test(CD), '11 CDR path travels to the submit');
+  const pc = CD.indexOf('async function processCDRData(');
+  const pcBody = CD.slice(pc, CD.indexOf('const saved = await saveCDRDumps(dumps)', pc));
+  ok(/await _cdrKeepSource\(dump, opts\.sourcePath\)/.test(pcBody), '11 CDR file kept before the dump is saved');
+  const ai = CD.indexOf('async function importAmpcaseFile()');
+  const aBody = CD.slice(ai, CD.indexOf('await saveCDRDumps(dumps)', ai));
+  ok(/await _cdrKeepSource\(dump, filePath\)/.test(aBody), '11 .ampcase kept before the dump is saved');
+  ok((MAIN.match(/await _apertureKeepOriginal\(data, filePath\)/g) || []).length === 2, '11 both Aperture import handlers keep the original');
+  ok(/kind: 'emailSources', sourcePath: filePath, ifInCase: 'skip'/.test(MAIN), '11 Aperture skips files already in the case (Evidence scan)');
+  ok(/caseNumber: this\.caseNumber/.test(AM), '11 Aperture renderer sends the case number');
+  ok(/newSource\.sourceFile = sourceData\.sourceFile/.test(AD) && /newSource\.sourcePath = sourceData\.sourcePath/.test(AD), '11 Aperture source records the kept copy');
+  ok(/EXPORT_FOLDER_KEYS = \[\.\.\.LEGACY_FOLDER_KEYS, 'forensics', 'warrantDrafts', 'rmsReports'\]/.test(MAIN), '11 DA export knows rmsReports');
+  ok(!/LEGACY_FOLDER_KEYS = \[[^\]]*rmsReports/.test(MAIN), '11 rmsReports is not in the legacy (default) set');
+  ok(/if \(wants\('rmsReports'\)\) addTreeToArchive\(/.test(MAIN), '11 RMS PDFs archived only when asked');
+  ok(/id="exportRmsPdfs" class=/.test(CD) && !/id="exportRmsPdfs"[^>]*checked/.test(CD), '11 export dialog offers the RMS PDFs unticked');
+  ok(/_rmsPdfBox && _rmsPdfBox\.checked\) _daExportFolders\.push\('rmsReports'\)/.test(CD), '11 ticked box adds rmsReports');
+  ok(!/cyberTips|cdrSources|emailSources/.test(MAIN.slice(MAIN.indexOf('const EXPORT_FOLDER_KEYS'), MAIN.indexOf('const EXPORT_FOLDER_KEYS') + 200)),
+    '11 CyberTip / CDR / e-mail originals are not DA-export folders');
 
   try { fs.rmSync(T, { recursive: true, force: true }); } catch (_) { /* ignore */ }
   console.log(`case-source-store: ${pass} passed, ${fail} failed`);

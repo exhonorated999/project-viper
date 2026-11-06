@@ -21,7 +21,10 @@
  *   - Field Security on + unlocked → written encrypted; on + locked → refused
  *     (never plaintext behind a locked vault);
  *   - written to a temp file in the same folder, renamed into place, then
- *     read back and checked against the source hash.
+ *     read back and checked against the source hash;
+ *   - `ifInCase: 'skip'` → a source already inside this case's folder is
+ *     not copied again ({success, inCase:true, path}).
+ * Success results carry `path`, the stored copy's full path.
  *
  * Never throws: every outcome is {success, ...}.
  */
@@ -92,9 +95,10 @@ function create(deps) {
         if (!cn) return { error: fail('CASE', 'Invalid case number') };
         if (!Object.prototype.hasOwnProperty.call(dirs, kind)) return { error: fail('KIND', 'Unknown file kind') };
         const root = path.resolve(getCasesDir());
-        const dir = path.resolve(root, cn, dirs[kind]);
-        if (!inside(root, dir)) return { error: fail('CASE', 'Invalid case folder') };
-        return { dir };
+        const caseDir = path.resolve(root, cn);
+        const dir = path.resolve(caseDir, dirs[kind]);
+        if (!inside(root, caseDir) || !inside(caseDir, dir)) return { error: fail('CASE', 'Invalid case folder') };
+        return { dir, caseDir };
     }
 
     async function keep(payload) {
@@ -109,6 +113,14 @@ function create(deps) {
             let st;
             try { st = await fs.promises.stat(src); } catch (_) { return fail('NOT_FOUND', 'The source file is no longer there'); }
             if (!st.isFile()) return fail('SOURCE', 'The source is not a file');
+
+            // A file read from inside this case's own folder (its Evidence,
+            // say) is already kept with the case: no second copy when the
+            // caller asks for that.
+            if (p.ifInCase === 'skip' && inside(f.caseDir, path.resolve(src))) {
+                return { success: true, inCase: true, fileName: path.basename(src), path: path.resolve(src),
+                    size: st.size, reused: true };
+            }
 
             const name = sanitizeName(p.fileName || path.basename(src));
             if (!name) return fail('NAME', 'Invalid file name');
@@ -144,7 +156,7 @@ function create(deps) {
                     // The file picked IS the stored copy, or an identical
                     // copy is already there: nothing to write.
                     if (same(path.resolve(dest), srcAbs) || (await plainHash(dest)) === sha) {
-                        return { success: true, fileName: candName, size: st.size, sha256: sha,
+                        return { success: true, fileName: candName, path: dest, size: st.size, sha256: sha,
                             encrypted: isVipencFile(dest), reused: true };
                     }
                     continue;
@@ -170,7 +182,7 @@ function create(deps) {
                     try { await fs.promises.unlink(dest); } catch (_) { /* ignore */ }
                     return fail('VERIFY', 'The copy did not match the original');
                 }
-                return { success: true, fileName: candName, size: st.size, sha256: sha,
+                return { success: true, fileName: candName, path: dest, size: st.size, sha256: sha,
                     encrypted: encrypting, reused: false };
             }
             return fail('NAME', 'Too many files with this name');

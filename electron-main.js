@@ -2778,7 +2778,13 @@ const CASE_ATTACHMENT_DIRS = Object.freeze({
   photos:         'Photos',
   // Original RMS report PDFs, copied in at import (case-source-keep below).
   // Same folder the old RMS text dump used.
-  rmsReports:     'RMS_Reports'
+  rmsReports:     'RMS_Reports',
+  // Originals of other imports, kept the same way (case-source-keep):
+  // CyberTip report PDF / ICAC ZIP as received, carrier CDR files and
+  // .ampcase bundles, Aperture mailboxes and single e-mails.
+  cyberTips:      'CyberTips',
+  cdrSources:     'CDR/Original Files',
+  emailSources:   'Email Sources'
 });
 
 function _caseAttachmentDir(caseNumber, kind) {
@@ -5327,8 +5333,10 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
   // `forensics` (Device Exams reports) and `warrantDrafts` (Warrant Author
   // PDF/DOCX output) are only carried when asked for by name, so an older
   // caller that sends no list gets exactly the five folders it always got.
+  // `rmsReports` (the original RMS report PDFs kept at import) is the same:
+  // by name only, and the export dialog leaves it unticked by default.
   const LEGACY_FOLDER_KEYS = ['evidence', 'warrants', 'notes', 'canvas', 'fieldwork'];
-  const EXPORT_FOLDER_KEYS = [...LEGACY_FOLDER_KEYS, 'forensics', 'warrantDrafts'];
+  const EXPORT_FOLDER_KEYS = [...LEGACY_FOLDER_KEYS, 'forensics', 'warrantDrafts', 'rmsReports'];
   const wantFolders = new Set(Array.isArray(folders)
     ? folders.filter(k => EXPORT_FOLDER_KEYS.includes(k))
     : LEGACY_FOLDER_KEYS);
@@ -5638,6 +5646,16 @@ ipcMain.handle('save-da-export', async (event, { fileName, pdfBytes, caseNumber,
         pfx('Warrant Author'),
         archive,
         { manifestModule: 'Warrant Author', onlyExts: new Set(['.pdf', '.docx']) }
+      );
+
+      // 8b. RMS Reports — the original report PDFs kept when they were
+      //    imported (cases/<cn>/RMS_Reports/). PDFs only: the folder also
+      //    held the old text dumps.
+      if (wants('rmsReports')) addTreeToArchive(
+        path.join(casesDir, caseNumber, 'RMS_Reports'),
+        pfx('RMS Reports'),
+        archive,
+        { manifestModule: 'RMS Reports', onlyExts: new Set(['.pdf']) }
       );
 
       // 9. Manifest with per-file outcome — useful for DA-side audit
@@ -11731,6 +11749,30 @@ const ApertureParser = require('./modules/aperture/aperture-parser.js');
 const ApertureData = require('./modules/aperture/aperture-data.js');
 const apertureData = new ApertureData(casesDir);
 
+// Keep a copy of an imported mailbox / e-mail in cases/<n>/Email Sources/
+// (case-source-store rules). A file picked from this case's own Evidence is
+// already with the case and is not copied twice. The source then reads the
+// kept copy for Source Validation (`sourcePath`; `filePath` stays the
+// import's identity). Never fails the import.
+async function _apertureKeepOriginal(data, filePath) {
+  const caseNumber = data && data.caseNumber;
+  if (!caseNumber) return { fields: {}, error: null };
+  try {
+    const r = await _caseSourceStore.keep({ caseNumber: String(caseNumber), kind: 'emailSources', sourcePath: filePath, ifInCase: 'skip' });
+    if (!r || !r.success) return { fields: {}, error: (r && r.error) || 'The file could not be copied' };
+    if (r.inCase) return { fields: {}, error: null, inCase: true };
+    return {
+      fields: {
+        sourcePath: r.path,
+        sourceFile: { kind: 'emailSources', fileName: r.fileName, size: r.size, sha256: r.sha256,
+          encrypted: !!r.encrypted, reused: !!r.reused, savedAt: new Date().toISOString() }
+      },
+      error: null
+    };
+  } catch (e) {
+    return { fields: {}, error: (e && e.message) || String(e) };
+  }
+}
 ipcMain.handle('aperture-load-emails', async (event, caseId) => {
   try {
     const emails = apertureData.loadEmails(String(caseId));
@@ -11765,14 +11807,15 @@ ipcMain.handle('aperture-import-mbox', async (event, data) => {
     console.log(`Parsed ${emails.length} emails`);
     
     // Add source
-    const source = apertureData.addSource(caseId, {
+    const kept = await _apertureKeepOriginal(data, filePath);
+    const source = apertureData.addSource(caseId, Object.assign({
       name: sourceName,
       fileName: fileName,
       filePath: filePath,
       fileType: 'mbox',
       emailCount: emails.length,
       sourceIntegrity: await fingerprintP
-    });
+    }, kept.fields));
     
     // Add emails
     const addedEmails = apertureData.addEmails(caseId, source.id, emails);
@@ -11780,7 +11823,9 @@ ipcMain.handle('aperture-import-mbox', async (event, data) => {
     return { 
       success: true, 
       emailCount: emails.length,
-      sourceId: source.id 
+      sourceId: source.id,
+      sourceFile: kept.fields.sourceFile || null,
+      sourceKeepError: kept.error || null
     };
   } catch (error) {
     console.error('Failed to import mbox:', error);
@@ -11827,18 +11872,20 @@ ipcMain.handle('aperture-import-email-file', async (event, data) => {
       emails = [email];
     }
 
-    const source = apertureData.addSource(caseId, {
+    const kept = await _apertureKeepOriginal(data, filePath);
+    const source = apertureData.addSource(caseId, Object.assign({
       name: sourceName,
       fileName: fileName,
       filePath: filePath,
       fileType: ext.replace('.', ''),
       emailCount: emails.length,
       sourceIntegrity: await fingerprintP
-    });
+    }, kept.fields));
 
     apertureData.addEmails(caseId, source.id, emails);
 
-    return { success: true, emailCount: emails.length, sourceId: source.id };
+    return { success: true, emailCount: emails.length, sourceId: source.id,
+      sourceFile: kept.fields.sourceFile || null, sourceKeepError: kept.error || null };
   } catch (error) {
     console.error('Failed to import email file:', error);
     return { success: false, error: error.message };

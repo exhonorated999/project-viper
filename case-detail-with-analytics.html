@@ -2838,6 +2838,28 @@
                                     `;
                                 }).join('')}
                             </div>
+                            ${(() => {
+                                // The original RMS report PDFs kept at import: offered,
+                                // but never sent unless the officer ticks this.
+                                let n = 0;
+                                try {
+                                    const seen = new Set();
+                                    (getRmsImports() || []).forEach(r => { const f = r && r.sourceFile && r.sourceFile.fileName; if (f && !seen.has(f)) { seen.add(f); n++; } });
+                                } catch (_) { n = 0; }
+                                if (!n) return '';
+                                return `
+                                <label class="flex items-center space-x-3 p-3 mb-4 -mt-2 rounded-lg cursor-pointer hover:bg-viper-card/30 transition-colors border border-dashed border-gray-700 hover:border-viper-orange/30">
+                                    <input type="checkbox" id="exportRmsPdfs" class="w-5 h-5 rounded border-gray-600 text-viper-orange focus:ring-viper-orange">
+                                    <div class="flex items-center justify-between flex-1">
+                                        <div class="flex items-center space-x-2">
+                                            <span class="text-xl">📄</span>
+                                            <span class="text-sm font-medium text-white">Original RMS report PDFs</span>
+                                            <span class="text-xs text-viper-orange bg-viper-orange/20 px-2 py-0.5 rounded">Files</span>
+                                        </div>
+                                        <span class="text-xs text-gray-400">${n} ${n === 1 ? 'PDF' : 'PDFs'} · not included unless ticked</span>
+                                    </div>
+                                </label>`;
+                            })()}
 
                             <div class="bg-viper-card/30 border border-viper-cyan/20 rounded-lg p-4 text-sm text-gray-300">
                                 <div class="flex items-start space-x-2">
@@ -3347,6 +3369,9 @@
             // evidence file on the case — on a case holding a phone
             // extraction that is tens of gigabytes and a quarter of an hour.
             _daExportFolders = _exportFoldersForTabs(selectedTabs.map(t => t.id));
+            // The kept RMS report PDFs ride along only when ticked (off by default).
+            const _rmsPdfBox = document.getElementById('exportRmsPdfs');
+            if (_rmsPdfBox && _rmsPdfBox.checked) _daExportFolders.push('rmsReports');
 
             closeExportCaseModal();
 
@@ -3384,7 +3409,8 @@
         const EXPORT_FOLDER_LABELS = {
             evidence: 'evidence files', warrants: 'warrant files', notes: 'note attachments',
             canvas: 'area canvas media', fieldwork: 'field work media',
-            forensics: 'device exam reports', warrantDrafts: 'warrant author documents'
+            forensics: 'device exam reports', warrantDrafts: 'warrant author documents',
+            rmsReports: 'original RMS report PDFs'
         };
         function _exportFoldersForTabs(tabIds) {
             const out = [];
@@ -40342,6 +40368,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <div class="text-white text-sm font-medium mb-1">${dump.name}</div>
                                 <div class="text-gray-400 text-xs">${dump.stats.totalRecords.toLocaleString()} records</div>
                                 <div class="text-gray-500 text-xs">${formatDate(dump.uploadDate)}</div>
+                                ${dump.sourceFile ? `<div class="text-emerald-300/80 text-[11px]" title="${_cdrEsc('CDR\\Original Files\\' + (dump.sourceFile.fileName || ''))}">Original saved to case</div>` : ''}
                             </div>
                         `).join('')}
                     </div>
@@ -41687,6 +41714,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     hasTowerData: true,
                     hasGeo: (data.points || []).length > 0
                 };
+                await _cdrKeepSource(dump, filePath);
 
                 const dumps = getCDRDumpsForCase();
                 dumps.push(dump);
@@ -41712,6 +41740,30 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
 
         function _cdrEsc(v) {
             return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // Disk path of a picked File ('' for one that has none, e.g. a test).
+        function _cdrFilePath(file) {
+            try {
+                if (file && typeof file.path === 'string' && file.path) return file.path;
+                const api = window.electronAPI;
+                if (file && api && typeof api.getPathForFile === 'function') return api.getPathForFile(file) || '';
+            } catch (_) { /* no path */ }
+            return '';
+        }
+
+        // Keeps a CDR source (carrier file / .ampcase) in cases/<n>/CDR/Original
+        // Files/ and stamps the dump. A failure is said, never fatal.
+        async function _cdrKeepSource(dump, filePath) {
+            if (!filePath) return;
+            let kept;
+            try { kept = (await _keepImportSource('cdrSources', filePath, 'cdr')) || {}; }
+            catch (e) { kept = { error: (e && e.message) || String(e) }; }
+            if (kept.file) dump.sourceFile = kept.file;
+            else if (kept.error) {
+                dump.sourceFileError = kept.error;
+                showToast('The CDR was imported, but the original file could not be saved to the case folder (' + kept.error + ')', 'error');
+            }
         }
 
         // Reads a carrier return (CSV/TXT or Excel .xlsx) into rows, finds the
@@ -41791,6 +41843,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             window._cdrPending = {
                 fileName, sheetName, carrier, formatType,
                 sourceFormat: isXlsx ? 'xlsx' : 'csv',
+                // Where the file is on disk, so the original can be kept in
+                // the case folder once the officer confirms the mapping.
+                sourcePath: _cdrFilePath(file),
                 headers: conv.headers,
                 records: conv.records
             };
@@ -42023,7 +42078,8 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     utc: timesUtc,
                     sourceFormat: pend.sourceFormat,
                     sheetName: pend.sheetName,
-                    carrier: pend.carrier
+                    carrier: pend.carrier,
+                    sourcePath: pend.sourcePath || ''
                 });
             } catch (err) {
                 console.error('processCDRData error:', err);
@@ -42181,6 +42237,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 refLon: window._cdrRefLon || null
             };
             
+            // The carrier's file itself goes with the case (CDR/Original Files).
+            await _cdrKeepSource(dump, opts.sourcePath);
+
             // Save to per-case dumps.json on disk (no localStorage quota)
             const dumps = getCDRDumpsForCase();
             dumps.push(dump);
@@ -46082,6 +46141,31 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             }
         }
 
+        /* Same rule for the other importers (CyberTip, CDR / .ampcase): the
+         * original goes to cases/<n>/<folder for kind>/ and the record keeps
+         * `sourceFile` (+ `path`, the kept copy). A file already inside this
+         * case's folder is not copied twice → { inCase: true }.
+         * → { file } | { inCase } | { error }. Audit `import_source_saved`. */
+        async function _keepImportSource(kind, filePath, module) {
+            const api = window.electronAPI;
+            if (!filePath || !currentCase || !currentCase.caseNumber) return { error: 'No case open' };
+            if (!api || typeof api.caseSourceKeep !== 'function') return { error: 'Not available in this version' };
+            try {
+                const r = await api.caseSourceKeep({ caseNumber: currentCase.caseNumber, kind, sourcePath: filePath, ifInCase: 'skip' });
+                if (!r || !r.success) return { error: (r && r.error) || 'The file could not be copied' };
+                if (r.inCase) return { inCase: true, path: r.path };
+                const file = { kind, fileName: r.fileName, size: r.size, sha256: r.sha256,
+                    encrypted: !!r.encrypted, savedAt: new Date().toISOString() };
+                if (!r.reused) {
+                    audit('import_source_saved', { module, case_number: currentCase.caseNumber, case_id: currentCase.id,
+                        file_name: r.fileName, size: r.size, sha256: r.sha256, encrypted: !!r.encrypted });
+                }
+                return { file, path: r.path };
+            } catch (e) {
+                return { error: (e && e.message) || String(e) };
+            }
+        }
+
         // Create-case-from-report: index.html had the file path, the case
         // did not exist yet. The reports are already saved (synchronously);
         // copy the PDF now and stamp the documents that came from it.
@@ -47559,6 +47643,9 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             const tips = getCyberTips();
             // ZIP name -> whether a CyberTip report was found inside it.
             const zipFound = new Map();
+            // Original file path -> _keepImportSource result (one copy per file).
+            const keptByPath = new Map();
+            const keepErrors = new Set();
             try {
                 items = await _cyberTipExpandZips(items, tally, zipFound);
                 for (const it of items) {
@@ -47598,6 +47685,29 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             try { parsed.sourceIntegrity = await window.electronAPI.sourceFingerprint({ source: fpSrc }); }
                             catch (_) { parsed.sourceIntegrity = null; }
                         }
+                        // The original (the PDF, or the whole ICAC ZIP as
+                        // received) is kept in cases/<n>/CyberTips/ — once
+                        // per file, however many tips it held. Tips found
+                        // in Evidence are already with the case.
+                        if (!it.evidenceTag) {
+                            if (!keptByPath.has(it.path)) {
+                                // A failed copy never stops the tip importing.
+                                let k;
+                                try { k = await _keepImportSource('cyberTips', it.path, 'cybertip'); }
+                                catch (e) { k = { error: (e && e.message) || String(e) }; }
+                                keptByPath.set(it.path, k || {});
+                            }
+                            const kept = keptByPath.get(it.path);
+                            if (kept.file) {
+                                parsed.sourceFile = Object.assign({}, kept.file);
+                                parsed.sourceOriginalPath = it.path;
+                                // Source Validation reads the kept copy, so it
+                                // still works after Downloads is tidied up.
+                                parsed.sourcePath = kept.path || it.path;
+                            } else if (kept.error) {
+                                keepErrors.add(kept.error);
+                            }
+                        }
                         tips.push(parsed);
                         tally.added++;
                     } catch (err) {
@@ -47616,6 +47726,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 saveCyberTips(tips);
                 viperToast(`Imported ${tally.added} CyberTip${tally.added > 1 ? 's' : ''}`, 'success');
                 renderTabContent('cyberTips');
+            }
+            if (tally.added && keepErrors.size) {
+                viperToast(`The original CyberTip file could not be saved to the case folder (${_esc(Array.from(keepErrors).join('; '))}). ` +
+                    'The tip still points at the file where it was picked from.', 'warning', 9000);
             }
             return tally;
         }
@@ -47851,6 +47965,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 ${recipients.length ? `<span class="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30">${recipients.length} Recipient${recipients.length > 1 ? 's' : ''}</span>` : ''}
                                 ${totalIPs ? `<span class="px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">${totalIPs} IP${totalIPs > 1 ? 's' : ''}</span>` : ''}
                                 ${t.uploadedFiles.length ? `<span class="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">${t.uploadedFiles.length} File${t.uploadedFiles.length > 1 ? 's' : ''}</span>` : ''}
+                                ${t.sourceFile ? `<span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="${escHtmlSafe('Saved as CyberTips\\' + (t.sourceFile.fileName || ''))}">Original saved to case</span>` : ''}
                             </div>
                         </div>`;
                     }).join('')}

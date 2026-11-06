@@ -124,6 +124,9 @@ class ApertureData {
             // Source Validation: SHA-256 of the original, taken at import.
             sourceIntegrity: sourceData.sourceIntegrity || null
         };
+        // The copy kept in the case folder (Email Sources), when one was made.
+        if (sourceData.sourceFile) newSource.sourceFile = sourceData.sourceFile;
+        if (sourceData.sourcePath) newSource.sourcePath = sourceData.sourcePath;
         
         sources.push(newSource);
         this.saveSources(caseId, sources);

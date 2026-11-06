@@ -105,24 +105,30 @@ class ApertureModule {
         try {
             const ext = fileName.split('.').pop().toLowerCase();
             let result;
+            // caseNumber: main keeps a copy of the original in the case
+            // folder (Email Sources) unless it is already in this case.
+            const payload = {
+                caseId: this.caseId,
+                caseNumber: this.caseNumber,
+                filePath: filePath,
+                sourceName: sourceName || fileName,
+                fileName: fileName
+            };
 
             if (ext === 'mbox') {
-                result = await window.electronAPI.apertureImportMbox({
-                    caseId: this.caseId,
-                    filePath: filePath,
-                    sourceName: sourceName || fileName,
-                    fileName: fileName
-                });
+                result = await window.electronAPI.apertureImportMbox(payload);
             } else {
-                result = await window.electronAPI.apertureImportEmailFile({
-                    caseId: this.caseId,
-                    filePath: filePath,
-                    sourceName: sourceName || fileName,
-                    fileName: fileName
-                });
+                result = await window.electronAPI.apertureImportEmailFile(payload);
             }
 
             if (result.success) {
+                const sf = result.sourceFile;
+                if (sf && !sf.reused && typeof audit === 'function') {
+                    try {
+                        audit('import_source_saved', { module: 'aperture', case_number: this.caseNumber, case_id: this.caseId,
+                            file_name: sf.fileName, size: sf.size, sha256: sf.sha256, encrypted: !!sf.encrypted });
+                    } catch (_) { /* audit is best effort here */ }
+                }
                 await this.loadEmails();
                 await this.loadSources();
                 await this.scanEvidence();

@@ -29,6 +29,7 @@
     "electron-builder": "^26.8.1"
   },
   "dependencies": {
+    "@xmldom/xmldom": "^0.8.15",
     "adm-zip": "^0.5.17",
     "archiver": "^7.0.1",
     "better-sqlite3": "^12.9.0",

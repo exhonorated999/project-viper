@@ -19,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const AdmZip = require('adm-zip');
-const { createPackStore, validateManifest, validateConfig, isSafeRelPath, FORMAT, FORMAT_VERSION, ID_RE } = require('../modules/agency-packs/pack-store.js');
+const { createPackStore, buildPackBuffer, isSafeRelPath, ID_RE } = require('../modules/agency-packs/pack-store.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const CONFIG_KEYS = ['globalFields', 'templatesConfig', 'unbracketedFields', 'filenameSuffixFields'];
@@ -60,41 +60,23 @@ function buildPack(o) {
     if (!o.templates && !fs.existsSync(tplDir)) tplDir = path.join(source, 'templates');
     const rules = JSON.parse(fs.readFileSync(path.resolve(o.rules), 'utf8'));
 
-    const zip = new AdmZip();
-    const files = {};
-    const add = (name, buf) => {
-        zip.addFile(name, buf);
-        files[name] = crypto.createHash('sha256').update(buf).digest('hex');
-    };
+    const templates = new Map();
     const rels = Object.keys(config.templatesConfig || {}).sort();
     const missing = [];
     for (const rel of rels) {
         if (!isSafeRelPath(rel)) throw new Error('Template path cannot be packed safely: ' + rel);
         const file = path.join(tplDir, ...rel.split('/'));
         if (!fs.existsSync(file)) { missing.push(rel); continue; }
-        add('templates/' + rel, fs.readFileSync(file));
+        templates.set(rel, fs.readFileSync(file));
     }
     if (missing.length) throw new Error('Templates named in the config are missing:\n  ' + missing.join('\n  '));
-    add('config.json', Buffer.from(JSON.stringify(config), 'utf8'));
 
-    const manifest = {
-        format: FORMAT,
-        formatVersion: FORMAT_VERSION,
-        id: o.id,
-        name: o.name,
-        agency: o.agency || '',
-        description: o.description || '',
-        packVersion: o.version,
-        kind: 'warrant-builder',
-        createdAt: new Date().toISOString(),
-        builder: rules,
-        files,
-    };
-    validateManifest(manifest);
-    validateConfig(config, (p) => Object.prototype.hasOwnProperty.call(files, p));
-    zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
+    const { buffer } = buildPackBuffer({
+        id: o.id, name: o.name, agency: o.agency, description: o.description, packVersion: o.version,
+        rules, config, templates,
+    }, { AdmZip, crypto });
     fs.mkdirSync(path.dirname(out), { recursive: true });
-    zip.writeZip(out);
+    fs.writeFileSync(out, buffer);
 
     // Read it back exactly as the installer will.
     const store = createPackStore({ fs, path, crypto, AdmZip, rootDir: path.join(path.dirname(out), '.unused-agency-packs') });

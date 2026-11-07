@@ -131,6 +131,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agencyPackVerify: (id) => ipcRenderer.invoke('agency-pack-verify', id),
   agencyPackBuild: (req) => ipcRenderer.invoke('agency-pack-build', req),
   agencyPackOpenOutput: (req) => ipcRenderer.invoke('agency-pack-open-output', req),
+  agencyPackExport: (id) => ipcRenderer.invoke('agency-pack-export', id),
+  // Pack editor (create / edit a pack inside VIPER)
+  agencyPackDrafts: () => ipcRenderer.invoke('agency-pack-drafts'),
+  agencyPackDraftCreate: (req) => ipcRenderer.invoke('agency-pack-draft-create', req),
+  agencyPackDraftOpen: (req) => ipcRenderer.invoke('agency-pack-draft-open', req),
+  agencyPackDraftGet: (id) => ipcRenderer.invoke('agency-pack-draft-get', id),
+  agencyPackDraftOp: (req) => ipcRenderer.invoke('agency-pack-draft-op', req),
+  agencyPackDraftAddTemplates: (req) => ipcRenderer.invoke('agency-pack-draft-add-templates', req),
+  agencyPackDraftReplaceTemplate: (req) => ipcRenderer.invoke('agency-pack-draft-replace-template', req),
+  agencyPackDraftPreview: (req) => ipcRenderer.invoke('agency-pack-draft-preview', req),
+  agencyPackDraftSave: (id) => ipcRenderer.invoke('agency-pack-draft-save', id),
+  agencyPackDraftDiscard: (id) => ipcRenderer.invoke('agency-pack-draft-discard', id),
 
   // Diagnostic Report (diagnostic-edition builds)
   isDiagnosticMode: () => ipcRenderer.invoke('is-diagnostic-mode'),

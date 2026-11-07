@@ -4007,6 +4007,19 @@ const _agencyPacks = (() => {
     downloadsDir: () => app.getPath('downloads'),
     shell,
   });
+  // Pack editor: officers create and edit packs; drafts in userData/agency-pack-drafts/<id>/.
+  const D = require('./modules/agency-packs/pack-drafts.js');
+  const drafts = D.createDraftStore({
+    fs, path, crypto, store,
+    rootDir: path.join(app.getPath('userData'), 'agency-pack-drafts'),
+  });
+  D.registerDraftIpc(ipcMain, drafts, store, {
+    dialog, getWindow: () => mainWindow, shell, audit: () => audit, AUDIT_EVENTS,
+    restoreFocus: () => restoreFocus(),
+    defaultDir: () => app.getPath('documents'),
+    // An agency's pack never goes inside VIPER's own folder (or this repository in dev).
+    forbiddenDirs: [__dirname, path.dirname(app.getPath('exe'))],
+  });
   return store;
 })();
 

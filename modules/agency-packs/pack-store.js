@@ -133,6 +133,57 @@ function summarize(manifest, config, extra) {
     }, extra || {});
 }
 
+/**
+ * A .viperpack in memory. Used by VIPER's pack editor and by scripts/build-agency-pack.js.
+ * input: { id, name, agency?, description?, packVersion, createdAt?, rules?, config,
+ *          templates: Map|[[rel, Buffer]] (one per templatesConfig key) }
+ * Returns { buffer, manifest }. Throws PackError when the result would not install.
+ */
+function buildPackBuffer(input, deps) {
+    deps = deps || {};
+    const AdmZip = deps.AdmZip || require('adm-zip');
+    const crypto = deps.crypto || require('crypto');
+    const o = input || {};
+    if (typeof o.id !== 'string' || !ID_RE.test(o.id)) fail('Pack id must be lowercase letters, digits and dashes');
+    const config = o.config;
+    if (!isPlainObject(config) || !isPlainObject(config.templatesConfig)) fail('The pack has no templates');
+    const tpl = o.templates instanceof Map ? o.templates : new Map(o.templates || []);
+    const zip = new AdmZip();
+    const files = {};
+    const add = (name, buf) => {
+        zip.addFile(name, buf);
+        files[name] = crypto.createHash('sha256').update(buf).digest('hex');
+    };
+    const rels = Object.keys(config.templatesConfig).sort();
+    const missing = [];
+    for (const rel of rels) {
+        if (!isSafeRelPath(rel) || !/\.docx$/i.test(rel)) fail('Template name cannot be packed safely: ' + rel);
+        const buf = tpl.get(rel);
+        if (!Buffer.isBuffer(buf)) { missing.push(rel); continue; }
+        if (!(buf[0] === 0x50 && buf[1] === 0x4b)) fail('Not a Word document: ' + rel);
+        add('templates/' + rel, buf);
+    }
+    if (missing.length) fail('Templates named in the config are missing: ' + missing.join(', '));
+    add('config.json', Buffer.from(JSON.stringify(config), 'utf8'));
+    const manifest = {
+        format: FORMAT,
+        formatVersion: FORMAT_VERSION,
+        id: o.id,
+        name: String(o.name || '').trim(),
+        agency: String(o.agency || '').trim(),
+        description: String(o.description || '').trim(),
+        packVersion: String(o.packVersion || '').trim(),
+        kind: 'warrant-builder',
+        createdAt: o.createdAt || new Date().toISOString(),
+        builder: isPlainObject(o.rules) ? o.rules : {},
+        files,
+    };
+    validateManifest(manifest);
+    validateConfig(config, (p) => Object.prototype.hasOwnProperty.call(files, p));
+    zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
+    return { buffer: zip.toBuffer(), manifest };
+}
+
 function createPackStore(deps) {
     const { fs, path, crypto } = deps;
     const AdmZip = deps.AdmZip || require('adm-zip');
@@ -234,7 +285,8 @@ function createPackStore(deps) {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
     }
 
-    function install(filePath) {
+    function install(filePath, opts) {
+        opts = opts || {};
         const p = readPackFile(filePath);
         const id = p.manifest.id;
         const stamp = now();
@@ -252,7 +304,7 @@ function createPackStore(deps) {
             for (const [rel, buf] of p.files) write(rel, buf);
             write(INSTALL_INFO, Buffer.from(JSON.stringify({
                 installedAt: new Date(stamp).toISOString(),
-                sourceName: path.basename(filePath),
+                sourceName: opts.sourceName || path.basename(filePath),
             }, null, 2), 'utf8'));
             // Re-hash from disk before swapping in.
             for (const [rel, h] of Object.entries(p.manifest.files)) {
@@ -390,7 +442,39 @@ function createPackStore(deps) {
 
     const hasBuilderPack = () => list().some(p => !p.error && p.kind === 'warrant-builder');
 
-    return { rootDir, stagingRoot, inspect, install, list, load, readTemplate, verify, remove, build, zipDocuments, hasBuilderPack, readPackFile };
+    // Install a pack built in memory (the editor's Save). Goes through the same checks as a file.
+    function installBuffer(buf, sourceName) {
+        if (!Buffer.isBuffer(buf)) fail('Nothing to install');
+        fs.mkdirSync(stagingRoot, { recursive: true });
+        const tmp = path.join(stagingRoot, `incoming-${now()}-${Math.random().toString(36).slice(2, 8)}.viperpack`);
+        fs.writeFileSync(tmp, buf);
+        try { return install(tmp, { sourceName: sourceName || 'VIPER pack editor' }); } finally {
+            try { fs.unlinkSync(tmp); } catch (_) { /* best effort */ }
+        }
+    }
+
+    // An installed pack, every file hash-checked, as { manifest, config, templates: Map(rel → Buffer) }.
+    function readInstalled(id) {
+        const L = load(id);
+        const templates = new Map();
+        for (const rel of Object.keys(L.config.templatesConfig)) templates.set(rel, readTemplate(id, rel, L));
+        return { manifest: L.manifest, config: L.config, rules: L.rules, templates };
+    }
+
+    // An installed pack as a .viperpack (the officer shares the file themselves).
+    function exportBuffer(id) {
+        const P = readInstalled(id);
+        const m = P.manifest;
+        return buildPackBuffer({
+            id: m.id, name: m.name, agency: m.agency, description: m.description, packVersion: m.packVersion,
+            createdAt: m.createdAt, rules: P.rules, config: P.config, templates: P.templates,
+        }, { AdmZip, crypto });
+    }
+
+    return {
+        rootDir, stagingRoot, inspect, install, installBuffer, list, load, readTemplate, readInstalled, exportBuffer,
+        verify, remove, build, zipDocuments, hasBuilderPack, readPackFile,
+    };
 }
 
 /**
@@ -552,4 +636,4 @@ function uniqueDiskPath(dir, filename, exists) {
 const BUILD_MODES = ['case', 'saveAs', 'blank', 'downloads'];
 const MAX_BUILD_VALUES_CHARS = 60 * 1024 * 1024;
 
-module.exports = { createPackStore, registerPackIpc, PackError, isSafeRelPath, validateManifest, validateConfig, validateRules, FORMAT, FORMAT_VERSION, LIMITS, ID_RE };
+module.exports = { createPackStore, registerPackIpc, buildPackBuffer, PackError, isSafeRelPath, validateManifest, validateConfig, validateRules, FORMAT, FORMAT_VERSION, LIMITS, ID_RE };

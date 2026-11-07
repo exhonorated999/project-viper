@@ -67,6 +67,7 @@ const USERDATA_ITEMS = Object.freeze([
     { name: 'warrant-author', type: 'dir' },           // boilerplate library
     { name: 'branding', type: 'dir' },                 // department badge on reports
     { name: 'agency-packs', type: 'dir' },             // installed agency warrant packs
+    { name: 'agency-pack-drafts', type: 'dir' },       // packs being made or edited in VIPER
     { name: 'audit', type: 'audit' },
     { name: 'restored-audit', type: 'dir' },           // audit logs from earlier restores
 ]);

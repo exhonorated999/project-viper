@@ -71,6 +71,11 @@
         dateTimeFields: ['date/time of admission', 'date and time - utc', 'end date and time', 'end date, time',
             'end date/time', 'exact date and time', 'start date and time', 'start date, time', 'start date/time'],
         richTextPatterns: ['probable cause', 'pc statement'],
+        // Fields that ask for a picture ("include photo of residence", "insert photo of
+        // suspect"). They take text plus photos. Narratives that merely mention photos
+        // ("why you believe there will be photos/videos…") must not match.
+        photoPatterns: ['photo of', 'photograph of', 'photos of', 'include photo', 'insert photo', 'add photo',
+            'use photo', 'including photo', 'and photo', 'photo if', 'photos if', 'photo (optional)'],
         longNarrativeNameLength: 80,
         // Profile field -> list of form field names it answers.
         profileFields: {
@@ -192,6 +197,29 @@
             .map(s => ({ type: 'paragraph', runs: [{ text: s }] }));
     }
 
+    // Content blocks -> plain text (one line per paragraph / list item; tables by row).
+    function blocksToText(blocks) {
+        if (typeof blocks === 'string') return blocks.trim();
+        if (!Array.isArray(blocks)) return '';
+        const runsText = (runs) => (runs || []).map(r => (r && r.break ? '\n' : (r && typeof r.text === 'string' ? r.text : ''))).join('');
+        const lines = [];
+        blocks.forEach(b => {
+            if (!b) return;
+            if (b.type === 'table') {
+                (b.rows || []).forEach(row => lines.push((row || []).map(c => runsText(c && c.runs).trim()).join('\t')));
+                return;
+            }
+            const t = runsText(b.runs);
+            if (!t.trim() && (b.runs || []).some(r => r && r.image)) return; // picture-only line
+            lines.push(t);
+        });
+        return lines.map(s => s.replace(/[ \t]+$/g, '')).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+    const blocksHaveImage = (blocks) => Array.isArray(blocks) && blocks.some(b => b && (
+        (b.runs || []).some(r => r && r.image) ||
+        (b.type === 'table' && (b.rows || []).some(row => (row || []).some(c => ((c && c.runs) || []).some(r => r && r.image))))));
+
     // ---- Builder ---------------------------------------------------------------------------
     function createBuilder(config, rules) {
         config = config || {};
@@ -207,6 +235,7 @@
         const JD_NAMES = set(R.judicialDistrictFieldNames);
         const DATE = set(R.dateFields), RANGE = set(R.dateRangeFields), DATETIME = set(R.dateTimeFields);
         const RICH = (R.richTextPatterns || []).map(lc);
+        const PHOTO = (R.photoPatterns || []).map(lc);
         const PRIORITY = (R.priority || []).map(g => g.map(lc));
         const VENUE_CATS = new Set(R.venueCategories || []);
         const MUNI = new RegExp(R.municipalPattern || '(?!)', 'i');
@@ -264,6 +293,7 @@
             return PRIORITY.length;
         };
         const isRichText = (n) => { const l = lc(n); return RICH.some(p => l.includes(p)); };
+        const isPhotoField = (n) => { const l = lc(n); return !isRichText(n) && PHOTO.some(p => l.includes(p)); };
         const isDateField = (n) => DATE.has(lc(n));
         const isDateRangeField = (n) => RANGE.has(lc(n));
         const isDateTimeField = (n) => DATETIME.has(lc(n));
@@ -285,6 +315,7 @@
         // Kind of input a field gets, by the name the form shows.
         function fieldKind(name, type) {
             if (isRichText(name)) return 'richtext';
+            if (type !== 'dropdown' && isPhotoField(name)) return 'photo';
             if (isDateRangeField(name)) return 'daterange';
             if (isDateTimeField(name)) return 'datetime';
             if (isDateField(name)) return 'date';
@@ -483,6 +514,17 @@
                     else if (typeof b === 'string' && b.trim()) rich[p.name] = textToBlocks(b);
                     return;
                 }
+                // Photo fields: the text goes in like any field (so a placeholder sharing a line
+                // with other text still reads right); the blocks go along only when there's a
+                // picture, so a text-only answer stays exactly as the original tool fills it.
+                const ptype = g ? g.type : p.type;
+                if (ptype !== 'dropdown' && (isPhotoField(name) || isPhotoField(p.customTitle || ''))) {
+                    const b = values[key];
+                    const text = blocksToText(b);
+                    if (text) out[p.name] = text;
+                    if (blocksHaveImage(b)) rich[p.name] = b;
+                    return;
+                }
                 let v;
                 if (isDateRangeField(name)) v = formatDateRange(values[key + '::rangeStart'], values[key + '::rangeEnd']);
                 else if (isDateTimeField(name)) {
@@ -600,7 +642,7 @@
             templates, categories, getTemplate, globalFor,
             fieldKeyShared: keyShared, fieldKeyTemplate: keyTemplate, fieldKey: keyFor, fieldKeyForModelField: keyForModelField,
             placeholderMapping, formModel, fieldKind, isHidden, priorityRank,
-            isRichText, isDateField, isDateRangeField, isDateTimeField, isLongNarrative, defaultTimezone,
+            isRichText, isPhotoField, isDateField, isDateRangeField, isDateTimeField, isLongNarrative, defaultTimezone,
             isCountyField, isJudicialDistrictField,
             profileValue, applyProfile, applyCaseFacts,
             counties: () => counties.slice(), countyRule, applyCounty, removeDaApproval,
@@ -613,6 +655,6 @@
     return {
         createBuilder, DEFAULT_RULES, mergeRules,
         sanitizeTag, detectDropdownChoices, displayName, formatDate, formatDateRange,
-        sanitizeFilenamePart, guardReservedFilename, toIsoDate, textToBlocks,
+        sanitizeFilenamePart, guardReservedFilename, toIsoDate, textToBlocks, blocksToText, blocksHaveImage,
     };
 });

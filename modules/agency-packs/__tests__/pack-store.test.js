@@ -89,6 +89,8 @@ throws(() => S.validateManifest(Object.assign(goodManifest(), { files: { '../evi
 throws(() => S.validateManifest(Object.assign(goodManifest(), { files: { 'config.json': 'xyz' } })), /checksum/i, 'bad checksum format');
 throws(() => S.validateRules({ counties: [{}] }), /label/, 'county needs label');
 throws(() => S.validateRules({ hiddenFields: [1] }), /list of text/, 'hiddenFields text');
+throws(() => S.validateRules({ photoPatterns: 'photo' }), /list of text/, 'photoPatterns list');
+eq(S.validateRules({ photoPatterns: ['photo of'] }).photoPatterns, ['photo of'], 'photoPatterns ok');
 throws(() => S.validateRules({ municipalPattern: '(' }), /pattern/, 'bad regex');
 throws(() => S.validateRules({ typeTokens: { a: 1 } }), /typeTokens/, 'typeTokens text');
 throws(() => S.validateRules([]), /object/, 'rules array');
@@ -311,7 +313,7 @@ eq(fs.readdirSync(ROOT + '-staging'), [], 'staging cleaned after remove');
     audit: () => auditObj,
     AUDIT_EVENTS: { AGENCY_PACK_INSTALLED: 'agency_pack_installed', AGENCY_PACK_REMOVED: 'agency_pack_removed' },
   });
-  eq(Object.keys(handlers).sort(), ['agency-pack-build', 'agency-pack-choose', 'agency-pack-get', 'agency-pack-install', 'agency-pack-list', 'agency-pack-remove', 'agency-pack-verify'], 'ipc channels');
+  eq(Object.keys(handlers).sort(), ['agency-pack-build', 'agency-pack-choose', 'agency-pack-get', 'agency-pack-install', 'agency-pack-list', 'agency-pack-open-output', 'agency-pack-remove', 'agency-pack-verify'], 'ipc channels');
   const lst = await handlers['agency-pack-list']({});
   eq([lst.success, lst.packs.map(p => p.id)], [true, ['test-pack']], 'ipc list');
   const got = await handlers['agency-pack-get']({}, 'test-pack');
@@ -416,6 +418,64 @@ eq(fs.readdirSync(ROOT + '-staging'), [], 'staging cleaned after remove');
     S.registerPackIpc({ handle: (c, f) => { hc[c] = f; } }, store, {});
     const noSaver = await hc['agency-pack-build']({}, Object.assign({ mode: 'case', caseNumber: 'X1' }, base));
     eq([noSaver.success, noSaver.error], [false, 'Saving to the case is not available'], 'no saveToCase dep');
+  }
+
+  // ---- Word documents into Downloads + open / show ------------------------------------------------
+  {
+    const DL = path.join(TMP, 'Downloads');
+    fs.mkdirSync(DL, { recursive: true });
+    const hd = {};
+    const dAudits = [];
+    const shellCalls = [];
+    let openErr = '';
+    S.registerPackIpc({ handle: (c, f) => { hd[c] = f; } }, store, {
+      audit: () => ({ write: (ev, data) => dAudits.push([ev, data]) }),
+      AUDIT_EVENTS: { AGENCY_PACK_DOCS_GENERATED: 'agency_pack_docs_generated' },
+      downloadsDir: () => DL,
+      shell: { openPath: async (p) => { shellCalls.push(['open', p]); return openErr; }, showItemInFolder: (p) => shellCalls.push(['show', p]) },
+    });
+    const values = { 'global:g_case': '26-000777', ['tpl:' + T_ACME + ':account']: 'user@example.test', ['tpl:' + T_ARR + ':defendant name']: 'Pat SYNTHETIC' };
+    const base = { packId: 'test-pack', templateIds: [T_ACME, T_ARR], values, county: 'South County', caseNumber: '26-000777' };
+    const r1 = await hd['agency-pack-build']({}, Object.assign({ mode: 'downloads' }, base));
+    eq([r1.success, r1.count, r1.dir], [true, 2, DL], 'downloads build');
+    eq(r1.files.map(f => f.name), ['26000777 SW Acme_user@example.test.docx', '26000777 AW South County_Pat SYNTHETIC.docx'], 'each document separately (no zip)');
+    ok(r1.files.every(f => path.dirname(f.path) === DL && fs.readFileSync(f.path).slice(0, 2).toString('latin1') === 'PK'), 'docx files written in Downloads');
+    eq(dAudits[0], ['agency_pack_docs_generated', { case_number: '26-000777', pack_id: 'test-pack', pack_version: '1.1.0', documents: 2, destination: 'downloads',
+      files: ['26000777 SW Acme_user@example.test.docx', '26000777 AW South County_Pat SYNTHETIC.docx'] }], 'downloads audit names files only');
+    const r2 = await hd['agency-pack-build']({}, Object.assign({ mode: 'downloads' }, base, { templateIds: [T_ACME] }));
+    eq(r2.files.map(f => f.name), ['26000777 SW Acme_user@example.test (2).docx'], 'never overwrites: (2)');
+    const r3 = await hd['agency-pack-build']({}, Object.assign({ mode: 'downloads' }, base, { templateIds: [T_ACME] }));
+    eq(r3.files.map(f => f.name), ['26000777 SW Acme_user@example.test (3).docx'], 'never overwrites: (3)');
+    const noCaseOk = await hd['agency-pack-build']({}, Object.assign({ mode: 'downloads' }, base, { caseNumber: '' }));
+    eq(noCaseOk.success, true, 'downloads does not need a case number');
+
+    const op = await hd['agency-pack-open-output']({}, { path: r1.files[0].path });
+    eq([op.success, op.opened, shellCalls[0]], [true, true, ['open', r1.files[0].path]], 'open in Word');
+    const sh = await hd['agency-pack-open-output']({}, { path: r1.files[1].path, action: 'show' });
+    eq([sh.success, sh.shown, shellCalls[1]], [true, true, ['show', r1.files[1].path]], 'show in folder');
+    openErr = 'No application';
+    const oe = await hd['agency-pack-open-output']({}, { path: r1.files[0].path });
+    ok(!oe.success && /No application/.test(oe.error), 'open error reported');
+    const calls = shellCalls.length;
+    const outside = await hd['agency-pack-open-output']({}, { path: path.join(TMP, 'docs', 'x.docx') });
+    ok(!outside.success && /Only Builder documents/.test(outside.error), 'outside Downloads refused');
+    const sub = await hd['agency-pack-open-output']({}, { path: path.join(DL, 'sub', 'x.docx') });
+    eq(sub.success, false, 'subfolder refused');
+    const trav = await hd['agency-pack-open-output']({}, { path: path.join(DL, '..', 'x.docx') });
+    eq(trav.success, false, 'traversal refused');
+    fs.writeFileSync(path.join(DL, 'evil.exe'), 'x');
+    const exe = await hd['agency-pack-open-output']({}, { path: path.join(DL, 'evil.exe') });
+    eq(exe.success, false, 'non-docx refused');
+    const gone = await hd['agency-pack-open-output']({}, { path: path.join(DL, 'gone.docx') });
+    ok(!gone.success && /no longer in Downloads/.test(gone.error), 'missing file explained');
+    eq((await hd['agency-pack-open-output']({}, null)).success, false, 'null request refused');
+    eq((await hd['agency-pack-open-output']({}, { path: 42 })).success, false, 'non-string path refused');
+    eq(shellCalls.length, calls, 'shell never called for refused paths');
+
+    const hn = {};
+    S.registerPackIpc({ handle: (c, f) => { hn[c] = f; } }, store, {});
+    const noDl = await hn['agency-pack-build']({}, Object.assign({ mode: 'downloads' }, base));
+    eq([noDl.success, noDl.error], [false, 'The Downloads folder is not available'], 'no downloadsDir dep');
   }
 
   console.log(`pack-store: ${pass} passed, ${fail} failed`);

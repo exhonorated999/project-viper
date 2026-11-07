@@ -22,6 +22,7 @@
  * at least one warrant-builder pack is installed.
  */
 
+const nodePath = require('path');
 const FORMAT = 'viper-agency-pack';
 const FORMAT_VERSION = 1;
 const KINDS = ['warrant-builder'];
@@ -61,7 +62,7 @@ function validateRules(rules) {
         if (!Array.isArray(rules[k]) || !rules[k].every(s => typeof s === 'string')) fail(`manifest.builder.${k} must be a list of text`);
     };
     ['countyFieldNames', 'judicialDistrictFieldNames', 'hiddenFields', 'hideCountyFieldsFor', 'venueCategories',
-        'dateFields', 'dateRangeFields', 'dateTimeFields', 'richTextPatterns'].forEach(strList);
+        'dateFields', 'dateRangeFields', 'dateTimeFields', 'richTextPatterns', 'photoPatterns'].forEach(strList);
     if (rules.counties != null) {
         if (!Array.isArray(rules.counties)) fail('manifest.builder.counties must be a list');
         rules.counties.forEach((c, i) => {
@@ -470,6 +471,19 @@ function registerPackIpc(ipcMain, store, deps) {
             return { saved, count: saved.length };
         }
 
+        if (mode === 'downloads') {
+            const dir = downloadsDir();
+            const fsx = deps.fs || require('fs');
+            const files = [];
+            for (const d of built.documents) {
+                const p = uniqueDiskPath(dir, d.filename, (q) => fsx.existsSync(q));
+                (deps.writeFile || fsx.writeFileSync)(p, d.data);
+                files.push({ name: nodePath.basename(p), path: p });
+            }
+            audit('AGENCY_PACK_DOCS_GENERATED', Object.assign(auditBase, { destination: 'downloads', files: files.map(f => f.name) }));
+            return { files, count: files.length, dir };
+        }
+
         const docs = built.documents;
         const single = docs.length === 1;
         const defaultName = single ? docs[0].filename : (blank ? 'Blank_Forms.zip' : built.packetFilename);
@@ -491,9 +505,51 @@ function registerPackIpc(ipcMain, store, deps) {
         if (!blank) audit('AGENCY_PACK_DOCS_GENERATED', Object.assign(auditBase, { destination: 'export', files: [require('path').basename(r.filePath)] }));
         return { filePath: r.filePath, count: docs.length, zipped: !single };
     }));
+
+    // Open a document the Builder put in Downloads, or show it in its folder.
+    // Only .docx files directly inside the Downloads folder are accepted, so the
+    // renderer cannot use this to open arbitrary paths.
+    ipcMain.handle('agency-pack-open-output', wrap(async (_e, req) => {
+        req = isPlainObject(req) ? req : {};
+        const action = req.action === 'show' ? 'show' : 'open';
+        const p = checkDownloadsDocx(req.path);
+        const fsx = deps.fs || require('fs');
+        if (!fsx.existsSync(p)) throw new PackError('That document is no longer in Downloads (it may have been moved or deleted)');
+        if (!deps.shell) throw new PackError('Opening documents is not available');
+        if (action === 'show') { deps.shell.showItemInFolder(p); return { shown: true }; }
+        const err = await deps.shell.openPath(p);
+        if (err) throw new PackError('Could not open the document: ' + err);
+        return { opened: true };
+    }));
+
+    function downloadsDir() {
+        const d = typeof deps.downloadsDir === 'function' ? deps.downloadsDir() : '';
+        if (!d || typeof d !== 'string') throw new PackError('The Downloads folder is not available');
+        return d;
+    }
+    function checkDownloadsDocx(p) {
+        if (typeof p !== 'string' || !p || p.length > 1024) throw new PackError('Unknown document');
+        const dir = nodePath.resolve(downloadsDir());
+        const abs = nodePath.resolve(p);
+        const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+        if (!same(nodePath.dirname(abs), dir) || !/\.docx$/i.test(abs)) throw new PackError('Only Builder documents in Downloads can be opened here');
+        return abs;
+    }
 }
 
-const BUILD_MODES = ['case', 'saveAs', 'blank'];
+// "<name>.docx" → "<name> (2).docx" … while the name is taken. Never overwrites.
+function uniqueDiskPath(dir, filename, exists) {
+    const ext = nodePath.extname(filename);
+    const stem = filename.slice(0, filename.length - ext.length);
+    let p = nodePath.join(dir, filename);
+    for (let n = 2; exists(p); n++) {
+        if (n > 9999) throw new PackError('Too many documents with the same name in Downloads');
+        p = nodePath.join(dir, `${stem} (${n})${ext}`);
+    }
+    return p;
+}
+
+const BUILD_MODES = ['case', 'saveAs', 'blank', 'downloads'];
 const MAX_BUILD_VALUES_CHARS = 60 * 1024 * 1024;
 
 module.exports = { createPackStore, registerPackIpc, PackError, isSafeRelPath, validateManifest, validateConfig, validateRules, FORMAT, FORMAT_VERSION, LIMITS, ID_RE };

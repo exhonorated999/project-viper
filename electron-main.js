@@ -4002,6 +4002,10 @@ const _agencyPacks = (() => {
     saveToCase: (caseNumber, fileName, bytes) => _workingDocs().addBuffer(caseNumber, fileName, bytes),
     defaultDir: () => app.getPath('documents'),
     restoreFocus: () => restoreFocus(),
+    // "Create Word documents" writes each .docx straight into Downloads;
+    // open / show-in-folder is limited to .docx files directly in that folder.
+    downloadsDir: () => app.getPath('downloads'),
+    shell,
   });
   return store;
 })();

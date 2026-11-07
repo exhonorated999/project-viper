@@ -240,5 +240,57 @@ eq(req.unbracketedFields.length, 1, 'packet unbracketed');
 ok(req.templates[0].placeholders['case number'].tag === 'case_number', 'packet mapping');
 eq(b.timezones().map(t => t.value), ['ZT', 'UTC'], 'timezones');
 
+// ---- Photo fields -----------------------------------------------------------------------------
+const PHOTO_NAMES = [
+  'include photo of residence – not mandatory but preferred',
+  'insert photo of suspect',
+  'describe vehicle, including make, model, year, vin, and photo if available',
+  'DESCRIBE RESIDENCE OR LOCATION TO BE SEARCHED – USE PHOTOS IF AVAILABLE',
+  'describe item to be searched/include photo of item if available',
+];
+PHOTO_NAMES.forEach(n => {
+  ok(b.isPhotoField(n), 'photo field: ' + n);
+  eq(b.fieldKind(n), 'photo', 'kind photo: ' + n);
+});
+ok(!b.isPhotoField('Describe why you believe there will be photos/videos and their associated metadata relevant to your offense in this account'), 'narrative photos/videos not a photo field');
+ok(!b.isPhotoField('statement of probable cause'), 'pc never photo');
+ok(!b.isPhotoField('account'), 'plain not photo');
+eq(b.fieldKind('include photo of residence', 'dropdown'), 'dropdown', 'dropdown wins over photo');
+eq(B.createBuilder(config, { photoPatterns: ['snapshot'] }).fieldKind('add snapshot'), 'photo', 'custom photoPatterns');
+
+const IMG = 'data:image/png;base64,iVBORw0KGgo=';
+eq(B.blocksToText([{ type: 'paragraph', runs: [{ text: 'Blue ' }, { text: 'house' }] }, { type: 'paragraph', runs: [{ image: IMG }] }, { type: 'paragraph', runs: [{ text: 'Rear door' }] }]),
+  'Blue house\nRear door', 'blocksToText skips images');
+eq(B.blocksToText([{ type: 'table', rows: [[{ runs: [{ text: 'a' }] }, { runs: [{ text: 'b' }] }]] }]), 'a\tb', 'blocksToText table');
+eq(B.blocksToText('  plain  '), 'plain', 'blocksToText string');
+eq(B.blocksToText(null), '', 'blocksToText null');
+ok(B.blocksHaveImage([{ type: 'paragraph', runs: [{ image: IMG }] }]), 'has image');
+ok(!B.blocksHaveImage([{ type: 'paragraph', runs: [{ text: 'x' }] }]), 'no image');
+ok(!B.blocksHaveImage('text'), 'string no image');
+
+const T_PHOTO = 'Warrants/Delta/Delta Residence_Template.docx';
+const pcfg = JSON.parse(JSON.stringify(config));
+pcfg.templatesConfig[T_PHOTO] = { category: 'Search Warrant', placeholders: [
+  ph('case number'), ph('include photo of residence – not mandatory but preferred'), ph('pick one', { customTitle: 'insert photo of item', type: 'dropdown', choices: ['a', 'b'] }),
+] };
+const pb = B.createBuilder(pcfg, rules);
+const PK = (n) => 'tpl:' + T_PHOTO + ':' + n;
+const PNAME = 'include photo of residence – not mandatory but preferred';
+const withImg = [{ type: 'paragraph', runs: [{ text: 'Two-story, blue' }] }, { type: 'paragraph', runs: [{ image: IMG }] }];
+let pr = pb.resolveValues(T_PHOTO, { [PK(PNAME)]: withImg, [PK('pick one')]: 'b' });
+eq(pr.values[PNAME], 'Two-story, blue', 'photo text in values');
+eq(pr.richtextBlocks[PNAME], withImg, 'photo blocks when image present');
+eq(pr.values['pick one'], 'b', 'photo-titled dropdown stays a dropdown');
+ok(!('pick one' in pr.richtextBlocks), 'dropdown no blocks');
+pr = pb.resolveValues(T_PHOTO, { [PK(PNAME)]: [{ type: 'paragraph', runs: [{ text: 'Text only' }] }] });
+eq(pr.values[PNAME], 'Text only', 'text-only photo value');
+ok(!(PNAME in pr.richtextBlocks), 'text-only photo: no blocks');
+pr = pb.resolveValues(T_PHOTO, { [PK(PNAME)]: ' typed ' });
+eq(pr.values[PNAME], 'typed', 'string photo value');
+ok(!(PNAME in pr.richtextBlocks), 'string photo: no blocks');
+pr = pb.resolveValues(T_PHOTO, { [PK(PNAME)]: [{ type: 'paragraph', runs: [{ image: IMG }] }] });
+ok(!(PNAME in pr.values), 'image-only photo: no text value');
+ok(PNAME in pr.richtextBlocks, 'image-only photo: blocks');
+
 console.log(`builder-model: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

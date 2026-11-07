@@ -897,6 +897,7 @@
     <script src="modules/agency-packs/builder-model.js"></script>
     <script src="modules/agency-packs/richtext-blocks.js"></script>
     <script src="modules/agency-packs/case-facts.js"></script>
+    <script src="modules/agency-packs/warrant-list.js"></script>
     <script src="modules/agency-packs/agency-builder-ui.js"></script>
 </head>
 <body class="text-white">
@@ -15199,6 +15200,8 @@
                 return _renderAgencyBuilderOnlyTab();
             }
             if (_waCurrentSubtab === 'agency' && !_waPackInstalled()) _waCurrentSubtab = 'drafts';
+            // Outstanding / Returned are tracked in the Warrants tab now.
+            if (_waCurrentSubtab !== 'agency') _waCurrentSubtab = 'drafts';
             const sub = _waCurrentSubtab || 'drafts';
             const caseId = currentCase && currentCase.id;
             // Expose currentCase on window so submodules (warrant-author-ui,
@@ -15236,8 +15239,6 @@
                     <!-- Subtab pill row -->
                     <div class="wa-subtab-row">
                         <button class="wa-subtab-pill ${sub === 'drafts' ? 'active' : ''}" data-sub="drafts" onclick="waSwitchSubtab('drafts')">Drafts</button>
-                        <button class="wa-subtab-pill ${sub === 'outstanding' ? 'active' : ''}" data-sub="outstanding" onclick="waSwitchSubtab('outstanding')">Outstanding</button>
-                        <button class="wa-subtab-pill ${sub === 'returned' ? 'active' : ''}" data-sub="returned" onclick="waSwitchSubtab('returned')">Returned</button>
                         ${_waPackInstalled() ? `<button class="wa-subtab-pill ${sub === 'agency' ? 'active' : ''}" data-sub="agency" onclick="waSwitchSubtab('agency')">Agency Templates</button>` : ''}
                     </div>
 
@@ -15271,6 +15272,7 @@
         }
 
         function waSwitchSubtab(name) {
+            if (name !== 'agency') name = 'drafts';
             _waCurrentSubtab = name;
             const root = document.getElementById('waSubtabContent');
             if (root) root.innerHTML = renderWarrantAuthorSubtab(name);
@@ -15281,6 +15283,11 @@
 
         function waNewDraft() {
             const caseId = currentCase && currentCase.id;
+            // On the Agency Templates tab "New Warrant" starts an agency warrant.
+            if (_waCurrentSubtab === 'agency' && window.ViperAgencyBuilderUI && typeof window.ViperAgencyBuilderUI.newWarrant === 'function') {
+                window.ViperAgencyBuilderUI.newWarrant();
+                return;
+            }
             if (window.WarrantAuthorUI && window.WarrantAuthorUI.bus) {
                 window.WarrantAuthorUI.bus.onClickNewDraft(caseId);
             } else {

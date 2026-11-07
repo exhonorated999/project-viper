@@ -369,5 +369,82 @@ function readStory(buf, name) {
   ok(props1.includes('{GUID}'), 'deterministic: guid');
 }
 
+// 12. Photo fields (VIPER addition): blocks supplied for a non-PC field make it rich text;
+// a photo placeholder sharing its line gets its text inline and its pictures right below.
+{
+  const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+  const hl = (t) => '<w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr><w:t>' + t + '</w:t></w:r>';
+  const docXml = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:w="' + W_NS + '" xmlns:r="' + R_NS + '">' +
+    '<w:body>' +
+    '<w:p>' + hl('[include photo of residence]') + '</w:p>' +
+    '<w:p><w:pPr><w:jc w:val="left"/></w:pPr>' + hl('[describe item]') + '<w:r><w:t xml:space="preserve"> — </w:t></w:r>' + hl('[include photo of item if available]') + '</w:p>' +
+    '<w:p><w:r><w:t>After</w:t></w:r></w:p>' +
+    '</w:body></w:document>'
+  );
+  const ph = {
+    'include photo of residence': { title: 'include photo of residence', tag: 'res_photo' },
+    'describe item': { title: 'describe item', tag: 'item_desc' },
+    'include photo of item if available': { title: 'include photo of item if available', tag: 'item_photo' },
+  };
+  const blocksA = [{ type: 'paragraph', runs: [{ text: 'Front of house' }] }, { type: 'paragraph', runs: [{ image: tinyPng }] }];
+  const blocksB = [{ type: 'paragraph', runs: [{ text: 'Black case' }, { image: tinyPng }] }];
+  const out = F.convertDocx(makeDocx({ documentXml: docXml }), ph, {
+    protect: false,
+    values: { 'include photo of residence': 'Front of house', 'describe item': 'Rifle', 'include photo of item if available': 'Black case' },
+    richtextBlocks: { 'include photo of residence': blocksA, 'include photo of item if available': blocksB },
+  });
+  const story = readStory(out, 'word/document.xml');
+  const zip = new AdmZip(out);
+  const media = zip.getEntries().map(e => e.entryName).filter(n => n.startsWith('word/media/'));
+  eq(media.length, 2, 'photo: two pictures embedded');
+  eq((story.match(/<w:drawing>/g) || []).length, 2, 'photo: two drawings in the story');
+  ok(story.includes('Front of house'), 'photo: whole-paragraph text kept');
+  ok(story.includes('Rifle') && story.includes('Black case'), 'photo: inline texts filled');
+  ok(story.includes('w:val="item_photo_photos"'), 'photo: pictures control after the shared line');
+  const iLine = story.indexOf('Black case'), iPics = story.indexOf('item_photo_photos'), iAfter = story.indexOf('After');
+  ok(iLine < iPics && iPics < iAfter, 'photo: pictures sit between the line and the next paragraph');
+  const rels = zip.readAsText('word/_rels/document.xml.rels');
+  eq((rels.match(/relationships\/image"/g) || []).length, 2, 'photo: two image relationships');
+  _parseXml(story);   // still well-formed
+
+  // No picture → no blocks sent → plain field exactly as before.
+  const out2 = F.convertDocx(makeDocx({ documentXml: docXml }), ph, { protect: false, values: { 'include photo of residence': 'Front of house' } });
+  const story2 = readStory(out2, 'word/document.xml');
+  ok(!story2.includes('<w:drawing>') && !story2.includes('_photos'), 'photo: text-only answer adds nothing');
+  ok(!story2.includes('w:richText'), 'photo: text-only answer stays a plain field');
+
+  // Adjacent [a][b] merge into one field "a/b" (original rule) — whole line, so pictures go in place.
+  const merged = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:w="' + W_NS + '" xmlns:r="' + R_NS + '"><w:body>' +
+    '<w:p>' + hl('[describe item]') + hl('[include photo of item if available]') + '</w:p></w:body></w:document>'
+  );
+  const mName = 'describe item/include photo of item if available';
+  const out3 = F.convertDocx(makeDocx({ documentXml: merged }), { [mName]: { title: mName, tag: 'item_merged' } }, {
+    protect: false, values: { [mName]: 'Black case' }, richtextBlocks: { [mName]: blocksB },
+  });
+  const story3 = readStory(out3, 'word/document.xml');
+  eq((story3.match(/<w:drawing>/g) || []).length, 1, 'photo: merged field gets its picture');
+  ok(story3.includes('Black case') && !story3.includes('_photos'), 'photo: merged field filled in place');
+
+  // Pictures only on a shared line: the line says where they are instead of showing {{tag}}.
+  const out4 = F.convertDocx(makeDocx({ documentXml: docXml }), ph, {
+    protect: false, values: { 'describe item': 'Rifle' },
+    richtextBlocks: { 'include photo of item if available': [{ type: 'paragraph', runs: [{ image: tinyPng }] }] },
+  });
+  const story4 = readStory(out4, 'word/document.xml');
+  ok(story4.includes('(see photo below)') && !story4.includes('{{item_photo}}'), 'photo: picture-only inline note');
+  eq((story4.match(/<w:drawing>/g) || []).length, 1, 'photo: picture-only still embedded');
+  // Word refreshes bound controls from the customXml part on open, so it must say the same.
+  const bound4 = new AdmZip(out4).getEntries()
+    .filter(e => /^customXml\/item\d+\.xml$/.test(e.entryName))
+    .map(e => e.getData().toString('utf-8'))
+    .find(s => s.includes('<item_photo>')) || '';
+  ok(bound4.includes('<item_photo>(see photo below)</item_photo>'), 'photo: picture-only note in bound data');
+  ok(bound4.includes('Rifle'), 'photo: other bound values unchanged');
+}
+
 console.log(`docx-form-engine: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

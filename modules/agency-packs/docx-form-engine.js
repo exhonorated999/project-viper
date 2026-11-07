@@ -663,6 +663,46 @@ function replaceParagraphWithRichtextBlock(paragraph, parentMap, contentBlocks, 
   return true;
 }
 
+// VIPER addition: every picture in a block list, one per paragraph block.
+function _imageOnlyBlocks(blocks) {
+  const out = [];
+  const take = (runs) => { for (const r of (runs || [])) if (r && typeof r.image === "string" && _DATA_URL_IMAGE_RE.test(r.image)) out.push({ type: "paragraph", runs: [{ image: r.image }] }); };
+  for (const b of (Array.isArray(blocks) ? blocks : [])) {
+    if (!b) continue;
+    if (b.type === "table") { for (const row of (b.rows || [])) for (const c of (row || [])) take(c && c.runs); continue; }
+    take(b.runs);
+  }
+  return out;
+}
+
+// VIPER addition: for photo fields whose placeholder shares a paragraph with other text, put
+// the pictures in a rich-text content control directly after that paragraph (in field order).
+function insertPictureParagraphsAfter(paragraph, parentMap, infos, listNumIds, imageEmbedder) {
+  const parent = parentMap.get(paragraph);
+  if (!parent) return;
+  const doc = paragraph.ownerDocument;
+  const pPr = _firstChildElement(paragraph, NS.w, "pPr");
+  let anchor = paragraph;
+  for (const info of infos) {
+    const np = _elNS(doc, NS.w, "w:p");
+    if (pPr) {
+      const clone = _deepCloneElement(pPr);
+      // Pictures shouldn't continue a list or carry the line's own numbering.
+      const numPr = _firstChildElement(clone, NS.w, "numPr"); if (numPr) clone.removeChild(numPr);
+      np.appendChild(clone);
+    }
+    parent.insertBefore(np, anchor.nextSibling || null);
+    parentMap.set(np, parent);
+    const ok = replaceParagraphWithRichtextBlock(np, parentMap, _imageOnlyBlocks(info.richtextBlocks),
+      info.title + " (photos)", (info.tag + "_photos").slice(0, 64), info.idGenerator(), listNumIds, imageEmbedder);
+    if (!ok) { parent.removeChild(np); continue; }
+    // The content control now sits where np was.
+    let node = anchor.nextSibling;
+    while (node && node.nodeType !== 1) node = node.nextSibling;
+    anchor = node || anchor;
+  }
+}
+
 function _stripDocumentProtection(xmlStr) {
   xmlStr = xmlStr.replace(/<w:documentProtection\b[^>]*\/>/g, "");
   xmlStr = xmlStr.replace(/<w:documentProtection\b[^>]*>.*?<\/w:documentProtection>/gs, "");
@@ -784,16 +824,32 @@ function processXmlStory(xmlContent, fieldInfoMap, unbracketedFields, storeItemI
         }
       }
       const ms = [...placeholdersInP].sort((a, b) => b[0] - a[0]);
+      const pictureFields = [];
       for (const [S, E, content] of ms) {
         const info = fieldInfoMap[content]; if (!info) continue;
         const fieldId = info.idGenerator();
-        replacePlaceholderInParagraph(p, S, E, content, info.title, info.tag, fieldId, info.type, info.choices, storeItemId, info.value, info.isMultiline);
+        const hasPics = _fieldHasPictures(info);
+        const inlineValue = _picturesOnlyText(info) || info.value;
+        replacePlaceholderInParagraph(p, S, E, content, info.title, info.tag, fieldId, info.type, info.choices, storeItemId, inlineValue, info.isMultiline);
+        if (hasPics) pictureFields.push(info);
       }
+      // VIPER addition: a photo field that shares its line with other text gets its words in
+      // the line and its pictures in their own content control right below the paragraph.
+      if (pictureFields.length) insertPictureParagraphsAfter(p, parentMap, pictureFields.reverse(), listNumIds, imageEmbedder);
       modified = true;
     }
   }
   if (!modified) return null;
   return Buffer.from(_serialize(root), "utf-8");
+}
+
+// VIPER addition: photo fields carry pictures as image-only blocks (never probable-cause fields).
+function _fieldHasPictures(info) {
+  return !!info && !isPcStatementField(info.title) && _imageOnlyBlocks(info.richtextBlocks).length > 0;
+}
+// Text shown for a photo field that has pictures but no words; "" otherwise.
+function _picturesOnlyText(info) {
+  return _fieldHasPictures(info) && !String(info.value || "").trim() ? "(see photo below)" : "";
 }
 
 function stripDaApprovalSection(xmlContent) {
@@ -852,7 +908,9 @@ function convertDocx(fileBytes, placeholders, opts) {
       title, tag, type: fieldType, choices,
       idGenerator: makeIdGen(),
       value: cleanValue,
-      isRichtext: isPcStatementField(title),
+      // The original only ever sends blocks for probable-cause fields; VIPER also sends them for
+      // photo fields that carry a picture, so supplied blocks make a field rich text too.
+      isRichtext: isPcStatementField(title) || (Array.isArray(richtextBlocks[pName]) && richtextBlocks[pName].length > 0),
       isMultiline: isLongNarrativeField(title) || isLongNarrativeField(pName) || /\n/.test(cleanValue || ""),
       richtextBlocks: richtextBlocks[pName]
     };
@@ -866,7 +924,9 @@ function convertDocx(fileBytes, placeholders, opts) {
     const tag = info.tag;
     if (!addedTags.has(tag)) {
       const child = customXmlDoc.createElementNS(CUSTOM_XML_SCHEMA_URI, tag);
-      child.textContent = info.value || "[" + info.title + "]";
+      // Word refreshes bound controls from this part when the file opens, so a pictures-only
+      // photo field must carry the same "(see photo below)" text here as in the document.
+      child.textContent = _picturesOnlyText(info) || info.value || "[" + info.title + "]";
       customXmlRoot.appendChild(child); addedTags.add(tag);
     }
   }

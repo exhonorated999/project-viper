@@ -131,6 +131,27 @@ A.autoLink(c, opts);
 ok(!BM.createBuilder(c, {}).globalFor(BM.createBuilder(c, {}).getTemplate(relB), p), 'auto-link leaves split field alone');
 throws(() => A.splitField(c, gSus.id, relB, 'Suspect Name'), /not part/, 'split twice');
 
+// Separating one of only two templates ends the shared field: both go back to their own templates.
+{
+  const c2 = A.newConfig();
+  A.addTemplate(c2, 'X.docx', scan('Phone Number'), opts);
+  A.addTemplate(c2, 'Y.docx', scan('Target Phone'), opts);
+  const m2 = A.mergeFields(c2, { t: 'X.docx', p: 'Phone Number' }, { t: 'Y.docx', p: 'Target Phone' }, opts);
+  A.updateField(c2, m2, { hint: 'SYNTHETIC hint' }, {});
+  const vals2 = { ['global:' + m2.g]: '555-0100' };
+  A.splitField(c2, m2.g, 'X.docx', 'Phone Number');
+  eq(c2.globalFields.length, 0, 'split of a two-template field: shared field gone');
+  const L2 = A.listFields(c2, {});
+  eq([L2.shared.length, L2.own.length], [0, 2], 'split of a two-template field: two own fields');
+  const py = c2.templatesConfig['Y.docx'].placeholders[0];
+  eq([py.hint, !!py.unlinked], ['SYNTHETIC hint', false], 'remaining field keeps the settings, can link again by name');
+  ok(c2.templatesConfig['X.docx'].placeholders[0].unlinked === true, 'separated field stays separate');
+  eq(L2.own.map(f => f.label).sort(), ['Phone Number', 'Target Phone'], 'split: each field gets its own name back, not the other template\'s');
+  const b4 = BM.createBuilder(A.clone(c2), {});
+  b4.migrateValues(vals2);
+  eq([vals2[b4.fieldKeyTemplate('X.docx', 'Phone Number')], vals2[b4.fieldKeyTemplate('Y.docx', 'Target Phone')]], ['555-0100', '555-0100'], 'split of a two-template field: both keep the typed value');
+}
+
 // ---- replace / remove template ----
 const gOnlyA = c.globalFields.find(g => g.name === 'Only In A');
 r = A.replaceTemplate(c, relC, scan('Case Number', 'Brand New'), opts);

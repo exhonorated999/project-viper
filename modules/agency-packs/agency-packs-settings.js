@@ -12,7 +12,8 @@
     'use strict';
 
     const LS_FLAG = 'viperAgencyPackInstalled';
-    const state = { packs: [], pending: null, busy: false, verify: {} };
+    // create: null, or the "Create a pack" form's values while it is open.
+    const state = { packs: [], drafts: [], pending: null, busy: false, verify: {}, create: null };
     let mountEl = null;
 
     const api = () => (typeof window !== 'undefined' && window.electronAPI) || {};
@@ -22,7 +23,8 @@
         try { console.log('[agency-packs]', msg); } catch (_) { /* ignore */ }
     };
     const confirmBox = async (msg, opts) => {
-        try { if (window.viperConfirm) return await window.viperConfirm(msg, opts); } catch (_) { /* fall through */ }
+        // viperConfirm shows its message as HTML; pack names come from shared pack files.
+        try { if (window.viperConfirm) return await window.viperConfirm(esc(msg).replace(/\n/g, '<br>'), opts); } catch (_) { /* fall through */ }
         return window.confirm(msg);
     };
 
@@ -57,8 +59,86 @@
         } catch (e) {
             state.packs = [];
         }
+        try {
+            const d = typeof api().agencyPackDrafts === 'function' ? await api().agencyPackDrafts() : null;
+            state.drafts = (d && d.success && Array.isArray(d.drafts)) ? d.drafts : [];
+        } catch (_) {
+            state.drafts = [];
+        }
         setFlag(state.packs);
         render();
+    }
+
+    // ---- Making and editing packs ------------------------------------------------------------
+    const editorReady = () => !!(window.ViperPackEditor && typeof api().agencyPackDraftCreate === 'function');
+
+    function openEditor(opts) {
+        if (!editorReady()) return toast('The pack editor is not available in this build', 'error');
+        window.ViperPackEditor.open(Object.assign({}, opts, { onClose: () => refresh() }));
+    }
+
+    async function createPack() {
+        if (state.busy || !mountEl) return;
+        const val = (k) => {
+            const el = mountEl.querySelector(`[data-ap-new="${k}"]`);
+            return el ? el.value.trim() : '';
+        };
+        state.create = { name: val('name'), agency: val('agency'), description: val('description') };
+        if (!state.create.name) {
+            toast('Give the pack a name', 'error');
+            const el = mountEl.querySelector('[data-ap-new="name"]');
+            if (el) el.focus();
+            return;
+        }
+        state.busy = true; render();
+        try {
+            const r = await api().agencyPackDraftCreate(state.create);
+            if (!r || !r.success) return toast((r && r.error) || 'Could not start the pack', 'error');
+            state.create = null;
+            openEditor({ id: r.draft.id, mode: 'resume', view: r.draft, tab: 'templates' });
+        } catch (e) {
+            toast('Could not start the pack: ' + (e && e.message || e), 'error');
+        } finally {
+            state.busy = false;
+            await refresh();
+        }
+    }
+
+    async function exportPack(id) {
+        if (state.busy) return;
+        const fn = api().agencyPackExport;
+        if (typeof fn !== 'function') return toast('Export is not available in this build', 'error');
+        state.busy = true; render();
+        try {
+            const r = await fn(id);
+            if (!r || r.canceled) return;
+            if (!r.success) return toast(r.error || 'Export failed', 'error');
+            toast(`Exported version ${r.packVersion} to ${r.filePath}`, 'success');
+        } catch (e) {
+            toast('Export failed: ' + (e && e.message || e), 'error');
+        } finally {
+            state.busy = false; render();
+        }
+    }
+
+    async function discardDraft(id) {
+        if (state.busy) return;
+        const d = (state.drafts || []).find(x => x.id === id) || { id };
+        const msg = d.installed
+            ? `Throw away the unsaved changes to "${d.name || id}"?\n\nThe installed pack stays as it was.`
+            : `Delete "${d.name || id}"?\n\nThis pack was never saved, so its templates and settings are deleted from this computer.`;
+        const ok = await confirmBox(msg, { danger: true, okText: d.installed ? 'Throw away changes' : 'Delete' });
+        if (!ok) return;
+        state.busy = true; render();
+        try {
+            const r = await api().agencyPackDraftDiscard(id);
+            if (!r || !r.success) toast((r && r.error) || 'Could not delete it', 'error');
+        } catch (e) {
+            toast('Could not delete it: ' + (e && e.message || e), 'error');
+        } finally {
+            state.busy = false;
+            await refresh();
+        }
     }
 
     async function choose() {
@@ -202,7 +282,11 @@
                         <div class="text-[11px] text-gray-400 mt-0.5">${meta}</div>
                         ${categoryText(p.categories) ? `<div class="text-[11px] text-gray-500 mt-0.5">${categoryText(p.categories)}</div>` : ''}
                     </div>
-                    <div class="flex gap-2 shrink-0">
+                    <div class="flex flex-wrap justify-end gap-2 shrink-0">
+                        ${editorReady() ? `<button type="button" data-ap-act="edit" data-ap-id="${esc(p.id)}" ${state.busy ? 'disabled' : ''}
+                            class="px-2.5 py-1 text-xs rounded border border-viper-cyan/60 text-viper-cyan hover:bg-viper-cyan/10 disabled:opacity-50">Edit</button>` : ''}
+                        ${typeof api().agencyPackExport === 'function' ? `<button type="button" data-ap-act="export" data-ap-id="${esc(p.id)}" ${state.busy ? 'disabled' : ''}
+                            class="px-2.5 py-1 text-xs rounded border border-gray-600 text-gray-300 hover:bg-gray-700/40 disabled:opacity-50" title="Save a copy of this pack as a .viperpack file to give to other officers">Export…</button>` : ''}
                         <button type="button" data-ap-act="verify" data-ap-id="${esc(p.id)}" ${state.busy ? 'disabled' : ''}
                             class="px-2.5 py-1 text-xs rounded border border-gray-600 text-gray-300 hover:bg-gray-700/40 disabled:opacity-50">Check files</button>
                         <button type="button" data-ap-act="remove" data-ap-id="${esc(p.id)}" ${state.busy ? 'disabled' : ''}
@@ -210,6 +294,74 @@
                     </div>
                 </div>
                 ${renderVerify(p.id)}
+                ${renderUnsaved(p.id)}
+            </div>`;
+    }
+
+    // An installed pack with edits that were never saved.
+    function renderUnsaved(id) {
+        const d = (state.drafts || []).find(x => x.id === id && x.installed && x.dirty && !x.error);
+        if (!d || !editorReady()) return '';
+        return `
+                <div class="mt-2 flex items-center justify-between gap-3 text-[11px] text-amber-300" data-ap-unsaved="${esc(id)}">
+                    <span>Unsaved changes${d.updatedAt ? ` from ${esc(fmtDate(d.updatedAt))}` : ''}. They are not in the pack yet — open Edit and Save pack to use them.</span>
+                    <button type="button" data-ap-act="discard" data-ap-id="${esc(id)}" ${state.busy ? 'disabled' : ''}
+                        class="shrink-0 px-2 py-0.5 rounded border border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-50">Throw away</button>
+                </div>`;
+    }
+
+    // Packs started here that were never saved.
+    function renderDrafts() {
+        const list = (state.drafts || []).filter(d => !d.installed);
+        if (!list.length || !editorReady()) return '';
+        const row = (d) => d.error ? `
+                <div class="p-3 rounded-lg border border-rose-500/40 bg-rose-500/5 flex items-center justify-between gap-3">
+                    <div class="min-w-0"><div class="text-sm text-white">${esc(d.id)}</div><div class="text-[11px] text-rose-300">${esc(d.error)}</div></div>
+                    <button type="button" data-ap-act="discard" data-ap-id="${esc(d.id)}" ${state.busy ? 'disabled' : ''}
+                        class="px-2.5 py-1 text-xs rounded border border-rose-500/50 text-rose-300 hover:bg-rose-500/10">Delete</button>
+                </div>` : `
+                <div class="p-3 rounded-lg border border-dashed border-gray-600 bg-viper-dark/30 flex items-start justify-between gap-3" data-ap-draft="${esc(d.id)}">
+                    <div class="min-w-0">
+                        <div class="text-sm text-white font-semibold">${esc(d.name || d.id)} <span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-normal bg-amber-500/15 text-amber-300 border border-amber-500/30">Not saved yet</span></div>
+                        ${d.agency ? `<div class="text-xs text-gray-300">${esc(d.agency)}</div>` : ''}
+                        <div class="text-[11px] text-gray-400 mt-0.5">${esc(d.templateCount || 0)} templates${d.updatedAt ? ` · last change ${esc(fmtDate(d.updatedAt))}` : ''}</div>
+                    </div>
+                    <div class="flex gap-2 shrink-0">
+                        <button type="button" data-ap-act="resume" data-ap-id="${esc(d.id)}" ${state.busy ? 'disabled' : ''}
+                            class="px-2.5 py-1 text-xs rounded border border-viper-cyan/60 text-viper-cyan hover:bg-viper-cyan/10 disabled:opacity-50">Continue</button>
+                        <button type="button" data-ap-act="discard" data-ap-id="${esc(d.id)}" ${state.busy ? 'disabled' : ''}
+                            class="px-2.5 py-1 text-xs rounded border border-rose-500/50 text-rose-300 hover:bg-rose-500/10 disabled:opacity-50">Delete</button>
+                    </div>
+                </div>`;
+        return `
+                <div class="mt-3 space-y-2" data-ap-drafts>
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">Packs you are making</div>
+                    ${list.map(row).join('')}
+                </div>`;
+    }
+
+    function renderCreate() {
+        const c = state.create;
+        if (!c) return '';
+        const IN = 'w-full px-2.5 py-1.5 text-sm rounded-lg bg-viper-dark border border-gray-600 text-white focus:border-viper-cyan focus:outline-none';
+        return `
+            <div class="mt-3 p-3 rounded-lg border border-viper-cyan/40 bg-viper-cyan/5" data-ap-create>
+                <div class="text-sm text-white font-semibold">Create a pack</div>
+                <p class="text-[11px] text-gray-400 mt-0.5">Next you add your agency's Word templates. Mark each blank in Word as <span class="text-gray-200">[Field Name]</span> and highlight it; VIPER turns those into a form.</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                    <label class="text-[11px] text-gray-400">Pack name
+                        <input data-ap-new="name" maxlength="120" value="${esc(c.name)}" placeholder="e.g. Search Warrant Packet" class="${IN} mt-0.5"></label>
+                    <label class="text-[11px] text-gray-400">Agency
+                        <input data-ap-new="agency" maxlength="120" value="${esc(c.agency)}" placeholder="e.g. Anytown Police Department" class="${IN} mt-0.5"></label>
+                    <label class="text-[11px] text-gray-400 md:col-span-2">Description <span class="text-gray-600">(optional)</span>
+                        <input data-ap-new="description" maxlength="1000" value="${esc(c.description)}" placeholder="What the pack is for, who keeps it up to date" class="${IN} mt-0.5"></label>
+                </div>
+                <div class="flex gap-2 mt-3">
+                    <button type="button" data-ap-act="create-go" ${state.busy ? 'disabled' : ''}
+                        class="px-3 py-1.5 text-xs rounded-lg bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan text-viper-cyan disabled:opacity-50">Create and add templates</button>
+                    <button type="button" data-ap-act="create-cancel" ${state.busy ? 'disabled' : ''}
+                        class="px-3 py-1.5 text-xs rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700/40">Cancel</button>
+                </div>
             </div>`;
     }
 
@@ -221,15 +373,21 @@
                 <div class="flex items-start justify-between gap-3">
                     <div class="pr-2">
                         <h4 class="text-white font-semibold text-sm">Agency template packs</h4>
-                        <p class="text-xs text-gray-400 mt-1">Install the <span class="text-gray-300">.viperpack</span> file your agency gave you to fill its own Word warrant templates from the Warrant Author tab on a case. The templates stay on this computer and are included in VIPER backups.</p>
+                        <p class="text-xs text-gray-400 mt-1">Install the <span class="text-gray-300">.viperpack</span> file your agency gave you to fill its own Word warrant templates from the Warrant Author tab on a case${editorReady() ? `, or create your own pack from your agency's Word templates. Use <span class="text-gray-300">Edit</span> to change an installed pack and <span class="text-gray-300">Export…</span> to give a copy to other officers` : ''}. The templates stay on this computer and are included in VIPER backups.</p>
                     </div>
-                    <button type="button" data-ap-act="choose" ${state.busy ? 'disabled' : ''}
-                        class="shrink-0 px-3 py-1.5 text-xs rounded-lg bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan text-viper-cyan disabled:opacity-50">Install pack…</button>
+                    <div class="shrink-0 flex flex-col gap-2 items-stretch">
+                        <button type="button" data-ap-act="choose" ${state.busy ? 'disabled' : ''}
+                            class="px-3 py-1.5 text-xs rounded-lg bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan text-viper-cyan disabled:opacity-50">Install pack…</button>
+                        ${editorReady() ? `<button type="button" data-ap-act="create" ${state.busy || state.create ? 'disabled' : ''}
+                            class="px-3 py-1.5 text-xs rounded-lg border border-gray-600 text-gray-200 hover:bg-gray-700/40 disabled:opacity-50">Create a pack…</button>` : ''}
+                    </div>
                 </div>
+                ${renderCreate()}
                 ${renderPending()}
                 <div class="mt-3 space-y-2">
                     ${packs.length ? packs.map(renderPack).join('') : '<div class="text-xs text-gray-500 italic">No agency packs installed.</div>'}
                 </div>
+                ${renderDrafts()}
                 ${creditHtml()}
             </div>`;
     }
@@ -260,6 +418,30 @@
         else if (act === 'cancel') { state.pending = null; render(); }
         else if (act === 'verify') verify(id);
         else if (act === 'remove') remove(id);
+        else if (act === 'create') {
+            state.create = { name: '', agency: '', description: '' };
+            render();
+            const el = mountEl && mountEl.querySelector('[data-ap-new="name"]');
+            if (el) el.focus();
+        }
+        else if (act === 'create-go') createPack();
+        else if (act === 'create-cancel') { state.create = null; render(); }
+        else if (act === 'edit') openEditor({ id, mode: 'edit' });
+        else if (act === 'resume') openEditor({ id, mode: 'resume' });
+        else if (act === 'export') exportPack(id);
+        else if (act === 'discard') discardDraft(id);
+    }
+
+    // Keep what is typed in the create form across re-renders; Enter creates.
+    function onInput(e) {
+        const k = e.target && e.target.getAttribute && e.target.getAttribute('data-ap-new');
+        if (k && state.create) state.create[k] = e.target.value;
+    }
+    function onKeyDown(e) {
+        if (e.key === 'Enter' && e.target && e.target.getAttribute && e.target.getAttribute('data-ap-new')) {
+            e.preventDefault();
+            createPack();
+        }
     }
 
     function mount(el) {
@@ -268,6 +450,8 @@
         if (!mountEl.__apWired) {
             mountEl.__apWired = true;
             mountEl.addEventListener('click', onClick);
+            mountEl.addEventListener('input', onInput);
+            mountEl.addEventListener('keydown', onKeyDown);
         }
         render();
         refresh();

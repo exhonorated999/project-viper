@@ -402,20 +402,38 @@
         return { g: g.id };
     }
 
-    /** Take one template's field out of a shared field; it keeps the shared field's settings. */
+    /**
+     * Take one template's field out of a shared field; it keeps the shared field's settings.
+     * When that leaves the shared field with a single template, it stops being shared too.
+     */
     function splitField(cfg, globalId, rel, name) {
         const c = normalizeConfig(cfg);
         const g = getGlobal(c, globalId); if (!g) fail('Field not found.');
         if (!g.mappings.some(m => m.templateId === rel && m.placeholderName === name)) fail('That template is not part of this field.');
         const p = getPlaceholder(c, rel, name); if (!p) fail('Field not found.');
-        g.mappings = g.mappings.filter(m => !(m.templateId === rel && m.placeholderName === name));
-        p.customTitle = g.name;
-        p.type = g.type || 'text';
-        p.choices = (g.choices || []).slice();
-        SETTING_KEYS.forEach(s => { if (g[s] !== undefined) p[s] = g[s]; else delete p[s]; });
-        p.aliases = uniq((p.aliases || []).concat(['global:' + g.id]));
-        p.unlinked = true;
-        p.customTag = uniqueTag(p.name, tagsInTemplate(c, rel, p));
+        // A shared label that is just another template's field name goes back to this field's own name.
+        const memberNames = new Set(g.mappings.map(m => norm(m.placeholderName)));
+        const labelFor = (q) => {
+            if (norm(g.name) === norm(q.name) || !memberNames.has(norm(g.name))) return g.name;
+            return (q.customTitle && norm(q.customTitle) !== norm(g.name)) ? q.customTitle : q.name;
+        };
+        const takeOut = (q, qRel, unlinked) => {
+            g.mappings = g.mappings.filter(m => !(m.templateId === qRel && m.placeholderName === q.name));
+            q.customTitle = labelFor(q);
+            q.type = g.type || 'text';
+            q.choices = (g.choices || []).slice();
+            SETTING_KEYS.forEach(s => { if (g[s] !== undefined) q[s] = g[s]; else delete q[s]; });
+            q.aliases = uniq((q.aliases || []).concat(['global:' + g.id]));
+            if (unlinked) q.unlinked = true;
+            q.customTag = uniqueTag(q.name, tagsInTemplate(c, qRel, q));
+        };
+        takeOut(p, rel, true);
+        const live = g.mappings.filter(m => getPlaceholder(c, m.templateId, m.placeholderName));
+        if (live.length === 1) {
+            const m = live[0];
+            takeOut(getPlaceholder(c, m.templateId, m.placeholderName), m.templateId, false);
+            g.mappings = [];
+        }
         pruneGlobals(c, new Set([g.id]));
         return { t: rel, p: name };
     }

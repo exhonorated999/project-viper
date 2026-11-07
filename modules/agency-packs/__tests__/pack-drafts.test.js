@@ -160,7 +160,9 @@ v = drafts.op('example-warrants', 'mergeFields', { into: phone.key, from: mail.k
 const merged = v.fields.shared.find(f => f.label === 'target phone number');
 eq(merged && merged.uses.length, 2, 'merged into one shared field');
 v = drafts.op('example-warrants', 'splitField', { ref: merged.key, rel: 'Example Mail Co.docx', name: 'email address' });
-ok(v.fields.own.some(f => f.label === 'target phone number' && f.unlinked), 'split back out');
+ok(v.fields.own.some(f => f.label === 'email address' && f.unlinked), 'split back out, with its own name again');
+ok(v.fields.own.some(f => f.label === 'target phone number' && !f.unlinked), 'the one template left is not shared any more');
+eq(v.fields.shared.filter(f => f.label === 'target phone number').length, 0, 'no one-template shared field left behind');
 throws(() => drafts.op('example-warrants', 'splitField', { ref: v.fields.own[0].key, rel: 'x', name: 'y' }), /not shared/, 'split needs a shared field');
 throws(() => drafts.op('example-warrants', 'eval', {}), /Unknown change/, 'unknown op refused');
 throws(() => drafts.op('example-warrants', 'updateField', { ref: '{"g":"nope"}', patch: {} }), /Field not found/, 'unknown field refused');

@@ -893,6 +893,11 @@
     <script src="modules/warrant-author/pdf-composer.js"></script>
     <script src="modules/warrant-author/validator.js"></script>
     <script src="modules/warrant-author/warrant-author-ui.js"></script>
+    <!-- Agency template packs (Warrant Builder): forms come from an installed pack, never from the repo -->
+    <script src="modules/agency-packs/builder-model.js"></script>
+    <script src="modules/agency-packs/richtext-blocks.js"></script>
+    <script src="modules/agency-packs/case-facts.js"></script>
+    <script src="modules/agency-packs/agency-builder-ui.js"></script>
 </head>
 <body class="text-white">
     <div class="flex h-screen overflow-hidden hex-pattern">
@@ -2610,9 +2615,10 @@
 
             // Warrant Author — only surface in Manage Tabs when feature toggle is enabled.
             // Already-added warrantAuthor tabs on a case still render via moduleConfig + renderTabContent.
+            // An installed agency template pack also surfaces it (builder-only view).
             try {
-                if (localStorage.getItem('viperWarrantAuthorEnabled') === 'true') {
-                    allModules.warrantAuthor = { label: 'Warrant Author', icon: '✍️', beta: true };
+                if (_waTabAvailable()) {
+                    allModules.warrantAuthor = { label: 'Warrant Author', icon: '✍️', beta: _waAuthorEnabled() };
                 }
             } catch (_) {}
 
@@ -15135,7 +15141,64 @@
         // Plan: plans/2026-06-05_21-49-56__warrant-author-v1/plan.md
         let _waCurrentSubtab = 'drafts';
 
+        // The tab shows when the beta Warrant Author is on OR an agency
+        // template pack is installed (ViperAgencyBuilderUI keeps the
+        // viperAgencyPackInstalled flag current). With only a pack, the tab is
+        // the Warrant Builder alone.
+        function _waAuthorEnabled() {
+            try { return localStorage.getItem('viperWarrantAuthorEnabled') === 'true'; } catch (_) { return false; }
+        }
+        function _waPackInstalled() {
+            try { return localStorage.getItem('viperAgencyPackInstalled') === 'true'; } catch (_) { return false; }
+        }
+        function _waTabAvailable() { return _waAuthorEnabled() || _waPackInstalled(); }
+
+        function _waMountAgencyBuilder() {
+            const el = document.getElementById('agencyBuilderMount');
+            if (!el || !currentCase) return;
+            if (!window.ViperAgencyBuilderUI) {
+                el.innerHTML = '<div class="text-rose-300 text-sm">Warrant Builder module not loaded.</div>';
+                return;
+            }
+            try { loadSuspects(); } catch (_) {}
+            const caseId = currentCase.id;
+            const pcs = window.WarrantAuthorCasePcStore;
+            window.ViperAgencyBuilderUI.mount(el, {
+                caseId,
+                caseNumber: currentCase.caseNumber || '',
+                currentCase,
+                suspects: Array.isArray(suspects) ? suspects : [],
+                getPcText: () => { try { return pcs ? pcs.getBody(caseId) : ''; } catch (_) { return ''; } },
+                offenseDescription: (() => { try { return pcs ? pcs.getOffenseDescription(caseId) : ''; } catch (_) { return ''; } })(),
+                offenseDate: (() => { try { return pcs ? pcs.getOffenseDate(caseId) : ''; } catch (_) { return ''; } })(),
+                toast: (msg, kind) => showToast(msg, kind),
+            });
+        }
+
+        function _renderAgencyBuilderOnlyTab() {
+            return `
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-2xl font-bold flex items-center">
+                            <svg class="w-6 h-6 mr-2 text-viper-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                            </svg>
+                            Warrant Builder
+                            <span class="ml-3 text-xs px-2 py-0.5 bg-viper-cyan/10 text-viper-cyan rounded border border-viper-cyan/30">Agency templates</span>
+                        </h3>
+                    </div>
+                    <div id="agencyBuilderMount"></div>
+                </div>
+            `;
+        }
+
         function renderWarrantAuthorTab() {
+            try { window.currentCase = currentCase; } catch (_) {}
+            if (!_waAuthorEnabled() && _waPackInstalled()) {
+                _waCurrentSubtab = 'agency';
+                return _renderAgencyBuilderOnlyTab();
+            }
+            if (_waCurrentSubtab === 'agency' && !_waPackInstalled()) _waCurrentSubtab = 'drafts';
             const sub = _waCurrentSubtab || 'drafts';
             const caseId = currentCase && currentCase.id;
             // Expose currentCase on window so submodules (warrant-author-ui,
@@ -15172,9 +15235,10 @@
 
                     <!-- Subtab pill row -->
                     <div class="wa-subtab-row">
-                        <button class="wa-subtab-pill ${sub === 'drafts' ? 'active' : ''}" onclick="waSwitchSubtab('drafts')">Drafts</button>
-                        <button class="wa-subtab-pill ${sub === 'outstanding' ? 'active' : ''}" onclick="waSwitchSubtab('outstanding')">Outstanding</button>
-                        <button class="wa-subtab-pill ${sub === 'returned' ? 'active' : ''}" onclick="waSwitchSubtab('returned')">Returned</button>
+                        <button class="wa-subtab-pill ${sub === 'drafts' ? 'active' : ''}" data-sub="drafts" onclick="waSwitchSubtab('drafts')">Drafts</button>
+                        <button class="wa-subtab-pill ${sub === 'outstanding' ? 'active' : ''}" data-sub="outstanding" onclick="waSwitchSubtab('outstanding')">Outstanding</button>
+                        <button class="wa-subtab-pill ${sub === 'returned' ? 'active' : ''}" data-sub="returned" onclick="waSwitchSubtab('returned')">Returned</button>
+                        ${_waPackInstalled() ? `<button class="wa-subtab-pill ${sub === 'agency' ? 'active' : ''}" data-sub="agency" onclick="waSwitchSubtab('agency')">Agency Templates</button>` : ''}
                     </div>
 
                     <!-- Subtab content -->
@@ -15190,6 +15254,7 @@
 
         function renderWarrantAuthorSubtab(sub) {
             const caseId = currentCase && currentCase.id;
+            if (sub === 'agency') return '<div id="agencyBuilderMount"></div>';
             if (window.WarrantAuthorUI && typeof window.WarrantAuthorUI.renderSubtab === 'function') {
                 return window.WarrantAuthorUI.renderSubtab(caseId, sub);
             }
@@ -15210,10 +15275,8 @@
             const root = document.getElementById('waSubtabContent');
             if (root) root.innerHTML = renderWarrantAuthorSubtab(name);
             // Update pill highlight
-            document.querySelectorAll('.wa-subtab-pill').forEach(p => p.classList.remove('active'));
-            const activeIdx = ['drafts','outstanding','returned'].indexOf(name);
-            const pills = document.querySelectorAll('.wa-subtab-pill');
-            if (pills[activeIdx]) pills[activeIdx].classList.add('active');
+            document.querySelectorAll('.wa-subtab-pill').forEach(p => p.classList.toggle('active', p.getAttribute('data-sub') === name));
+            if (name === 'agency') _waMountAgencyBuilder();
         }
 
         function waNewDraft() {
@@ -15225,14 +15288,21 @@
             }
         }
 
+        let _waChangeListenerAdded = false;
         function initWarrantAuthorTab() {
             // re-render on draft-store-change events fired from the UI bus
-            try {
-                window.addEventListener('warrant-author-change', () => {
-                    const root = document.getElementById('waSubtabContent');
-                    if (root) root.innerHTML = renderWarrantAuthorSubtab(_waCurrentSubtab || 'drafts');
-                });
-            } catch (_) {}
+            if (!_waChangeListenerAdded) {
+                _waChangeListenerAdded = true;
+                try {
+                    window.addEventListener('warrant-author-change', () => {
+                        // The agency builder keeps its own state; re-rendering would wipe the open form.
+                        if (_waCurrentSubtab === 'agency') return;
+                        const root = document.getElementById('waSubtabContent');
+                        if (root) root.innerHTML = renderWarrantAuthorSubtab(_waCurrentSubtab || 'drafts');
+                    });
+                } catch (_) {}
+            }
+            if (_waCurrentSubtab === 'agency') _waMountAgencyBuilder();
         }
 
         /* ------------------------------------------------------------------
@@ -37713,13 +37783,14 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             ];
 
             // Warrant Author — gated by feature toggle. Already-added warrantAuthor tabs still render via moduleConfig.
+            // An installed agency template pack also surfaces it (builder-only view).
             try {
-                if (localStorage.getItem('viperWarrantAuthorEnabled') === 'true') {
+                if (_waTabAvailable()) {
                     caseManagement.push({
                         id: 'warrantAuthor',
                         label: 'Warrant Author',
                         icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
-                        beta: true,
+                        beta: _waAuthorEnabled(),
                     });
                 }
             } catch (_) {}
@@ -40123,6 +40194,10 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             loadTheme();
             updateUserDisplay();
             loadCase();
+
+            // Keep the "agency template pack installed" flag current so the
+            // Warrant Author tab is offered when a pack is installed.
+            try { window.ViperAgencyBuilderUI && window.ViperAgencyBuilderUI.refreshAvailability(); } catch (_) {}
 
             // Confirmation carried across the reload that removing an import
             // triggers. Shown once, then dropped.

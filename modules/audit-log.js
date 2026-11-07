@@ -101,6 +101,7 @@ const EVENT_TYPES = Object.freeze({
   WARRANT_RETURN_IMPORTED: 'warrant_return_imported',
   AGENCY_PACK_INSTALLED: 'agency_pack_installed',
   AGENCY_PACK_REMOVED:  'agency_pack_removed',
+  AGENCY_PACK_DOCS_GENERATED: 'agency_pack_docs_generated',
 
   // Update
   UPDATE_CHECKED:       'update_checked',

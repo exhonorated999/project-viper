@@ -393,8 +393,9 @@ function createPackStore(deps) {
 }
 
 /**
- * IPC for settings (install / list / remove) and the Builder (get). Build + save are wired by
- * the Builder UI step. deps: { dialog, getWindow, audit, AUDIT_EVENTS }
+ * IPC for settings (install / list / remove) and the Builder (get, build + save).
+ * deps: { dialog, getWindow, audit, AUDIT_EVENTS, saveToCase(caseNumber, fileName, bytes) → { fileName },
+ *         defaultDir(), restoreFocus(), writeFile(path, bytes) }
  */
 function registerPackIpc(ipcMain, store, deps) {
     deps = deps || {};
@@ -437,6 +438,62 @@ function registerPackIpc(ipcMain, store, deps) {
         return r;
     }));
     ipcMain.handle('agency-pack-verify', wrap(async (_e, id) => store.verify(id)));
+
+    // Fill (or produce blank) documents and put them somewhere.
+    // req: { packId, templateIds, values, county, overrides, caseNumber, mode }
+    //   mode 'case'   → every document into the case's Working Documents (deps.saveToCase)
+    //   mode 'saveAs' → one .docx, or a ZIP packet when several, wherever the officer picks
+    //   mode 'blank'  → the unfilled, protected forms, wherever the officer picks
+    ipcMain.handle('agency-pack-build', wrap(async (_e, req) => {
+        req = isPlainObject(req) ? req : {};
+        const mode = req.mode;
+        if (!BUILD_MODES.includes(mode)) throw new PackError('Unknown save option');
+        const packId = String(req.packId || '');
+        let size = 0;
+        try { size = JSON.stringify(req.values || {}).length; } catch (_) { throw new PackError('The form could not be read'); }
+        if (size > MAX_BUILD_VALUES_CHARS) throw new PackError('The form is too large to build (remove some pictures)');
+        const blank = mode === 'blank';
+        const caseNumber = typeof req.caseNumber === 'string' ? req.caseNumber.trim() : '';
+        if (mode === 'case' && !caseNumber) throw new PackError('Open a case first');
+        if (mode === 'case' && typeof deps.saveToCase !== 'function') throw new PackError('Saving to the case is not available');
+        const built = store.build(packId, {
+            templateIds: req.templateIds, values: blank ? {} : req.values, county: blank ? '' : req.county, overrides: req.overrides,
+        }, { blank });
+        let packVersion = null;
+        try { packVersion = store.load(packId).manifest.packVersion; } catch (_) { /* already checked by build */ }
+        const auditBase = { case_number: caseNumber || null, pack_id: packId, pack_version: packVersion, documents: built.documents.length };
+
+        if (mode === 'case') {
+            const saved = [];
+            for (const d of built.documents) saved.push(deps.saveToCase(caseNumber, d.filename, d.data).fileName);
+            audit('AGENCY_PACK_DOCS_GENERATED', Object.assign(auditBase, { destination: 'case', files: saved }));
+            return { saved, count: saved.length };
+        }
+
+        const docs = built.documents;
+        const single = docs.length === 1;
+        const defaultName = single ? docs[0].filename : (blank ? 'Blank_Forms.zip' : built.packetFilename);
+        const win = deps.getWindow && deps.getWindow();
+        const defaultDir = (typeof deps.defaultDir === 'function' && deps.defaultDir()) || '';
+        let r;
+        try {
+            r = await deps.dialog.showSaveDialog(win || undefined, {
+                title: blank ? 'Save blank forms' : 'Save warrant documents',
+                defaultPath: defaultDir ? require('path').join(defaultDir, defaultName) : defaultName,
+                filters: single ? [{ name: 'Word document', extensions: ['docx'] }] : [{ name: 'ZIP packet', extensions: ['zip'] }],
+            });
+        } finally {
+            try { if (deps.restoreFocus) deps.restoreFocus(); } catch (_) { /* ignore */ }
+        }
+        if (!r || r.canceled || !r.filePath) return { canceled: true };
+        const data = single ? docs[0].data : store.zipDocuments(docs);
+        (deps.writeFile || require('fs').writeFileSync)(r.filePath, data);
+        if (!blank) audit('AGENCY_PACK_DOCS_GENERATED', Object.assign(auditBase, { destination: 'export', files: [require('path').basename(r.filePath)] }));
+        return { filePath: r.filePath, count: docs.length, zipped: !single };
+    }));
 }
+
+const BUILD_MODES = ['case', 'saveAs', 'blank'];
+const MAX_BUILD_VALUES_CHARS = 60 * 1024 * 1024;
 
 module.exports = { createPackStore, registerPackIpc, PackError, isSafeRelPath, validateManifest, validateConfig, validateRules, FORMAT, FORMAT_VERSION, LIMITS, ID_RE };

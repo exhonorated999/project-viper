@@ -129,6 +129,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agencyPackInstall: (filePath) => ipcRenderer.invoke('agency-pack-install', filePath),
   agencyPackRemove: (id) => ipcRenderer.invoke('agency-pack-remove', id),
   agencyPackVerify: (id) => ipcRenderer.invoke('agency-pack-verify', id),
+  agencyPackBuild: (req) => ipcRenderer.invoke('agency-pack-build', req),
 
   // Diagnostic Report (diagnostic-edition builds)
   isDiagnosticMode: () => ipcRenderer.invoke('is-diagnostic-mode'),

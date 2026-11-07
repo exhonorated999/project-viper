@@ -311,7 +311,7 @@ eq(fs.readdirSync(ROOT + '-staging'), [], 'staging cleaned after remove');
     audit: () => auditObj,
     AUDIT_EVENTS: { AGENCY_PACK_INSTALLED: 'agency_pack_installed', AGENCY_PACK_REMOVED: 'agency_pack_removed' },
   });
-  eq(Object.keys(handlers).sort(), ['agency-pack-choose', 'agency-pack-get', 'agency-pack-install', 'agency-pack-list', 'agency-pack-remove', 'agency-pack-verify'], 'ipc channels');
+  eq(Object.keys(handlers).sort(), ['agency-pack-build', 'agency-pack-choose', 'agency-pack-get', 'agency-pack-install', 'agency-pack-list', 'agency-pack-remove', 'agency-pack-verify'], 'ipc channels');
   const lst = await handlers['agency-pack-list']({});
   eq([lst.success, lst.packs.map(p => p.id)], [true, ['test-pack']], 'ipc list');
   const got = await handlers['agency-pack-get']({}, 'test-pack');
@@ -340,6 +340,83 @@ eq(fs.readdirSync(ROOT + '-staging'), [], 'staging cleaned after remove');
   const h2 = {};
   S.registerPackIpc({ handle: (c, f) => { h2[c] = f; } }, store, { audit: () => { throw new Error('x'); }, AUDIT_EVENTS: { AGENCY_PACK_INSTALLED: 'a' } });
   eq((await h2['agency-pack-install']({}, PACK3)).success, true, 'audit failure does not block');
+
+  // ---- Build + save IPC --------------------------------------------------------------------------
+  {
+    const hb = {};
+    const bAudits = [];
+    const savedToCase = [];
+    const written = [];
+    let saveResult = { canceled: true };
+    let focusRestored = 0;
+    S.registerPackIpc({ handle: (c, f) => { hb[c] = f; } }, store, {
+      dialog: { showSaveDialog: async (_w, o) => { written.push(['dialog', o.defaultPath, o.filters[0].extensions[0]]); return saveResult; } },
+      getWindow: () => null,
+      audit: () => ({ write: (ev, data) => bAudits.push([ev, data]) }),
+      AUDIT_EVENTS: { AGENCY_PACK_DOCS_GENERATED: 'agency_pack_docs_generated' },
+      saveToCase: (cn, name, bytes) => { savedToCase.push([cn, name, bytes.length > 0]); return { fileName: name.replace('.docx', ' (1).docx') }; },
+      defaultDir: () => path.join(TMP, 'docs'),
+      restoreFocus: () => { focusRestored++; },
+      writeFile: (p, b) => written.push(['write', path.basename(p), b.length > 0, b.slice(0, 2).toString('latin1')]),
+    });
+    ok(typeof hb['agency-pack-build'] === 'function', 'ipc build registered');
+    const values = { 'global:g_case': '26-000777', ['tpl:' + T_ACME + ':account']: 'user@example.test', ['tpl:' + T_ARR + ':defendant name']: 'Pat SYNTHETIC' };
+    const base = { packId: 'test-pack', templateIds: [T_ACME, T_ARR], values, county: 'South County' };
+
+    const toCase = await hb['agency-pack-build']({}, Object.assign({ mode: 'case', caseNumber: ' 26-000777 ' }, base));
+    eq([toCase.success, toCase.count, toCase.saved], [true, 2, ['26000777 SW Acme_user@example.test (1).docx', '26000777 AW South County_Pat SYNTHETIC (1).docx']], 'build to case');
+    eq(savedToCase, [['26-000777', '26000777 SW Acme_user@example.test.docx', true], ['26-000777', '26000777 AW South County_Pat SYNTHETIC.docx', true]], 'saveToCase called per document');
+    eq(bAudits[0], ['agency_pack_docs_generated', { case_number: '26-000777', pack_id: 'test-pack', pack_version: '1.1.0', documents: 2, destination: 'case',
+      files: ['26000777 SW Acme_user@example.test (1).docx', '26000777 AW South County_Pat SYNTHETIC (1).docx'] }], 'case audit');
+
+    const noCase = await hb['agency-pack-build']({}, Object.assign({}, base, { mode: 'case', caseNumber: '  ' }));
+    eq([noCase.success, noCase.error], [false, 'Open a case first'], 'case mode needs a case number');
+    const badMode = await hb['agency-pack-build']({}, Object.assign({}, base, { mode: 'email' }));
+    eq([badMode.success, badMode.error], [false, 'Unknown save option'], 'unknown mode');
+    const noReq = await hb['agency-pack-build']({}, null);
+    eq(noReq.success, false, 'null request rejected');
+    const badPack = await hb['agency-pack-build']({}, Object.assign({}, base, { mode: 'saveAs', packId: '../x' }));
+    eq([badPack.success, badPack.error], [false, 'Invalid pack id'], 'bad pack id');
+    const noTpl = await hb['agency-pack-build']({}, Object.assign({}, base, { mode: 'saveAs', templateIds: [] }));
+    eq([noTpl.success, noTpl.error], [false, 'Choose at least one template'], 'no templates');
+
+    written.length = 0;
+    const cancel = await hb['agency-pack-build']({}, Object.assign({ mode: 'saveAs' }, base));
+    eq(cancel, { success: true, canceled: true }, 'save as canceled');
+    eq(written, [['dialog', path.join(TMP, 'docs', '26000777_Warrant_Packet.zip'), 'zip']], 'packet default name');
+    ok(focusRestored >= 1, 'focus restored after dialog');
+
+    written.length = 0;
+    saveResult = { canceled: false, filePath: path.join(TMP, 'docs', 'packet.zip') };
+    const asZip = await hb['agency-pack-build']({}, Object.assign({ mode: 'saveAs' }, base));
+    eq([asZip.success, asZip.count, asZip.zipped], [true, 2, true], 'save as zip');
+    eq(written[1], ['write', 'packet.zip', true, 'PK'], 'zip written');
+    eq(bAudits[bAudits.length - 1][1].destination, 'export', 'export audited');
+    eq(bAudits[bAudits.length - 1][1].files, ['packet.zip'], 'export audit names the file only');
+
+    written.length = 0;
+    saveResult = { canceled: false, filePath: path.join(TMP, 'docs', 'one.docx') };
+    const one = await hb['agency-pack-build']({}, Object.assign({ mode: 'saveAs' }, base, { templateIds: [T_ACME] }));
+    eq([one.success, one.zipped], [true, false], 'save as single docx');
+    eq(written[0][1], path.join(TMP, 'docs', '26000777 SW Acme_user@example.test.docx'), 'single default name');
+    eq(written[0][2], 'docx', 'single docx filter');
+
+    const auditsBefore = bAudits.length;
+    written.length = 0;
+    saveResult = { canceled: false, filePath: path.join(TMP, 'docs', 'blank.zip') };
+    const blankR = await hb['agency-pack-build']({}, Object.assign({}, base, { mode: 'blank' }));
+    eq([blankR.success, blankR.count], [true, 2], 'blank forms');
+    eq(written[0][1], path.join(TMP, 'docs', 'Blank_Forms.zip'), 'blank default name');
+    eq(bAudits.length, auditsBefore, 'blank forms not audited (no case data)');
+
+    const huge = await hb['agency-pack-build']({}, Object.assign({}, base, { mode: 'saveAs', values: { x: 'a'.repeat(61 * 1024 * 1024) } }));
+    ok(!huge.success && /too large/.test(huge.error), 'oversized form rejected');
+
+    const hc = {};
+    S.registerPackIpc({ handle: (c, f) => { hc[c] = f; } }, store, {});
+    const noSaver = await hc['agency-pack-build']({}, Object.assign({ mode: 'case', caseNumber: 'X1' }, base));
+    eq([noSaver.success, noSaver.error], [false, 'Saving to the case is not available'], 'no saveToCase dep');
+  }
 
   console.log(`pack-store: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

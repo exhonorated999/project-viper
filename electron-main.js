@@ -3997,6 +3997,11 @@ const _agencyPacks = (() => {
   });
   P.registerPackIpc(ipcMain, store, {
     dialog, getWindow: () => mainWindow, audit: () => audit, AUDIT_EVENTS,
+    // Filled documents land in the case's Working Documents (Field Security,
+    // unique names, edit-in-Word with saves brought back into the case).
+    saveToCase: (caseNumber, fileName, bytes) => _workingDocs().addBuffer(caseNumber, fileName, bytes),
+    defaultDir: () => app.getPath('documents'),
+    restoreFocus: () => restoreFocus(),
   });
   return store;
 })();

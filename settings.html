@@ -21,6 +21,7 @@
     <script src="modules/warrant-author/provider-directory.js"></script>
     <script src="modules/warrant-author/items-taxonomy.js"></script>
     <script src="modules/warrant-author/boilerplate-library.js"></script>
+    <script src="modules/agency-packs/agency-packs-settings.js"></script>
     <!-- The one authoritative list of where a case's data lives. Must load
          BEFORE case-snapshot.js and before the backup collector below. -->
     <script src="modules/_shared/case-stores.js"></script>
@@ -2848,6 +2849,9 @@
                     <p class="text-gray-400 text-sm mb-5">Author drafting modules for search warrants and related court documents. Generated drafts are aids — review with your DA / legal counsel before service.</p>
 
                     <div id="documentAuthoringBody" class="hidden mt-5 space-y-4">
+
+                        <!-- Agency template packs (agency-packs-settings.js) -->
+                        <div id="agencyPacksMount"></div>
 
                         <!-- Warrant Author Toggle -->
                         <div class="p-4 bg-viper-dark/50 rounded-lg border border-gray-700/50">
@@ -10719,7 +10723,7 @@
         evidence_viewed:'👁 Evidence Viewed', evidence_exported:'⬆ Evidence Exported',
         warrant_added:'➕ Warrant Added', warrant_deleted:'🗑 Warrant Deleted',
         warrant_return_imported:'⬇ Warrant Return Imported',
-        agency_pack_installed:'📦 Agency Pack Installed', agency_pack_removed:'🗑 Agency Pack Removed',
+        agency_pack_installed:'📦 Agency Pack Installed', agency_pack_removed:'🗑 Agency Pack Removed', agency_pack_docs_generated:'📝 Agency Warrant Documents Generated',
         update_checked:'🔍 Update Checked', update_downloaded:'⬇ Update Downloaded', update_applied:'🔄 Update Applied',
         settings_changed:'⚙ Settings Changed',
         audit_log_exported:'⬆ Audit Log Exported', audit_log_verified:'✓ Audit Log Verified', audit_log_rotated:'🔄 Audit Log Rotated',

@@ -138,11 +138,114 @@ h1, h2, h3, h4 {
 section { padding: 100px 0; }
 
 /* ══════════════════════════════════════════════════════════════════
+   AGENCY TICKER  (fixed strip above the nav)
+   ══════════════════════════════════════════════════════════════════ */
+:root { --ticker-h: 34px; }
+html { scroll-padding-top: calc(var(--ticker-h) + 70px); }
+.agency-ticker {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: var(--ticker-h);
+    z-index: 101;
+    display: flex;
+    align-items: center;
+    background: rgba(3,8,3,0.94);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border-green);
+    overflow: hidden;
+}
+.ticker-label {
+    flex: none;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px 0 18px;
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--bg-deep);
+    background: var(--viper-green);
+    box-shadow: 0 0 18px var(--viper-glow);
+    position: relative;
+    z-index: 2;
+}
+.ticker-label::after {
+    content: '';
+    position: absolute;
+    right: -12px; top: 0;
+    border-style: solid;
+    border-width: calc(var(--ticker-h) / 2) 0 calc(var(--ticker-h) / 2) 12px;
+    border-color: transparent transparent transparent var(--viper-green);
+}
+.ticker-label .pulse-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--bg-deep);
+    animation: pulse 2s ease-in-out infinite;
+}
+.ticker-viewport {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 40px, #000 calc(100% - 40px), transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 40px, #000 calc(100% - 40px), transparent 100%);
+}
+.ticker-track {
+    display: flex;
+    width: max-content;
+    animation: tickerScroll 45s linear infinite;
+}
+.agency-ticker:hover .ticker-track,
+.agency-ticker:focus-within .ticker-track { animation-play-state: paused; }
+.ticker-list {
+    display: flex;
+    align-items: center;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: none;
+}
+.ticker-list li {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-primary);
+    letter-spacing: 0.5px;
+}
+.ticker-list li::before {
+    content: '◆';
+    color: var(--viper-green);
+    font-size: 9px;
+    margin: 0 22px;
+    text-shadow: 0 0 8px var(--viper-glow);
+}
+.ticker-list li .st { color: var(--text-secondary); margin-left: 8px; }
+@keyframes tickerScroll {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ticker-track { animation: none; }
+    .ticker-viewport { overflow-x: auto; }
+    .ticker-list[aria-hidden="true"] { display: none; }
+}
+@media (max-width: 600px) {
+    :root { --ticker-h: 30px; }
+    .ticker-label { font-size: 10px; letter-spacing: 1.5px; padding: 0 12px 0 12px; }
+    .ticker-list li { font-size: 12px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
    NAVIGATION
    ══════════════════════════════════════════════════════════════════ */
 nav {
     position: fixed;
-    top: 0; left: 0; right: 0;
+    top: var(--ticker-h); left: 0; right: 0;
     z-index: 100;
     padding: 18px 0;
     transition: all 0.4s ease;
@@ -227,7 +330,7 @@ nav .container {
     min-height: 100vh;
     display: flex;
     align-items: center;
-    padding-top: 80px;
+    padding-top: calc(80px + var(--ticker-h));
     position: relative;
     overflow: hidden;
 }
@@ -992,7 +1095,7 @@ footer {
     }
     .trust-grid { grid-template-columns: repeat(2, 1fr); gap: 24px; }
     section { padding: 70px 0; }
-    .hero { min-height: auto; padding: 120px 0 60px; }
+    .hero { min-height: auto; padding: calc(120px + var(--ticker-h)) 0 60px; }
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1376,6 +1479,25 @@ footer {
 
 <!-- ═══════════════ CONTENT WRAPPER ═══════════════ -->
 <div class="content-wrapper">
+
+    <!-- ═══════════════ AGENCY TICKER ═══════════════ -->
+    <div class="agency-ticker" role="region" aria-label="Agencies using V.I.P.E.R.">
+        <div class="ticker-label"><span class="pulse-dot"></span><span>Trusted by</span></div>
+        <div class="ticker-viewport" tabindex="0">
+            <div class="ticker-track" id="tickerTrack">
+                <ul class="ticker-list">
+                    <li>Allegheny Township<span class="st">Pennsylvania</span></li>
+                    <li>Alleghany Sheriff<span class="st">Virginia</span></li>
+                    <li>Chesapeake PD<span class="st">Virginia</span></li>
+                    <li>Faulkner County Sheriff<span class="st">Arkansas</span></li>
+                    <li>Westminster PD<span class="st">Colorado</span></li>
+                    <li>Fort Worth PD<span class="st">Texas</span></li>
+                    <li>Winnemucca PD<span class="st">Nevada</span></li>
+                    <li>Gurnee PD<span class="st">Illinois</span></li>
+                </ul>
+            </div>
+        </div>
+    </div>
 
     <!-- ═══════════════ NAVIGATION ═══════════════ -->
     <nav id="mainNav">
@@ -2154,6 +2276,44 @@ window.addEventListener('scroll', () => {
 });
 
 /* ──────────────────────────────────────────────
+   AGENCY TICKER
+   The first list is the real (screen-reader) list. On wide screens it is
+   padded with hidden repeats so one copy is wider than the strip, then a
+   hidden duplicate is appended so translateX(-50%) loops with no seam.
+   Speed is constant (px/s) whatever the list length.
+   ────────────────────────────────────────────── */
+(function initAgencyTicker() {
+    const track = document.getElementById('tickerTrack');
+    const src = track && track.querySelector('.ticker-list');
+    if (!src) return;
+    const items = Array.from(src.children);
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const PX_PER_SEC = 45;
+    function build() {
+        track.querySelectorAll('.ticker-list[aria-hidden]').forEach(n => n.remove());
+        src.querySelectorAll('li[aria-hidden]').forEach(n => n.remove());
+        if (reduce.matches) return;
+        const vw = track.parentElement.clientWidth;
+        for (let i = 0; i < 12 && src.getBoundingClientRect().width < vw; i++) {
+            items.forEach(li => {
+                const c = li.cloneNode(true);
+                c.setAttribute('aria-hidden', 'true');
+                src.appendChild(c);
+            });
+        }
+        const copy = src.cloneNode(true);
+        copy.setAttribute('aria-hidden', 'true');
+        track.appendChild(copy);
+        track.style.animationDuration = (src.getBoundingClientRect().width / PX_PER_SEC) + 's';
+    }
+    build();
+    let t;
+    window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(build, 200); });
+    if (reduce.addEventListener) reduce.addEventListener('change', build);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(build);
+})();
+
+/* ──────────────────────────────────────────────
    SCROLL REVEAL
    ────────────────────────────────────────────── */
 const observer = new IntersectionObserver((entries) => {
@@ -2246,7 +2406,12 @@ document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
         capEl.innerHTML = '<h4><span class="cap-ico">' + s.ico + '</span>' + s.title + '</h4><p>' + s.desc + '</p>';
         badgeEl.textContent = s.badge;
         counterEl.textContent = (cur + 1) + ' / ' + slides.length;
-        try { tabs[cur].scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' }); } catch (e) {}
+        // Centre the active tab inside the tab strip only — scrollIntoView would also
+        // scroll the page, which jumped visitors down to this deck on load.
+        try {
+            const tb = tabs[cur].getBoundingClientRect(), cb = tabsEl.getBoundingClientRect();
+            tabsEl.scrollTo({ left: tabsEl.scrollLeft + (tb.left - cb.left) - (cb.width - tb.width) / 2, behavior: 'smooth' });
+        } catch (e) {}
     }
     function go(i) { cur = (i + slides.length) % slides.length; render(); }
 

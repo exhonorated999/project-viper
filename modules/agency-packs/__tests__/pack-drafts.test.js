@@ -137,7 +137,21 @@ ok(v.check.ok, 'draft with templates can be saved');
 ok(fs.existsSync(path.join(DROOT, 'example-warrants', 'templates', 'Example Phone Co.docx')), 'template copied into the draft');
 ok(!fs.existsSync(path.join(DROOT, 'example-warrants', 'templates', 'fake.docx')), 'refused file not copied');
 r = drafts.addTemplates('example-warrants', [DOC_A]);
-eq(r.results[0].rel, 'Example Phone Co (2).docx', 'same file name gets a new template name');
+eq([r.results.length, r.conflicts.length], [0, 1], 'same template again is a question, not a copy');
+eq(r.conflicts[0], { file: 'Example Phone Co.docx', path: DOC_A, rel: 'Example Phone Co.docx', title: 'Example Phone Co' }, 'conflict names the template it matches');
+eq(r.draft.templates.length, 2, 'nothing added for a conflict');
+ok(!fs.existsSync(path.join(DROOT, 'example-warrants', 'templates', 'Example Phone Co (2).docx')), 'no copy written for a conflict');
+{
+  // Matches ignore case, "_Template", folders and a copy number; different names are not matched.
+  const d1 = put('EXAMPLE PHONE CO_Template.docx', fs.readFileSync(DOC_A));
+  const d2 = put('Example Phone Co (3).docx', fs.readFileSync(DOC_A));
+  const rr = drafts.addTemplates('example-warrants', [d1, d2, DOC_A2, FAKE_DOCX]);
+  eq(rr.conflicts.map(c => c.rel), ['Example Phone Co.docx', 'Example Phone Co.docx'], 'loose name matches');
+  eq(rr.results.map(x => x.rel || 'error'), ['Example Phone Co v2.docx', 'error'], 'other files still added; bad file still an error, not a conflict');
+  drafts.op('example-warrants', 'removeTemplate', { rel: 'Example Phone Co v2.docx' });
+}
+r = drafts.addTemplates('example-warrants', [DOC_A], { duplicates: 'add' });
+eq([r.results[0].rel, r.conflicts.length], ['Example Phone Co (2).docx', 0], 'officer chose "add as a separate template"');
 v = drafts.op('example-warrants', 'removeTemplate', { rel: 'Example Phone Co (2).docx' });
 ok(!fs.existsSync(path.join(DROOT, 'example-warrants', 'templates', 'Example Phone Co (2).docx')), 'removed template file deleted');
 eq(v.templates.length, 2, 'template removed');
@@ -229,6 +243,53 @@ eq(s.pack.packVersion, '2.3.1', 'version bumped from the installed one');
 eq(store.load('cli-pack').rules, CLI_RULES, 'manifest rules untouched');
 eq(store.load('cli-pack').manifest.createdAt, CLI_CREATED, 'createdAt kept');
 
+// ---- Unsaved edits made to an older install -----------------------------------------------------
+{
+  const packOf = (ver) => S.buildPackBuffer({ id: 'cli-pack', name: 'CLI pack', agency: 'Example agency', packVersion: ver, rules: CLI_RULES, config: CLI_CONFIG,
+    templates: new Map([['Example Phone Co.docx', tplA]]) }, { AdmZip, crypto }).buffer;
+  eq(s.draft.stale, null, 'just saved: not stale');
+  drafts.op('cli-pack', 'setMeta', { description: 'my edits' });
+  eq(drafts.get('cli-pack').stale, null, 'own edits are not stale');
+  store.installBuffer(packOf('3.0'), 'agency file');
+  v = drafts.get('cli-pack');
+  eq([v.stale && v.stale.baseVersion, v.stale && v.stale.installedVersion, v.meta.nextVersion], ['2.3.1', '3.0', '3.0.1'], 'stale after a newer pack is installed');
+  ok(v.stale && v.stale.installedAt, 'stale says when');
+  eq(drafts.list().find(d => d.id === 'cli-pack').stale.installedVersion, '3.0', 'stale in the drafts list');
+  eq(drafts.openInstalled('cli-pack').stale.installedVersion, '3.0', 'opening again keeps the edits and says they are stale');
+  throws(() => drafts.save('cli-pack'), /made to version 2\.3\.1, but version 3\.0 has been installed since/, 'stale save refused');
+  eq([store.load('cli-pack').manifest.packVersion, store.load('cli-pack').manifest.description || ''], ['3.0', ''], 'newer install untouched');
+  s = drafts.save('cli-pack', { force: true });
+  eq([s.pack.packVersion, s.replacedNewer, s.draft.stale, s.pack.description], ['3.0.1', '3.0', null, 'my edits'], 'forced save goes on top of the newer version');
+  eq(drafts.save('cli-pack').replacedNewer, null, 'next save is normal');
+
+  // An older file installed over it is stale too; starting fresh takes the installed version.
+  drafts.op('cli-pack', 'setMeta', { description: 'more edits' });
+  store.installBuffer(packOf('2.0'), 'old file');
+  eq(drafts.get('cli-pack').stale.installedVersion, '2.0', 'older install also makes the edits stale');
+  v = drafts.openInstalled('cli-pack', { fresh: true });
+  eq([v.stale, v.meta.packVersion, v.meta.description, v.dirty], [null, '2.0', '', false], 'start from the installed version');
+
+  // The same version installed again from a file is noticed by its install time.
+  drafts.op('cli-pack', 'setMeta', { description: 'edits on 2.0' });
+  store.installBuffer(packOf('2.0'), 'same file again');
+  eq(drafts.get('cli-pack').stale && drafts.get('cli-pack').stale.installedVersion, '2.0', 'reinstall of the same version noticed');
+
+  // Drafts from before install times were recorded only compare versions.
+  const f = path.join(DROOT, 'cli-pack', 'draft.json');
+  const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+  delete j.meta.baseInstalledAt;
+  fs.writeFileSync(f, JSON.stringify(j));
+  eq(drafts.get('cli-pack').stale, null, 'older draft, same version: not stale');
+  store.installBuffer(packOf('2.1'), 'newer');
+  eq(drafts.get('cli-pack').stale.baseVersion, '2.0', 'older draft, other version: stale');
+
+  // A removed pack: saving installs it again, nothing to overwrite.
+  store.remove('cli-pack');
+  eq(drafts.get('cli-pack').stale, null, 'pack removed: not stale');
+  store.installBuffer(packOf('2.3.1'), 'restore');
+  drafts.openInstalled('cli-pack', { fresh: true });
+}
+
 // A new draft whose id gets installed by someone else before the first save.
 v = drafts.create({ name: 'Clash' });
 drafts.addTemplates('clash', [DOC_A]);
@@ -311,6 +372,20 @@ throws(() => drafts.save('clash'), /already installed/, 'never overwrite a diffe
   eq(x.success, false, 'export of an unknown pack refused');
   x = await call('agency-pack-drafts');
   ok(x.drafts.some(d => d.id === 'ipc-pack'), 'list over IPC');
+  x = await call('agency-pack-draft-add-templates', { id: 'ipc-pack', paths: [DOC_B] });
+  eq([x.success, x.results.length, x.conflicts.map(c => c.rel)], [true, 0, ['Example Mail Co.docx']], 'duplicate over IPC is a conflict');
+  x = await call('agency-pack-draft-add-templates', { id: 'ipc-pack', paths: [DOC_B], duplicates: 'add' });
+  eq([x.results[0].rel, x.conflicts.length], ['Example Mail Co (2).docx', 0], 'duplicates: add over IPC');
+  x = await call('agency-pack-draft-add-templates', { id: 'ipc-pack', paths: [DOC_B], duplicates: 'yes please' });
+  eq(x.conflicts.length, 1, 'only "add" skips the question');
+  store.installBuffer(S.buildPackBuffer({ id: 'ipc-pack', name: 'IPC Pack', packVersion: '5.0', config: CLI_CONFIG, templates: [['Example Phone Co.docx', tplA]] }).buffer, 'agency');
+  x = await call('agency-pack-draft-save', 'ipc-pack');
+  ok(!x.success && /version 5\.0 has been installed since/.test(x.error), 'stale save refused over IPC');
+  x = await call('agency-pack-draft-save', { id: 'ipc-pack', force: 'true' });
+  eq(x.success, false, 'force must be true, not truthy');
+  x = await call('agency-pack-draft-save', { id: 'ipc-pack', force: true });
+  eq([x.success, x.pack.packVersion, x.pack.templateCount], [true, '5.0.1', 4], 'forced save over IPC');
+  eq(audits[audits.length - 1], ['agency_pack_installed', { pack_id: 'ipc-pack', pack_version: '5.0.1', templates: 4, source: 'editor', replaced_newer: '5.0' }], 'forced save audited');
   x = await call('agency-pack-draft-open', { id: 'example-warrants', fresh: true });
   eq([x.success, x.draft.meta.packVersion], [true, '1.0.2'], 'open over IPC');
   x = await call('agency-pack-draft-discard', 'ipc-pack');

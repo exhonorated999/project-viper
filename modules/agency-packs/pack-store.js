@@ -112,6 +112,24 @@ function validateConfig(cfg, has) {
     return cfg;
 }
 
+/**
+ * Compare two pack versions like "1.2.10" and "1.2.9" number by number (missing parts are 0).
+ * Returns -1, 0 or 1, or null when either is not plain numbers and dots (then nothing is claimed).
+ */
+function compareVersions(a, b) {
+    const parse = (v) => {
+        const s = String(v == null ? '' : v).trim().replace(/^v/i, '');
+        return /^\d{1,9}(\.\d{1,9}){0,9}$/.test(s) ? s.split('.').map(Number) : null;
+    };
+    const x = parse(a), y = parse(b);
+    if (!x || !y) return null;
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+        const d = (x[i] || 0) - (y[i] || 0);
+        if (d) return d < 0 ? -1 : 1;
+    }
+    return 0;
+}
+
 function summarize(manifest, config, extra) {
     const categories = {};
     Object.values(config.templatesConfig || {}).forEach(t => {
@@ -275,9 +293,14 @@ function createPackStore(deps) {
 
     function inspect(filePath) {
         const p = readPackFile(filePath);
+        const installedVersion = installedSummary(p.manifest.id);
+        // -1: the file is older than what is installed, 0 same, 1 newer, null not comparable / not installed.
+        const versionVsInstalled = installedVersion ? compareVersions(p.manifest.packVersion, installedVersion) : null;
         return summarize(p.manifest, p.config, {
             sizeBytes: p.sizeBytes,
-            installedVersion: installedSummary(p.manifest.id),
+            installedVersion,
+            versionVsInstalled,
+            olderThanInstalled: versionVsInstalled === -1,
         });
     }
 
@@ -636,4 +659,4 @@ function uniqueDiskPath(dir, filename, exists) {
 const BUILD_MODES = ['case', 'saveAs', 'blank', 'downloads'];
 const MAX_BUILD_VALUES_CHARS = 60 * 1024 * 1024;
 
-module.exports = { createPackStore, registerPackIpc, buildPackBuffer, PackError, isSafeRelPath, validateManifest, validateConfig, validateRules, FORMAT, FORMAT_VERSION, LIMITS, ID_RE };
+module.exports = { createPackStore, registerPackIpc, buildPackBuffer, compareVersions, PackError, isSafeRelPath, validateManifest, validateConfig, validateRules, FORMAT, FORMAT_VERSION, LIMITS, ID_RE };

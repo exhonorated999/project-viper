@@ -15,6 +15,8 @@
         el: null, id: null, view: null, tab: 'templates', expanded: null, filter: '',
         notice: null, newCategory: 'Search Warrant', busy: '', chain: Promise.resolve(), onClose: null,
         openNotes: {}, resumed: false,
+        // Added Word files that look like a template already in the pack: { file, path, rel, title }.
+        conflicts: [],
     };
 
     const api = () => (typeof window !== 'undefined' && window.electronAPI) || {};
@@ -70,7 +72,7 @@
         E.id = opts.id;
         E.onClose = typeof opts.onClose === 'function' ? opts.onClose : null;
         E.tab = opts.tab || 'templates';
-        E.expanded = null; E.filter = ''; E.notice = null; E.openNotes = {}; E.resumed = false;
+        E.expanded = null; E.filter = ''; E.notice = null; E.openNotes = {}; E.resumed = false; E.conflicts = [];
         let r;
         if (opts.view) r = { success: true, draft: opts.view };
         else if (opts.mode === 'edit') r = await api().agencyPackDraftOpen({ id: opts.id });
@@ -175,7 +177,13 @@
                     <button type="button" data-pe-act="close" class="${BTN}">Close</button>
                 </div>
             </div>
-            ${E.resumed ? `
+            ${v.stale ? `
+            <div class="mt-3 p-3 rounded-lg border border-rose-500/50 bg-rose-500/10 text-xs text-rose-100 flex items-center justify-between gap-3" data-pe-stale>
+                <span><span class="font-semibold text-rose-200">This pack was updated after these changes were made.</span>
+                    The changes below were made to version ${esc(v.stale.baseVersion)}${v.updatedAt ? ' (last change ' + esc(fmtWhen(v.updatedAt)) + ')' : ''}, but version ${esc(v.stale.installedVersion)} has been installed since${v.stale.installedAt ? ' (' + esc(fmtWhen(v.stale.installedAt)) + ')' : ''}.
+                    Saving them would replace version ${esc(v.stale.installedVersion)} and lose whatever changed in it.</span>
+                <button type="button" data-pe-act="start-over" class="${BTN_PRIMARY} shrink-0">Start from version ${esc(v.stale.installedVersion)}</button>
+            </div>` : E.resumed ? `
             <div class="mt-3 p-2.5 rounded-lg border border-amber-500/40 bg-amber-500/5 text-xs text-amber-200 flex items-center justify-between gap-3" data-pe-resumed>
                 <span>You have changes to this pack that were never saved${v.updatedAt ? ' (last change ' + esc(fmtWhen(v.updatedAt)) + ')' : ''}. They are shown here.</span>
                 <button type="button" data-pe-act="start-over" class="${BTN}">Discard them and start from the installed pack</button>
@@ -231,11 +239,40 @@
         const all = Array.from(new Set(v.suggestedCategories.concat(v.categories)));
         return `<datalist id="pe-categories">${all.map(c => `<option value="${esc(c)}"></option>`).join('')}</datalist>`;
     }
+    function conflictsHtml() {
+        const list = E.conflicts;
+        if (!list.length) return '';
+        const rows = list.map((c, i) => `
+                <li class="py-2 flex items-center justify-between gap-3" data-pe-conflict="${i}">
+                    <div class="min-w-0 text-xs">
+                        <div class="text-white truncate">${esc(c.file)}</div>
+                        <div class="text-gray-400">Looks like <span class="text-gray-200">${esc(c.title)}</span>, already in the pack</div>
+                    </div>
+                    <div class="flex gap-2 shrink-0">
+                        <button type="button" data-pe-act="dup-replace" data-idx="${i}" class="${BTN_PRIMARY}"
+                            title="Use this file instead of the current one. Fields still in it keep their settings.">Replace ${esc(c.title)}</button>
+                        <button type="button" data-pe-act="dup-add" data-idx="${i}" class="${BTN}"
+                            title="Keep both. The new one is added with a number after its name.">Add as a separate template</button>
+                        <button type="button" data-pe-act="dup-skip" data-idx="${i}" class="${BTN}">Skip</button>
+                    </div>
+                </li>`).join('');
+        return `
+            <div class="mb-4 p-3 rounded-lg border border-amber-500/50 bg-amber-500/5" data-pe-conflicts>
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <div class="text-sm text-white font-semibold">${list.length === 1 ? 'This template is already in the pack' : `${list.length} of these templates are already in the pack`}</div>
+                        <div class="text-xs text-gray-400">If it is a newer version of the same document, replace the old one so officers don't see it twice.</div>
+                    </div>
+                    ${list.length > 1 ? `<button type="button" data-pe-act="dup-replace-all" class="${BTN_PRIMARY} shrink-0">Replace all ${list.length}</button>` : ''}
+                </div>
+                <ul class="divide-y divide-gray-700/40 mt-1">${rows}</ul>
+            </div>`;
+    }
     function noticeHtml() {
         const n = E.notice;
-        if (!n) return '';
+        if (!n) return conflictsHtml();
         const lines = n.lines.map(l => `<li class="${l.cls || 'text-gray-300'}">${l.html}</li>`).join('');
-        return `
+        return conflictsHtml() + `
             <div class="mb-4 p-3 rounded-lg border ${n.error ? 'border-rose-500/40 bg-rose-500/5' : 'border-viper-cyan/40 bg-viper-cyan/5'}" data-pe-notice>
                 <div class="flex items-start justify-between gap-3">
                     <div class="text-sm text-white font-semibold">${esc(n.title)}</div>
@@ -459,7 +496,7 @@
                     <ol class="list-decimal ml-5 space-y-1.5">
                         ${li('<span class="text-white">Save pack</span> installs it on this computer; the version number goes up each time. It shows on a case under Warrant Author → Agency Templates.')}
                         ${li('To share it, use <span class="text-white">Export</span> next to the pack in Settings and give the .viperpack file to other officers. They install it with <span class="text-white">Install pack…</span>.')}
-                        ${li('To change the wording later, edit the Word file, then <span class="text-white">Replace…</span> the template here. Fields that are still there keep their settings; new and removed fields are listed.')}
+                        ${li('To change the wording later, edit the Word file, then <span class="text-white">Replace…</span> the template here (or drop the file on it). Fields that are still there keep their settings; new and removed fields are listed. Adding a file with the same name as a template already in the pack asks whether to replace it.')}
                     </ol>
                 </section>
                 <p class="text-xs text-gray-500">The wording of the documents is edited in Word, not in VIPER. Your work is kept as a draft as you go, even if you close this window.</p>
@@ -487,6 +524,16 @@
         if (act === 'remove-tpl') return removeTemplate(rel);
         if (act === 'save') return save();
         if (act === 'start-over') return startOver();
+        if (act === 'dup-replace' || act === 'dup-add' || act === 'dup-skip') {
+            const c = E.conflicts[Number(b.getAttribute('data-idx'))];
+            if (!c) return;
+            E.conflicts = E.conflicts.filter(x => x !== c);
+            if (act === 'dup-skip') { render(); return; }
+            if (act === 'dup-replace') return replaceTemplate(c.rel, c.path);
+            const t = E.view.templates.find(x => x.rel === c.rel);
+            return addTemplates([c.path], { duplicates: 'add', category: t ? t.category : undefined });
+        }
+        if (act === 'dup-replace-all') return replaceAll();
         if (act === 'split') {
             const f = fieldByKey(key);
             const name = b.getAttribute('data-name');
@@ -560,10 +607,16 @@
     }
 
     // ---- Actions ---------------------------------------------------------------------------
-    function addTemplates(paths) {
+    function addTemplates(paths, opts) {
+        opts = opts || {};
         return queue('Reading Word files…', async () => {
-            const r = await api().agencyPackDraftAddTemplates({ id: E.id, paths: paths || undefined, category: E.newCategory });
+            const req = { id: E.id, paths: paths || undefined, category: opts.category || E.newCategory };
+            if (opts.duplicates === 'add') req.duplicates = 'add';
+            const r = await api().agencyPackDraftAddTemplates(req);
             if (!take(r, 'Could not add the templates')) return;
+            const conflicts = Array.isArray(r.conflicts) ? r.conflicts : [];
+            // A file chosen again replaces its earlier, still unanswered question.
+            E.conflicts = E.conflicts.filter(c => !conflicts.some(n => n.path === c.path)).concat(conflicts);
             const ok = r.results.filter(x => !x.error);
             const bad = r.results.filter(x => x.error);
             const lines = ok.map(x => {
@@ -574,10 +627,20 @@
                 if (!x.fields) extra.push('<span class="text-rose-300">no highlighted [fields] found</span>');
                 return { html: `<span class="text-white">${esc(x.title)}</span>: ${plural(x.fields, 'field')}${extra.length ? ' · ' + extra.join(' · ') : ''}` };
             }).concat(bad.map(x => ({ cls: 'text-rose-300', html: esc(x.error) })));
-            E.notice = { title: ok.length ? `Added ${plural(ok.length, 'template')}` : 'Nothing was added', error: !ok.length, lines };
+            if (lines.length) E.notice = { title: ok.length ? `Added ${plural(ok.length, 'template')}` : 'Nothing was added', error: !ok.length, lines };
+            else if (conflicts.length) E.notice = null;
             E.tab = 'templates';
             render();
         });
+    }
+
+    function replacedLines(x) {
+        const lines = [{ html: `${plural(x.kept, 'field')} kept with ${x.kept === 1 ? 'its' : 'their'} settings` }];
+        if (x.added.length) lines.push({ cls: 'text-viper-cyan', html: `New: ${x.added.map(n => '[' + esc(n) + ']').join(', ')} — check them under Fields` });
+        if (x.removed.length) lines.push({ cls: 'text-amber-300', html: `No longer in the document: ${x.removed.map(n => '[' + esc(n) + ']').join(', ')}` });
+        if (x.unhighlighted) lines.push({ cls: 'text-amber-300', html: `${plural(x.unhighlighted, '[bracket]')} not highlighted` });
+        if (x.unclosed) lines.push({ cls: 'text-amber-300', html: plural(x.unclosed, 'unclosed [') });
+        return lines;
     }
 
     function replaceTemplate(rel, path) {
@@ -585,12 +648,33 @@
             const r = await api().agencyPackDraftReplaceTemplate({ id: E.id, rel, path: path || undefined });
             if (!take(r, 'Could not replace the template')) return;
             const x = r.result;
-            const lines = [{ html: `${plural(x.kept, 'field')} kept with ${x.kept === 1 ? 'its' : 'their'} settings` }];
-            if (x.added.length) lines.push({ cls: 'text-viper-cyan', html: `New: ${x.added.map(n => '[' + esc(n) + ']').join(', ')} — check them under Fields` });
-            if (x.removed.length) lines.push({ cls: 'text-amber-300', html: `No longer in the document: ${x.removed.map(n => '[' + esc(n) + ']').join(', ')}` });
-            if (x.unhighlighted) lines.push({ cls: 'text-amber-300', html: `${plural(x.unhighlighted, '[bracket]')} not highlighted` });
-            if (x.unclosed) lines.push({ cls: 'text-amber-300', html: plural(x.unclosed, 'unclosed [') });
-            E.notice = { title: `Replaced ${x.title}`, lines };
+            E.notice = { title: `Replaced ${x.title}`, lines: replacedLines(x) };
+            E.tab = 'templates';
+            render();
+        });
+    }
+
+    // Every listed file replaces the template it matched (one file per template; the rest stay listed).
+    function replaceAll() {
+        const seen = new Set();
+        const todo = E.conflicts.filter(c => (seen.has(c.rel) ? false : (seen.add(c.rel), true)));
+        E.conflicts = E.conflicts.filter(c => !todo.includes(c));
+        return queue('Replacing templates…', async () => {
+            const lines = [];
+            let done = 0;
+            for (const c of todo) {
+                const r = await api().agencyPackDraftReplaceTemplate({ id: E.id, rel: c.rel, path: c.path });
+                if (!r || !r.success) { lines.push({ cls: 'text-rose-300', html: `${esc(c.file)}: ${esc((r && r.error) || 'could not be read')}` }); continue; }
+                if (r.draft) E.view = r.draft;
+                done++;
+                const x = r.result;
+                const extra = [];
+                if (x.added.length) extra.push(`<span class="text-viper-cyan">new: ${x.added.map(n => '[' + esc(n) + ']').join(', ')}</span>`);
+                if (x.removed.length) extra.push(`<span class="text-amber-300">gone: ${x.removed.map(n => '[' + esc(n) + ']').join(', ')}</span>`);
+                if (x.unhighlighted) extra.push(`<span class="text-amber-300">${plural(x.unhighlighted, '[bracket]')} not highlighted</span>`);
+                lines.push({ html: `<span class="text-white">${esc(x.title)}</span>: ${plural(x.kept, 'field')} kept${extra.length ? ' · ' + extra.join(' · ') : ''}` });
+            }
+            E.notice = { title: done ? `Replaced ${plural(done, 'template')}` : 'Nothing was replaced', error: !done, lines };
             E.tab = 'templates';
             render();
         });
@@ -608,12 +692,22 @@
         const ok = await confirmBox(`Remove "${t ? t.title : rel}" from this pack?\n\nIts field settings are removed with it. Documents already made are not affected.`, { danger: true, okText: 'Remove template' });
         if (!ok) return;
         delete E.openNotes[rel];
+        E.conflicts = E.conflicts.filter(c => c.rel !== rel);
         await op('removeTemplate', { rel }, 'Removing…');
     }
 
-    function save() {
+    async function save() {
+        const st = E.view && E.view.stale;
+        let force = false;
+        if (st) {
+            const ok = await confirmBox(
+                `Version ${st.installedVersion} of this pack was installed after you made these changes (they were made to version ${st.baseVersion}).\n\nSaving now replaces version ${st.installedVersion} with your changes, and anything that changed in version ${st.installedVersion} is lost.\n\nTo keep version ${st.installedVersion}, cancel and choose "Start from version ${st.installedVersion}".`,
+                { danger: true, okText: `Replace version ${st.installedVersion}` });
+            if (!ok) return;
+            force = true;
+        }
         return queue('Saving the pack…', async () => {
-            const r = await api().agencyPackDraftSave(E.id);
+            const r = await api().agencyPackDraftSave(force ? { id: E.id, force: true } : E.id);
             if (!take(r, 'Could not save the pack')) return;
             E.resumed = false;
             const p = r.pack || {};
@@ -624,12 +718,16 @@
     }
 
     async function startOver() {
-        const ok = await confirmBox('Discard the changes that were never saved and start again from the installed pack?', { danger: true, okText: 'Discard changes' });
+        const st = E.view && E.view.stale;
+        const msg = st
+            ? `Throw away your unsaved changes and load version ${st.installedVersion}, the one installed now?\n\nIf you still need some of your changes, make them again on version ${st.installedVersion}.`
+            : 'Discard the changes that were never saved and start again from the installed pack?';
+        const ok = await confirmBox(msg, { danger: true, okText: st ? `Load version ${st.installedVersion}` : 'Discard changes' });
         if (!ok) return;
         await queue('Loading the installed pack…', async () => {
             const r = await api().agencyPackDraftOpen({ id: E.id, fresh: true });
             if (!take(r, 'Could not load the installed pack')) return;
-            E.resumed = false; E.expanded = null; E.notice = null; E.openNotes = {};
+            E.resumed = false; E.expanded = null; E.notice = null; E.openNotes = {}; E.conflicts = [];
             render();
         });
     }

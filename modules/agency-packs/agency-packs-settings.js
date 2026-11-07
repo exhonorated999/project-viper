@@ -160,6 +160,13 @@
 
     async function install() {
         if (state.busy || !state.pending) return;
+        const s = state.pending.summary || {};
+        if (s.olderThanInstalled) {
+            const ok = await confirmBox(
+                `This file is version ${s.packVersion} of "${s.name || s.id}", but version ${s.installedVersion} is already installed.\n\nInstalling it replaces the newer version with the older one. Only do this if the agency asked you to go back to this version.`,
+                { danger: true, okText: `Install older version ${s.packVersion}` });
+            if (!ok || !state.pending) return;
+        }
         state.busy = true; render();
         try {
             const r = await api().agencyPackInstall(state.pending.filePath);
@@ -217,10 +224,17 @@
         if (!pd) return '';
         const s = pd.summary || {};
         let note = '';
-        if (s.installedVersion && s.installedVersion === s.packVersion) {
+        if (s.olderThanInstalled) {
+            note = `<div class="mt-2 p-2 rounded border border-rose-500/50 bg-rose-500/10 text-[11px] text-rose-200" data-ap-older>
+                    <span class="font-semibold">Older than what is installed.</span> This file is version ${esc(s.packVersion)}; version ${esc(s.installedVersion)} is installed now. Installing it goes back to the older templates.</div>`;
+        } else if (s.installedVersion && s.installedVersion === s.packVersion) {
             note = `<p class="text-[11px] text-amber-300 mt-2">Version ${esc(s.packVersion)} is already installed. Installing again replaces it with this copy.</p>`;
         } else if (s.installedVersion) {
             note = `<p class="text-[11px] text-viper-cyan mt-2">Replaces installed version ${esc(s.installedVersion)}.</p>`;
+        }
+        const draft = s.installedVersion && (state.drafts || []).find(d => d.id === s.id && d.installed && d.dirty && !d.error);
+        if (draft) {
+            note += `<p class="text-[11px] text-amber-300 mt-1" data-ap-pending-draft>You have unsaved edits to this pack. They were made to version ${esc(draft.packVersion || s.installedVersion)}; after installing, VIPER will ask before they are saved over this file.</p>`;
         }
         const counties = Array.isArray(s.counties) && s.counties.length
             ? `<div><span class="text-gray-500">Counties:</span> ${s.counties.map(esc).join(', ')}</div>` : '';
@@ -237,7 +251,7 @@
                 ${note}
                 <div class="flex gap-2 mt-3">
                     <button type="button" data-ap-act="install" ${state.busy ? 'disabled' : ''}
-                        class="px-3 py-1.5 text-xs rounded-lg bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan text-viper-cyan disabled:opacity-50">Install</button>
+                        class="px-3 py-1.5 text-xs rounded-lg ${s.olderThanInstalled ? 'bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/60 text-rose-200' : 'bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan text-viper-cyan'} disabled:opacity-50">${s.olderThanInstalled ? 'Install older version…' : 'Install'}</button>
                     <button type="button" data-ap-act="cancel" ${state.busy ? 'disabled' : ''}
                         class="px-3 py-1.5 text-xs rounded-lg border border-gray-600 text-gray-300 hover:bg-gray-700/40">Cancel</button>
                 </div>
@@ -302,9 +316,13 @@
     function renderUnsaved(id) {
         const d = (state.drafts || []).find(x => x.id === id && x.installed && x.dirty && !x.error);
         if (!d || !editorReady()) return '';
+        const when = d.updatedAt ? ` from ${esc(fmtDate(d.updatedAt))}` : '';
+        const text = d.stale
+            ? `<span class="text-rose-300">Unsaved changes${when} were made to version ${esc(d.stale.baseVersion)}, but version ${esc(d.stale.installedVersion)} has been installed since.</span> Throw them away, or open Edit to decide.`
+            : `Unsaved changes${when}. They are not in the pack yet — open Edit and Save pack to use them.`;
         return `
-                <div class="mt-2 flex items-center justify-between gap-3 text-[11px] text-amber-300" data-ap-unsaved="${esc(id)}">
-                    <span>Unsaved changes${d.updatedAt ? ` from ${esc(fmtDate(d.updatedAt))}` : ''}. They are not in the pack yet — open Edit and Save pack to use them.</span>
+                <div class="mt-2 flex items-center justify-between gap-3 text-[11px] text-amber-300" data-ap-unsaved="${esc(id)}"${d.stale ? ' data-ap-stale' : ''}>
+                    <span>${text}</span>
                     <button type="button" data-ap-act="discard" data-ap-id="${esc(id)}" ${state.busy ? 'disabled' : ''}
                         class="shrink-0 px-2 py-0.5 rounded border border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-50">Throw away</button>
                 </div>`;

@@ -54,10 +54,24 @@ function createDraftStore(deps) {
     const rmrf = (p) => { try { fs.rmSync(p, { recursive: true, force: true }); } catch (_) { /* best effort */ } };
     const iso = () => new Date(now()).toISOString();
     const installedIds = () => new Set(store.list().map(p => p.id));
-    const installedVersion = (id) => {
-        const p = store.list().find(x => x.id === id && !x.error);
-        return p ? p.packVersion : null;
-    };
+    const installedPack = (id) => store.list().find(x => x.id === id && !x.error) || null;
+    /**
+     * Unsaved edits made to an installed pack that has since been replaced (a newer file from the
+     * agency, or a save from another editor window). Saving them would quietly undo that install.
+     * meta.packVersion is the version the edits started from; meta.baseInstalledAt when it was installed.
+     */
+    function staleOf(d, inst) {
+        if (!d.meta.packVersion || !inst) return null;
+        const moved = inst.packVersion !== d.meta.packVersion
+            || (!!d.meta.baseInstalledAt && !!inst.installedAt && inst.installedAt !== d.meta.baseInstalledAt);
+        return moved ? { baseVersion: d.meta.packVersion, installedVersion: inst.packVersion, installedAt: inst.installedAt || null } : null;
+    }
+    // Same template, ignoring folders, "_Template", case and a copy number: "Phone Warrant (2).docx".
+    const matchKey = (rel) => BM.displayName(rel).toLowerCase().replace(/\s*\(\d+\)$/, '').replace(/\s+/g, ' ').trim();
+    function sameTemplate(c, file) {
+        const k = matchKey(author.templateRelFor(author.newConfig(), file));
+        return Object.keys(c.templatesConfig).sort((a, z) => a.localeCompare(z)).find(rel => matchKey(rel) === k) || null;
+    }
 
     // ---- draft.json ------------------------------------------------------------------------
     function read(id) {
@@ -91,7 +105,8 @@ function createDraftStore(deps) {
     function view(d) {
         const c = d.config;
         const rels = Object.keys(c.templatesConfig).sort((a, z) => a.localeCompare(z));
-        const inst = installedVersion(d.meta.id);
+        const ip = installedPack(d.meta.id);
+        const inst = ip ? ip.packVersion : null;
         const base = inst || d.meta.packVersion;
         return {
             id: d.meta.id,
@@ -101,6 +116,7 @@ function createDraftStore(deps) {
                 nextVersion: base ? author.bumpVersion(base) : '1.0.0',
                 hasRules: Object.keys(d.rules).length > 0,
             },
+            stale: staleOf(d, ip),
             dirty: !!d.dirty,
             updatedAt: d.updatedAt || null,
             savedAt: d.savedAt || null,
@@ -154,7 +170,9 @@ function createDraftStore(deps) {
     function list() {
         let names = [];
         try { names = fs.readdirSync(rootDir); } catch (_) { return []; }
-        const inst = installedIds();
+        const all = store.list();
+        const installedSet = new Set(all.map(p => p.id));
+        const inst = new Map(all.filter(p => !p.error).map(p => [p.id, p]));
         const out = [];
         for (const name of names.sort()) {
             if (!ID_RE.test(name)) continue;
@@ -163,7 +181,8 @@ function createDraftStore(deps) {
                 out.push({
                     id: name, name: d.meta.name || '', agency: d.meta.agency || '', dirty: !!d.dirty,
                     updatedAt: d.updatedAt || null, templateCount: Object.keys(d.config.templatesConfig).length,
-                    packVersion: d.meta.packVersion || null, installed: inst.has(name),
+                    packVersion: d.meta.packVersion || null, installed: installedSet.has(name),
+                    stale: staleOf(d, inst.get(name) || null),
                 });
             } catch (e) {
                 out.push({ id: name, error: e.message || String(e) });
@@ -204,6 +223,7 @@ function createDraftStore(deps) {
         }
         const P = store.readInstalled(id);
         const m = P.manifest;
+        const ip = installedPack(id);
         const dir = draftDir(id);
         rmrf(dir);
         fs.mkdirSync(path.join(dir, 'templates'), { recursive: true });
@@ -229,6 +249,7 @@ function createDraftStore(deps) {
             meta: {
                 id, name: m.name, agency: m.agency || '', description: m.description || '',
                 packVersion: m.packVersion, createdAt: m.createdAt || iso(),
+                baseInstalledAt: (ip && ip.installedAt) || null,
             },
             rules: P.rules || {}, config, notes, dirty: false, updatedAt: iso(), savedAt: null,
         };
@@ -283,12 +304,17 @@ function createDraftStore(deps) {
         return view(d);
     }
 
-    /** Add Word templates (paths from a drop or the file picker). One bad file doesn't stop the rest. */
+    /**
+     * Add Word templates (paths from a drop or the file picker). One bad file doesn't stop the rest.
+     * A file that looks like a template already in the pack is not added but returned in
+     * `conflicts` so the officer can choose to replace it, unless opts.duplicates === 'add'.
+     */
     function addTemplates(id, paths, opts) {
         opts = opts || {};
         if (!Array.isArray(paths) || !paths.length) fail('No Word files chosen');
         const d = read(id);
         const results = [];
+        const conflicts = [];
         let bytes = templateBytes(d);
         for (const p of paths.slice(0, 200)) {
             const file = typeof p === 'string' ? path.basename(p) : '';
@@ -297,6 +323,11 @@ function createDraftStore(deps) {
                 const buf = readDocx(p);
                 if (bytes + buf.length > limits.maxTotalBytes) fail('The pack is too large');
                 const s = scan(buf, d.config, file);
+                const same = opts.duplicates === 'add' ? null : sameTemplate(d.config, file);
+                if (same) {
+                    conflicts.push({ file, path: p, rel: same, title: BM.displayName(same) });
+                    continue;
+                }
                 const rel = author.templateRelFor(d.config, file);
                 const dest = tplFile(id, rel);
                 fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -315,7 +346,7 @@ function createDraftStore(deps) {
             }
         }
         if (results.some(r => !r.error)) write(d);
-        return { draft: view(d), results };
+        return { draft: view(d), results, conflicts };
     }
 
     /** A newer Word file for a template: settings of fields still in it are kept. */
@@ -358,13 +389,22 @@ function createDraftStore(deps) {
         return { filename: `Preview - ${base}.docx`, data };
     }
 
-    /** Check, bump the version, install over the same id. */
-    function save(id) {
+    /**
+     * Check, bump the version, install over the same id. Edits that started from an older install
+     * than the one there now are refused unless opts.force (the officer chose to keep them anyway).
+     */
+    function save(id, opts) {
+        opts = opts || {};
         const d = read(id);
         const chk = author.checkDraft({ meta: d.meta, config: d.config });
         if (!chk.ok) fail(chk.errors.join(' '));
-        const inst = installedVersion(id);
+        const ip = installedPack(id);
+        const inst = ip ? ip.packVersion : null;
         if (!d.meta.packVersion && inst) fail('A different pack with this id is already installed. Create the pack again under another name.');
+        const stale = staleOf(d, ip);
+        if (stale && !opts.force) {
+            fail(`These changes were made to version ${stale.baseVersion}, but version ${stale.installedVersion} has been installed since. Saving them would undo that version. Start again from the installed pack, or confirm that you want to keep these changes.`);
+        }
         const base = inst || d.meta.packVersion;
         const packVersion = base ? author.bumpVersion(base) : '1.0.0';
         const { buffer } = buildPackBuffer({
@@ -373,10 +413,11 @@ function createDraftStore(deps) {
         }, { AdmZip: deps.AdmZip, crypto });
         const pack = store.installBuffer(buffer, 'VIPER pack editor');
         d.meta.packVersion = packVersion;
+        d.meta.baseInstalledAt = pack.installedAt || null;
         d.dirty = false;
         d.savedAt = iso();
         write(d, { dirty: false });
-        return { pack, draft: view(d), warnings: chk.warnings };
+        return { pack, draft: view(d), warnings: chk.warnings, replacedNewer: stale ? stale.installedVersion : null };
     }
 
     function discard(id) {
@@ -432,13 +473,14 @@ function registerDraftIpc(ipcMain, drafts, store, deps) {
         r = req(r);
         return { draft: drafts.op(String(r.id || ''), String(r.op || ''), r.args) };
     }));
-    // r: { id, paths?, category } — no paths opens the file picker.
+    // r: { id, paths?, category, duplicates? } — no paths opens the file picker; duplicates: 'add'
+    // adds files that match a template already in the pack as separate templates.
     ipcMain.handle('agency-pack-draft-add-templates', wrap(async (_e, r) => {
         r = req(r);
         let list = paths(r.paths);
         if (!list.length) list = await pickDocx(true, 'Add Word templates');
         if (!list.length) return { canceled: true };
-        return drafts.addTemplates(String(r.id || ''), list, { category: r.category });
+        return drafts.addTemplates(String(r.id || ''), list, { category: r.category, duplicates: r.duplicates === 'add' ? 'add' : 'ask' });
     }));
     // r: { id, rel, path? }
     ipcMain.handle('agency-pack-draft-replace-template', wrap(async (_e, r) => {
@@ -465,10 +507,12 @@ function registerDraftIpc(ipcMain, drafts, store, deps) {
         if (err) throw new PackError('Could not open the preview: ' + err);
         return { opened: true };
     }));
-    ipcMain.handle('agency-pack-draft-save', wrap(async (_e, id) => {
-        const r = drafts.save(String(id || ''));
-        audit('AGENCY_PACK_INSTALLED', { pack_id: r.pack.id, pack_version: r.pack.packVersion, templates: r.pack.templateCount, source: 'editor' });
-        return r;
+    // r: pack id, or { id, force } — force keeps edits made to an older install (the officer confirmed).
+    ipcMain.handle('agency-pack-draft-save', wrap(async (_e, r) => {
+        const o = isPlainObject(r) ? r : { id: r };
+        const out = drafts.save(String(o.id || ''), { force: o.force === true });
+        audit('AGENCY_PACK_INSTALLED', { pack_id: out.pack.id, pack_version: out.pack.packVersion, templates: out.pack.templateCount, source: 'editor', replaced_newer: out.replacedNewer || undefined });
+        return out;
     }));
     ipcMain.handle('agency-pack-draft-discard', wrap(async (_e, id) => drafts.discard(String(id || ''))));
 

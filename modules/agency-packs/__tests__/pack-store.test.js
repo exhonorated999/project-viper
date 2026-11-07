@@ -221,6 +221,17 @@ const r2 = store.install(PACK2);
 eq([r2.packVersion, r2.previousVersion], ['1.1.0', '1.0.0'], 'upgrade reports previous version');
 eq(store.list().map(p => p.packVersion), ['1.1.0'], 'one copy after upgrade');
 eq(fs.readdirSync(ROOT + '-staging'), [], 'staging cleaned after upgrade');
+{
+  // Installing an older file over a newer one is flagged before anything happens.
+  const old = store.inspect(PACK);
+  eq([old.installedVersion, old.versionVsInstalled, old.olderThanInstalled], ['1.1.0', -1, true], 'inspect: older than installed');
+  const same = store.inspect(PACK2);
+  eq([same.versionVsInstalled, same.olderThanInstalled], [0, false], 'inspect: same version');
+  eq([ins.versionVsInstalled, ins.olderThanInstalled], [null, false], 'inspect: nothing installed');
+  const C = S.compareVersions;
+  eq([C('1.0.0', '1.1.0'), C('1.10', '1.9'), C('2', '2.0.0'), C('1.0.1', '1.0'), C('v3.1', '3.0.9')], [-1, 1, 0, 1, 1], 'compareVersions numbers');
+  eq([C('2026-01', '1.0'), C('1.0 beta', '1.0'), C('', '1'), C(null, '1')], [null, null, null, null], 'compareVersions: not plain numbers');
+}
 
 // A second pack lists alongside; a broken folder shows an error instead of hiding
 const PACK3 = buildPack(baseOpts({ id: 'other-pack', out: path.join(TMP, 'out', 'other.viperpack') })).out;

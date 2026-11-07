@@ -1158,7 +1158,120 @@ function extractValuesFromDocx(fileBytes) {
   return { values: outValues, richtextBlocks, aliases };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Placeholder scanning (port of the partner tool's scan_placeholders + extract_context_snippet).
+// Used when an officer adds a Word template to a pack: finds every highlighted [Field name].
+// ---------------------------------------------------------------------------------------------
+const PRECEDING_CONTEXT_CHARS = 90;
+const CONTEXT_ELLIPSIS = "\u2026";
+const CONTEXT_LINE_MARK = "\u23CE";
+
+function extractContextSnippet(pText, S, E, window, preceding) {
+  if (window == null) window = 110;
+  const start = Math.max(0, S - window);
+  const end = Math.min(pText.length, E + window);
+  const prefix = start > 0 ? CONTEXT_ELLIPSIS : "";
+  const suffix = end < pText.length ? CONTEXT_ELLIPSIS : "";
+  let snippet = (prefix + pText.slice(start, end) + suffix).trim();
+  if (preceding && snippet.length <= (E - S) + 4) {
+    let lead = preceding.trim();
+    if (lead.length > PRECEDING_CONTEXT_CHARS) lead = CONTEXT_ELLIPSIS + lead.slice(-PRECEDING_CONTEXT_CHARS);
+    snippet = lead + " " + CONTEXT_LINE_MARK + " " + snippet;
+  }
+  return snippet;
+}
+
+function _storyParagraphs(root) {
+  const paragraphs = [];
+  const walk = (node) => {
+    if (node.nodeType !== 1) return; // xmldom: text nodes have childNodes === null
+    if (node.namespaceURI === NS.w && node.localName === "p") paragraphs.push(node);
+    for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+  };
+  walk(root.documentElement);
+  return paragraphs;
+}
+
+function _unhighlightedBracketTexts(pText, charMapping) {
+  // Outermost [..] groups with no highlighting at all: VIPER leaves these alone, which is almost
+  // always a template the author forgot to highlight. Reported so the editor can say so.
+  const out = [];
+  for (const [S, E] of findBracketRanges(pText)) {
+    const content = pText.slice(S + 1, E - 1).trim(); if (!content) continue;
+    let hl = false;
+    for (let ci = S; ci < E && !hl; ci++) if (_charIsHighlighted(charMapping, ci)) hl = true;
+    if (!hl) out.push(content);
+  }
+  return out;
+}
+
+/**
+ * Scan a .docx for its fill-in fields.
+ * Returns { placeholders: [{name, count, context}] (document order, keyed like the partner tool),
+ *           unhighlighted: [text] (bracketed text Word has no highlight on — VIPER ignores it),
+ *           unclosed: [snippet] ('[' never closed and not recoverable), stories: n }.
+ */
+function scanTemplate(fileBytes, unbracketedFields) {
+  if (!unbracketedFields) unbracketedFields = [];
+  const found = new Map();
+  const unhighlighted = new Set();
+  const unclosed = [];
+  let zip;
+  try { zip = new AdmZip(fileBytes); } catch (e) { throw new Error("Not a Word (.docx) file."); }
+  const names = zip.getEntries().map(e => e.entryName);
+  if (!names.includes("word/document.xml")) throw new Error("Not a Word (.docx) file.");
+  const storyFiles = ["word/document.xml", ...names.filter(n => n.startsWith("word/header") || n.startsWith("word/footer"))];
+  let stories = 0;
+  for (const fileName of storyFiles) {
+    let root;
+    try { root = _parse(zip.getEntry(fileName).getData()); } catch (e) { continue; }
+    stories++;
+    const paraData = flattenStoryParagraphs(_storyParagraphs(root));
+    const returnBlock = findReturnBlockIndices(paraData.map(([t]) => t));
+    let preceding = null;
+    for (let idx = 0; idx < paraData.length; idx++) {
+      const [pText, charMapping] = paraData[idx];
+      if (!pText) continue;
+      const inRB = returnBlock.has(idx);
+      const bracketMatches = [];
+      const groups = findHighlightedBracketGroups(pText, charMapping);
+      for (const [S, E, content] of groups) {
+        const key = resolvePlaceholderRole(content, inRB);
+        if (!found.has(key)) found.set(key, { name: key, count: 0, context: extractContextSnippet(pText, S, E, 110, preceding) });
+        found.get(key).count++;
+        bracketMatches.push([S, E]);
+      }
+      for (const uf of unbracketedFields) {
+        const term = uf && uf.search; if (!term) continue;
+        const valid = findLiteralRanges(pText, term).filter(([S, E]) => !bracketMatches.some(([bS, bE]) => !(E <= bS || S >= bE)));
+        if (valid.length) {
+          if (!found.has(term)) found.set(term, { name: term, count: 0, context: extractContextSnippet(pText, valid[0][0], valid[0][1], 110, preceding) });
+          found.get(term).count += valid.length;
+        }
+      }
+      for (const t of _unhighlightedBracketTexts(pText, charMapping)) unhighlighted.add(t);
+      const opens = findUnmatchedBracketOpens(pText);
+      for (const u of opens) {
+        const covered = groups.some(([S, E]) => u >= S && u < E);
+        if (!covered) unclosed.push(extractContextSnippet(pText, u, Math.min(pText.length, u + 1), 40, null));
+      }
+      preceding = pText;
+    }
+  }
+  return { placeholders: [...found.values()], unhighlighted: [...unhighlighted], unclosed, stories };
+}
+
+/** Partner-compatible shape: { name: {count, context} } in discovery order. */
+function scanPlaceholders(fileBytes, unbracketedFields) {
+  const out = {};
+  for (const p of scanTemplate(fileBytes, unbracketedFields).placeholders) out[p.name] = { count: p.count, context: p.context };
+  return out;
+}
+
 module.exports = {
+  scanTemplate,
+  scanPlaceholders,
+  extractContextSnippet,
   convertDocx,
   buildPacket,
   extractValuesFromDocx,

@@ -446,5 +446,62 @@ function readStory(buf, name) {
   ok(bound4.includes('Rifle'), 'photo: other bound values unchanged');
 }
 
+// ---- scanTemplate / scanPlaceholders ----
+{
+  const HL = '<w:rPr><w:highlight w:val="yellow"/></w:rPr>';
+  const r = (text, hl) => '<w:r>' + (hl ? HL : '') + '<w:t xml:space="preserve">' + text + '</w:t></w:r>';
+  const p = (...runs) => '<w:p>' + runs.join('') + '</w:p>';
+  const doc = (...ps) => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<w:document xmlns:w="' + W_NS + '" xmlns:r="' + R_NS + '"><w:body>' + ps.join('') + '</w:body></w:document>';
+  const xml = doc(
+    p(r('The suspect '), r('[Suspect Name]', true), r(' lives at '), r('[Suspect', true), r(' Address]', true), r('.')),
+    p(r('Again '), r('[Suspect Name]', true), r(' and the plain [not a field] text.')),
+    p(r('Hair: '), r('[Brown]', true), r('[Black]', true)),
+    p(r('Elsewhere '), r('[name]', true)),
+    p(r('Records should be provided to:')),
+    p(r('Detective '), r('[name]', true)),
+    p(r('[email]', true)),
+    p(r('Expires '), r('[list date and time prior warrant expires)', true), r(' end')),
+    p(r('Agency SYNTHETIC PD here'))
+  );
+  const bytes = makeDocx({ documentXml: xml });
+  const res = F.scanTemplate(bytes, [{ search: 'SYNTHETIC PD' }]);
+  const byName = Object.fromEntries(res.placeholders.map(x => [x.name, x]));
+  eq(res.placeholders[0].name, 'Suspect Name', 'scan: document order first');
+  eq(byName['Suspect Name'].count, 2, 'scan: counts repeats');
+  ok(!!byName['Suspect Address'], 'scan: field split across runs');
+  ok(!!byName['Brown/Black'], 'scan: adjacent choices joined with /');
+  ok(!!byName['detective name'], 'scan: return-block role name');
+  ok(!!byName['detective email'], 'scan: return-block role email');
+  eq(byName['detective email'].context, 'Detective [name] \u23ce [email]', 'scan: lone field borrows preceding line');
+  ok(!!byName['name'], 'scan: name outside return block keeps raw name');
+  ok(!!byName['list date and time prior warrant expires'], 'scan: recovers wrongly-closed bracket');
+  eq(byName['SYNTHETIC PD'] && byName['SYNTHETIC PD'].count, 1, 'scan: unbracketed literal');
+  ok(byName['Suspect Name'].context.includes('The suspect [Suspect Name] lives at'), 'scan: context snippet');
+  ok(res.unhighlighted.includes('not a field'), 'scan: reports unhighlighted brackets');
+  ok(!res.unhighlighted.includes('Suspect Name'), 'scan: highlighted not reported as unhighlighted');
+  eq(res.unclosed.length, 0, 'scan: recovered bracket not reported unclosed');
+  const plain = F.scanPlaceholders(bytes);
+  eq(Object.keys(plain)[0], 'Suspect Name', 'scanPlaceholders: partner shape order');
+  eq(plain['Suspect Name'].count, 2, 'scanPlaceholders: partner shape count');
+  ok(!('SYNTHETIC PD' in plain), 'scanPlaceholders: no literal without unbracketed list');
+
+  const bad = makeDocx({ documentXml: doc(p(r('Open [never closed here'))) });
+  eq(F.scanTemplate(bad).unclosed.length, 1, 'scan: unclosed bracket reported');
+
+  // header/footer stories
+  const hz = new AdmZip(makeDocx({ documentXml: doc(p(r('Body'))) }));
+  hz.addFile('word/header1.xml', Buffer.from('<?xml version="1.0"?><w:hdr xmlns:w="' + W_NS + '">' + p(r('[Case Number]', true)) + '</w:hdr>'));
+  const hres = F.scanTemplate(hz.toBuffer());
+  eq(hres.placeholders.map(x => x.name).join(','), 'Case Number', 'scan: header story');
+  eq(hres.stories, 2, 'scan: counts stories');
+
+  let threw = null; try { F.scanTemplate(Buffer.from('not a zip')); } catch (e) { threw = e.message; }
+  eq(threw, 'Not a Word (.docx) file.', 'scan: rejects non-docx');
+  const nz = new AdmZip(); nz.addFile('a.txt', Buffer.from('x'));
+  threw = null; try { F.scanTemplate(nz.toBuffer()); } catch (e) { threw = e.message; }
+  eq(threw, 'Not a Word (.docx) file.', 'scan: rejects zip without document.xml');
+}
+
 console.log(`docx-form-engine: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

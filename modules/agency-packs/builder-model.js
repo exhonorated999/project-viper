@@ -120,6 +120,13 @@
         return r;
     }
 
+    // Per-field settings the pack editor can set (absent = the name rules above decide).
+    const FIELD_KINDS = ['text', 'long', 'richtext', 'date', 'daterange', 'datetime', 'dropdown', 'photo'];
+    const PROFILE_SOURCES = ['nameBadge', 'bareName', 'email', 'phone', 'signatureText', 'backgroundOfAffiant',
+        'title', 'agency', 'address'];
+    const CASE_SOURCES = Object.keys(DEFAULT_RULES.caseFields).concat(['pcText']);
+    const explicitKind = (f) => (f && FIELD_KINDS.includes(f.kind) ? f.kind : null);
+
     // ---- Small pure helpers (exact ports) ---------------------------------------------------
     function sanitizeTag(name) {
         let tag = String(name || '').replace(/[^a-zA-Z0-9]/g, '_').replace(/^_+/, '');
@@ -280,9 +287,36 @@
         const keyFor = (t, p) => { const g = globalFor(t, p); return g ? keyShared(g.id) : keyTemplate(t.id, p.name); };
         const keyForModelField = (tid, f) => f.isSoloShared ? keyShared(f.globalFieldId) : keyTemplate(tid, f.name);
 
+        // Saved warrants keep their answers after the pack is edited: a field that became shared
+        // (or was merged / split in the pack editor) picks up the value saved under its old key.
+        // Only fills empty slots; never removes the old keys.
+        const VALUE_SUFFIXES = ['', '::rangeStart', '::rangeEnd', '::datetime', '::tz'];
+        function migrateValues(values) {
+            if (!values || typeof values !== 'object') return values;
+            const copy = (to, from) => {
+                if (!from || from === to) return;
+                VALUE_SUFFIXES.forEach(s => {
+                    const cur = values[to + s], old = values[from + s];
+                    const empty = (v) => v == null || v === '' || (Array.isArray(v) && !v.length);
+                    if (empty(cur) && !empty(old)) values[to + s] = old;
+                });
+            };
+            globals.forEach(g => {
+                const to = keyShared(g.id);
+                (Array.isArray(g.aliases) ? g.aliases : []).forEach(a => copy(to, String(a)));
+                (g.mappings || []).forEach(m => copy(to, keyTemplate(m.templateId, m.placeholderName)));
+            });
+            templates.forEach(t => t.placeholders.forEach(p => {
+                if (globalFor(t, p)) return;
+                (Array.isArray(p.aliases) ? p.aliases : []).forEach(a => copy(keyTemplate(t.id, p.name), String(a)));
+            }));
+            return values;
+        }
+
         const isCountyField = (n) => COUNTY_NAMES.has(lc(n));
         const isJudicialDistrictField = (n) => JD_NAMES.has(lc(n));
-        const isHidden = (name, category) => {
+        const isHidden = (name, category, spec) => {
+            if (spec && typeof spec.hidden === 'boolean') return spec.hidden;
             const l = lc(name);
             if (HIDDEN.has(l)) return true;
             return HIDE_COUNTY_FOR.has(category) && (isJudicialDistrictField(l) || isCountyField(l));
@@ -312,8 +346,10 @@
             return `${m[2]}/${m[3]}/${m[1]} at ${h12}:${m[5]} ${h < 12 ? 'AM' : 'PM'} ${label}`;
         }
 
-        // Kind of input a field gets, by the name the form shows.
-        function fieldKind(name, type) {
+        // Kind of input a field gets, by the name the form shows. `kind` = an explicit per-field
+        // setting from the pack editor; it wins over the name rules when it's a known kind.
+        function fieldKind(name, type, kind) {
+            if (FIELD_KINDS.includes(kind)) return kind;
             if (isRichText(name)) return 'richtext';
             if (type !== 'dropdown' && isPhotoField(name)) return 'photo';
             if (isDateRangeField(name)) return 'daterange';
@@ -334,12 +370,15 @@
                 const detected = detectDropdownChoices(p.name);
                 const ownType = g ? g.type : p.type;
                 const ownChoices = g ? g.choices : p.choices;
+                const kind = explicitKind(g || p);
                 out[p.name] = {
                     title: g ? g.name : (p.customTitle || p.name),
                     tag: g ? g.tag : (p.customTag || sanitizeTag(p.name)),
-                    type: ownType || (detected ? 'dropdown' : 'text'),
+                    type: kind ? (kind === 'dropdown' ? 'dropdown' : 'text') : (ownType || (detected ? 'dropdown' : 'text')),
                     choices: (ownChoices && ownChoices.length) ? ownChoices : (detected || []),
                 };
+                // Explicit kinds tell the docx engine directly instead of it guessing from the title.
+                if (kind) { out[p.name].richtext = kind === 'richtext'; out[p.name].multiline = kind === 'long'; }
             }
             return out;
         }
@@ -353,7 +392,7 @@
                 const mine = [];
                 t.placeholders.forEach(p => {
                     const g = globalFor(t, p);
-                    if (isHidden(g ? g.name : p.name, t.category)) return;
+                    if (isHidden(g ? g.name : p.name, t.category, g || p)) return;
                     if (g) {
                         if (!candidates.has(g.id)) candidates.set(g.id, { field: g, appliesTo: [] });
                         candidates.get(g.id).appliesTo.push({ templateId: t.id, displayName: t.displayName, placeholderName: p.name });
@@ -373,6 +412,7 @@
                     if (!solo.has(only.templateId)) solo.set(only.templateId, []);
                     solo.get(only.templateId).push({
                         name: only.placeholderName, customTitle: field.name, type: field.type, choices: field.choices,
+                        kind: field.kind, hint: field.hint, autofill: field.autofill,
                         isSoloShared: true, globalFieldId: field.id, key: keyShared(field.id),
                     });
                 }
@@ -392,9 +432,12 @@
 
         // ---- Autofill ------------------------------------------------------------------------
         function profileValue(fieldName, profile) {
+            return profileValueFor(profileByName.get(lc(fieldName)), profile);
+        }
+        function profileValueFor(which, profile) {
             const p = profile || {};
             const bare = String(p.name || '').replace(/^(det\.?|detective)\s+/i, '');
-            switch (profileByName.get(lc(fieldName))) {
+            switch (which) {
                 case 'nameBadge': return [bare, p.badge ? '#' + p.badge : ''].filter(Boolean).join(' ');
                 case 'bareName': return bare;
                 case 'email': return p.email || '';
@@ -410,23 +453,38 @@
 
         // Walks the form model's fields: fn(key, displayName, field) for every visible field.
         function eachModelField(model, fn) {
-            model.sharedFields.forEach(({ field, key }) => fn(key, field.name, { type: field.type, choices: field.choices, global: field }));
+            model.sharedFields.forEach(({ field, key }) => fn(key, field.name, { type: field.type, choices: field.choices, kind: field.kind, autofill: field.autofill, global: field }));
             model.perTemplateSections.forEach(s => s.fields.forEach(f => fn(keyForModelField(s.templateId, f), f.customTitle || f.name, f)));
         }
 
         const isEmpty = (v) => v == null || v === '' || (Array.isArray(v) && !v.length);
 
+        // Explicit autofill setting: { src: 'case'|'profile'|'none', key } or null (use the name rules).
+        function explicitAutofill(f) {
+            const a = f && f.autofill;
+            if (a === 'none') return { src: 'none', key: '' };
+            const m = /^(case|profile):([A-Za-z]+)$/.exec(a || '');
+            if (!m) return null;
+            const ok = m[1] === 'case' ? CASE_SOURCES.includes(m[2]) : PROFILE_SOURCES.includes(m[2]);
+            return ok ? { src: m[1], key: m[2] } : null;
+        }
+        function profileFill(name, f, profile) {
+            const ex = explicitAutofill(f);
+            if (ex) return ex.src === 'profile' ? profileValueFor(ex.key, profile) : '';
+            return profileValue(name, profile);
+        }
+
         // Profile first, then a shared Global Field's defaultValue. Only fills empty slots.
         function applyProfile(model, values, profile) {
             model.sharedFields.forEach(({ field, key }) => {
                 if (!isEmpty(values[key])) return;
-                const v = profileValue(field.name, profile) || field.defaultValue;
+                const v = profileFill(field.name, field, profile) || field.defaultValue;
                 if (v) values[key] = v;
             });
             model.perTemplateSections.forEach(s => s.fields.forEach(f => {
                 const key = keyForModelField(s.templateId, f);
                 if (!isEmpty(values[key])) return;
-                const v = profileValue(f.customTitle || f.name, profile);
+                const v = profileFill(f.customTitle || f.name, f, profile);
                 if (v) values[key] = v;
             }));
             return values;
@@ -453,19 +511,24 @@
             }
             eachModelField(model, (key, name, f) => {
                 if (!isEmpty(values[key])) return;
-                const kind = fieldKind(name, f.type);
-                if (kind === 'richtext') {
+                const ex = explicitAutofill(f);
+                if (ex && ex.src !== 'case') return;
+                const kind = fieldKind(name, f.type, f.kind);
+                if (kind === 'richtext' && (!ex || ex.key === 'pcText')) {
                     const blocks = Array.isArray(facts.pcBlocks) && facts.pcBlocks.length ? facts.pcBlocks : textToBlocks(facts.pcText);
                     if (blocks.length) values[key] = blocks;
                     return;
                 }
-                const fact = caseByName.get(lc(name));
+                const fact = ex ? ex.key : caseByName.get(lc(name));
                 if (!fact) return;
                 let v = facts[fact];
                 if (Array.isArray(v)) v = v.filter(Boolean).join(', ');
                 v = String(v == null ? '' : v).trim();
                 if (!v) return;
+                if (kind === 'richtext') { const b = textToBlocks(v); if (b.length) values[key] = b; return; }
+                if (kind === 'photo') { const b = textToBlocks(v); if (b.length) values[key] = b; return; }
                 if (kind === 'date') { v = toIsoDate(v); if (!v) return; }
+                else if (kind === 'daterange' || kind === 'datetime') return;
                 else if (fact === 'suspectDob') { const iso = toIsoDate(v); if (iso) v = formatDate(iso); }
                 if (f.type === 'dropdown' && f.choices && f.choices.length) { v = matchChoice(v, f.choices); if (!v) return; }
                 values[key] = v;
@@ -508,7 +571,12 @@
                 const g = globalFor(t, p);
                 const key = g ? keyShared(g.id) : keyTemplate(t.id, p.name);
                 const name = g ? g.name : p.name;
-                if (isRichText(name)) {
+                const ptype = g ? g.type : p.type;
+                const kind = explicitKind(g || p) || (isRichText(name) ? 'richtext'
+                    : (ptype !== 'dropdown' && (isPhotoField(name) || isPhotoField(p.customTitle || ''))) ? 'photo'
+                        : isDateRangeField(name) ? 'daterange' : isDateTimeField(name) ? 'datetime'
+                            : isDateField(name) ? 'date' : 'text');
+                if (kind === 'richtext') {
                     const b = values[key];
                     if (Array.isArray(b) && b.length) rich[p.name] = b;
                     else if (typeof b === 'string' && b.trim()) rich[p.name] = textToBlocks(b);
@@ -517,8 +585,7 @@
                 // Photo fields: the text goes in like any field (so a placeholder sharing a line
                 // with other text still reads right); the blocks go along only when there's a
                 // picture, so a text-only answer stays exactly as the original tool fills it.
-                const ptype = g ? g.type : p.type;
-                if (ptype !== 'dropdown' && (isPhotoField(name) || isPhotoField(p.customTitle || ''))) {
+                if (kind === 'photo') {
                     const b = values[key];
                     const text = blocksToText(b);
                     if (text) out[p.name] = text;
@@ -526,13 +593,14 @@
                     return;
                 }
                 let v;
-                if (isDateRangeField(name)) v = formatDateRange(values[key + '::rangeStart'], values[key + '::rangeEnd']);
-                else if (isDateTimeField(name)) {
+                if (kind === 'daterange') v = formatDateRange(values[key + '::rangeStart'], values[key + '::rangeEnd']);
+                else if (kind === 'datetime') {
                     const dt = values[key + '::datetime'];
                     v = dt ? formatDateTime(dt, values[key + '::tz'] || defaultTimezone(name)) : '';
                 } else {
-                    v = String(values[key] == null ? '' : values[key]).trim();
-                    if (v && isDateField(name)) v = formatDate(v);
+                    v = values[key];
+                    v = String(v == null ? '' : (Array.isArray(v) ? blocksToText(v) : v)).trim();
+                    if (v && kind === 'date') v = formatDate(v);
                 }
                 if (v) out[p.name] = v;
             });
@@ -644,7 +712,7 @@
             placeholderMapping, formModel, fieldKind, isHidden, priorityRank,
             isRichText, isPhotoField, isDateField, isDateRangeField, isDateTimeField, isLongNarrative, defaultTimezone,
             isCountyField, isJudicialDistrictField,
-            profileValue, applyProfile, applyCaseFacts,
+            profileValue, applyProfile, applyCaseFacts, migrateValues,
             counties: () => counties.slice(), countyRule, applyCounty, removeDaApproval,
             resolveValues, formatDateTime,
             caseNumberForFilename, autoOutputFilename, outputFilename, packetFilename, packetRequest,
@@ -653,7 +721,7 @@
     }
 
     return {
-        createBuilder, DEFAULT_RULES, mergeRules,
+        createBuilder, DEFAULT_RULES, mergeRules, FIELD_KINDS, PROFILE_SOURCES, CASE_SOURCES,
         sanitizeTag, detectDropdownChoices, displayName, formatDate, formatDateRange,
         sanitizeFilenamePart, guardReservedFilename, toIsoDate, textToBlocks, blocksToText, blocksHaveImage,
     };

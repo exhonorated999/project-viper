@@ -201,7 +201,7 @@
             const hydrated = await hydrateImages(draft.values && typeof draft.values === 'object' ? draft.values : {});
             if (S.el !== el) return;
             S.templateIds = (draft.templateIds || []).filter(t => known.has(t));
-            S.values = hydrated;
+            S.values = S.builder.migrateValues(hydrated);
             S.county = typeof draft.county === 'string' ? draft.county : '';
             S.overrides = draft.overrides && typeof draft.overrides === 'object' ? draft.overrides : {};
             S.touched = new Set(Array.isArray(draft.touched) ? draft.touched : []);
@@ -519,7 +519,8 @@
             const a = sf.appliesTo[0];
             const pm = mapping(a.templateId)[a.placeholderName] || {};
             const docs = Array.from(new Set(sf.appliesTo.map(x => x.displayName)));
-            return fieldHtml(sf.key, sf.field.name, pm.type, pm.choices, `Used in ${docs.length} documents: ${docs.join(', ')}`);
+            return fieldHtml(sf.key, sf.field.name, pm.type, pm.choices,
+                [sf.field.hint, `Used in ${docs.length} documents: ${docs.join(', ')}`].filter(Boolean).join(' — '), sf.field.kind);
         }).join('');
         const sections = S.model.perTemplateSections.map(sec => {
             if (!sec.fields.length) return '';
@@ -530,7 +531,7 @@
                 <div class="grid gap-3" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr))">
                     ${sec.fields.map(f => {
                         const meta = pm[f.name] || {};
-                        return fieldHtml(B.fieldKeyForModelField(sec.templateId, f), f.customTitle || f.name, meta.type, meta.choices, '');
+                        return fieldHtml(B.fieldKeyForModelField(sec.templateId, f), f.customTitle || f.name, meta.type, meta.choices, f.hint || '', f.kind);
                     }).join('')}</div></div>`;
         }).join('');
         return `
@@ -589,9 +590,9 @@
     }
 
     let fid = 0;
-    function fieldHtml(key, label, type, choices, hint) {
+    function fieldHtml(key, label, type, choices, hint, explicitKind) {
         const B = S.builder;
-        const kind = B.fieldKind(label, type);
+        const kind = B.fieldKind(label, type, explicitKind);
         const id = 'abf' + (++fid);
         const v = S.values[key];
         const lab = `<label for="${id}" class="block text-xs text-gray-400 mb-1" ${hint ? `title="${esc(hint)}"` : ''}>${esc(label)}${hint ? ' <span class="text-viper-cyan/70">●</span>' : ''}</label>`;
@@ -684,15 +685,15 @@
         if (!S.model) return 0;
         const B = S.builder;
         let n = 0;
-        const check = (key, label, type) => {
-            const kind = B.fieldKind(label, type);
+        const check = (key, label, type, explicitKind) => {
+            const kind = B.fieldKind(label, type, explicitKind);
             if (kind === 'daterange') { if (!S.values[key + '::rangeStart'] && !S.values[key + '::rangeEnd']) n++; return; }
             if (kind === 'datetime') { if (!S.values[key + '::datetime']) n++; return; }
             if (kind === 'richtext' || kind === 'photo') { if (!RB().hasContent(S.values[key])) n++; return; }
             if (isEmpty(S.values[key]) || (typeof S.values[key] === 'string' && !S.values[key].trim())) n++;
         };
-        S.model.sharedFields.forEach(sf => check(sf.key, sf.field.name, sf.field.type));
-        S.model.perTemplateSections.forEach(sec => sec.fields.forEach(f => check(B.fieldKeyForModelField(sec.templateId, f), f.customTitle || f.name, f.type)));
+        S.model.sharedFields.forEach(sf => check(sf.key, sf.field.name, sf.field.type, sf.field.kind));
+        S.model.perTemplateSections.forEach(sec => sec.fields.forEach(f => check(B.fieldKeyForModelField(sec.templateId, f), f.customTitle || f.name, f.type, f.kind)));
         return n;
     }
 

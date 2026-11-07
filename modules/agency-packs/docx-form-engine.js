@@ -891,9 +891,9 @@ function convertDocx(fileBytes, placeholders, opts) {
   const pNames = isDict ? Object.keys(placeholders) : (placeholders || []);
 
   for (const pName of pNames.sort()) {
-    let title, tag, fieldType, choices;
+    let title, tag, fieldType, choices, ci = {};
     if (isDict) {
-      const ci = placeholders[pName];
+      ci = placeholders[pName] || {};
       title = ci.title || pName; tag = ci.tag || sanitizeTagName(pName);
       fieldType = ci.type || "text"; choices = ci.choices || [];
     } else {
@@ -910,8 +910,8 @@ function convertDocx(fileBytes, placeholders, opts) {
       value: cleanValue,
       // The original only ever sends blocks for probable-cause fields; VIPER also sends them for
       // photo fields that carry a picture, so supplied blocks make a field rich text too.
-      isRichtext: isPcStatementField(title) || (Array.isArray(richtextBlocks[pName]) && richtextBlocks[pName].length > 0),
-      isMultiline: isLongNarrativeField(title) || isLongNarrativeField(pName) || /\n/.test(cleanValue || ""),
+      isRichtext: (ci.richtext != null ? !!ci.richtext : isPcStatementField(title)) || (Array.isArray(richtextBlocks[pName]) && richtextBlocks[pName].length > 0),
+      isMultiline: (ci.multiline != null ? !!ci.multiline : (isLongNarrativeField(title) || isLongNarrativeField(pName))) || /\n/.test(cleanValue || ""),
       richtextBlocks: richtextBlocks[pName]
     };
   }

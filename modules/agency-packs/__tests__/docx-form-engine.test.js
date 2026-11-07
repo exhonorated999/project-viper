@@ -446,6 +446,20 @@ function readStory(buf, name) {
   ok(bound4.includes('Rifle'), 'photo: other bound values unchanged');
 }
 
+// ---- explicit richtext / multiline flags from the pack editor ----
+{
+  const PC = 'statement of probable cause';
+  const alone = (name) => '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="' + W_NS + '" xmlns:r="' + R_NS + '"><w:body>' +
+    '<w:p><w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr><w:t>[' + name + ']</w:t></w:r></w:p></w:body></w:document>';
+  const run1 = (ph) => findSdts(readStory(F.convertDocx(makeDocx({ documentXml: alone(PC) }), { [PC]: ph }, { protect: false }), 'word/document.xml'));
+  ok(!!run1({ title: PC, tag: 'pc' })[0].hasRichText, 'flags: PC name is rich text by default');
+  const plain = run1({ title: PC, tag: 'pc', richtext: false })[0];
+  ok(!plain.hasRichText && !!plain.binding, 'flags: richtext:false gives a normal bound control');
+  const CN = 'Case Number';
+  const rich = findSdts(readStory(F.convertDocx(makeDocx({ documentXml: alone(CN) }), { [CN]: { title: CN, tag: 'cn', richtext: true } }, { protect: false }), 'word/document.xml'));
+  ok(!!rich[0].hasRichText, 'flags: richtext:true on any name');
+}
+
 // ---- scanTemplate / scanPlaceholders ----
 {
   const HL = '<w:rPr><w:highlight w:val="yellow"/></w:rPr>';

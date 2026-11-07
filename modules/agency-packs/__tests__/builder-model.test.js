@@ -292,5 +292,81 @@ pr = pb.resolveValues(T_PHOTO, { [PK(PNAME)]: [{ type: 'paragraph', runs: [{ ima
 ok(!(PNAME in pr.values), 'image-only photo: no text value');
 ok(PNAME in pr.richtextBlocks, 'image-only photo: blocks');
 
+// ---- Per-field settings from the pack editor (kind / hidden / autofill / aliases) ----------
+{
+  const TA = 'a.docx', TB = 'b.docx';
+  const cfg = {
+    globalFields: [
+      { id: 'g_when', name: 'When it happened', tag: 'when', kind: 'date', mappings: [map(TA, 'When'), map(TB, 'When')] },
+      { id: 'g_who', name: 'Who', tag: 'who', autofill: 'case:suspectName', hint: 'Full legal name', mappings: [map(TA, 'Who'), map(TB, 'Who')], aliases: ['global:g_old'] },
+      { id: 'g_pc', name: 'statement of probable cause', tag: 'pc', kind: 'text', autofill: 'none', mappings: [map(TA, 'statement of probable cause'), map(TB, 'statement of probable cause')] },
+    ],
+    templatesConfig: {
+      [TA]: { category: 'Search Warrant', placeholders: [ph('When'), ph('Who'), ph('statement of probable cause'),
+        ph('Range'), ph('Story', { kind: 'richtext' }), ph('Secret', { hidden: true }), ph('Mail', { autofill: 'profile:email' }),
+        ph('Pic', { kind: 'photo' }), ph('Notes', { kind: 'long' }), ph('Old', { aliases: ['global:g_split'] })] },
+      [TB]: { category: 'Search Warrant', placeholders: [ph('When'), ph('Who'), ph('statement of probable cause'),
+        ph('detective, badge', { hidden: false }), ph('Range', { kind: 'daterange' }), ph('Hair', { kind: 'dropdown', choices: ['Brown', 'Black'] })] },
+    },
+  };
+  const b = B.createBuilder(cfg, { hiddenFields: ['detective, badge'] });
+  eq(b.fieldKind('anything', 'text', 'date'), 'date', 'explicit kind wins');
+  eq(b.fieldKind('statement of probable cause', 'text'), 'richtext', 'no kind: name rules');
+  eq(b.fieldKind('statement of probable cause', 'text', 'bogus'), 'richtext', 'unknown kind ignored');
+  const m = b.formModel([TA, TB]);
+  const shared = Object.fromEntries(m.sharedFields.map(s => [s.field.id, s]));
+  eq(shared.g_who.field.hint, 'Full legal name', 'global hint carried');
+  const secA = m.perTemplateSections.find(s => s.templateId === TA);
+  const secB = m.perTemplateSections.find(s => s.templateId === TB);
+  ok(!secA.fields.some(f => f.name === 'Secret'), 'hidden: true hides');
+  ok(secB.fields.some(f => f.name === 'detective, badge'), 'hidden: false beats rules.hiddenFields');
+  const pmA = b.placeholderMapping(TA), pmB = b.placeholderMapping(TB);
+  eq([pmA['statement of probable cause'].richtext, pmA['statement of probable cause'].multiline], [false, false], 'explicit text: engine not rich');
+  eq([pmA.Story.richtext, pmA.Notes.multiline], [true, true], 'explicit richtext / long flags');
+  ok(!('richtext' in pmA.Range), 'no kind: no engine flags');
+  eq([pmB.Hair.type, pmB.Hair.choices], ['dropdown', ['Brown', 'Black']], 'explicit dropdown');
+  eq(pmA.When.type, 'text', 'date kind: engine type text');
+
+  // autofill
+  const vals = {};
+  b.applyProfile(m, vals, { email: 'det@example.test', name: 'Det. Pat Example', badge: '1' });
+  b.applyCaseFacts(m, vals, { suspectName: 'SYNTHETIC SUSPECT', pcText: 'PC text here' });
+  eq(vals['global:g_who'], 'SYNTHETIC SUSPECT', 'autofill case fact on unusual name');
+  eq(vals[b.fieldKeyTemplate(TA, 'Mail')], 'det@example.test', 'autofill profile item');
+  ok(!('global:g_pc' in vals), 'autofill none: PC not filled');
+  eq(vals[b.fieldKeyTemplate(TA, 'Story')], [{ type: 'paragraph', runs: [{ text: 'PC text here' }] }], 'explicit richtext still gets PC by default');
+
+  // resolve by explicit kind
+  const r = b.resolveValues(TA, { 'global:g_when': '2026-03-04', 'global:g_pc': 'plain', [b.fieldKeyTemplate(TA, 'Story')]: 'Line 1\nLine 2',
+    [b.fieldKeyTemplate(TA, 'Pic')]: 'see attached' });
+  eq(r.values.When, '03/04/2026', 'explicit date formats');
+  eq(r.values['statement of probable cause'], 'plain', 'explicit text: PC name as plain text');
+  eq(r.richtextBlocks.Story.length, 2, 'explicit richtext blocks');
+  eq(r.values.Pic, 'see attached', 'explicit photo text');
+  const rb = b.resolveValues(TB, { [b.fieldKeyTemplate(TB, 'Range') + '::rangeStart']: '2026-01-01', [b.fieldKeyTemplate(TB, 'Range') + '::rangeEnd']: '2026-01-31' });
+  eq(rb.values.Range, '01/01/2026 to 01/31/2026', 'explicit daterange');
+  const rArr = b.resolveValues(TA, { [b.fieldKeyTemplate(TA, 'Notes')]: [{ type: 'paragraph', runs: [{ text: 'was rich' }] }] });
+  eq(rArr.values.Notes, 'was rich', 'blocks left from an old kind read as text');
+
+  // migrateValues
+  const old = {
+    [b.fieldKeyTemplate(TA, 'When')]: '2025-12-31',           // was a template field, now shared
+    'global:g_old': 'Merged value',                           // merged-away global
+    'global:g_split': 'Split value',                          // split out of a global
+    'global:g_split::datetime': '2026-01-01T10:00',
+    'global:g_when': undefined,
+  };
+  b.migrateValues(old);
+  eq(old['global:g_when'], '2025-12-31', 'migrate: template key -> shared');
+  eq(old['global:g_who'], 'Merged value', 'migrate: global alias');
+  eq(old[b.fieldKeyTemplate(TA, 'Old')], 'Split value', 'migrate: placeholder alias');
+  eq(old[b.fieldKeyTemplate(TA, 'Old') + '::datetime'], '2026-01-01T10:00', 'migrate: suffixed keys');
+  const keep = { 'global:g_who': 'Typed', 'global:g_old': 'Older' };
+  b.migrateValues(keep);
+  eq(keep['global:g_who'], 'Typed', 'migrate: never overwrites');
+  ok('global:g_old' in keep, 'migrate: keeps old key');
+  eq(B.CASE_SOURCES.includes('suspectName') && B.PROFILE_SOURCES.includes('email') && B.FIELD_KINDS.length, 8, 'exported lists');
+}
+
 console.log(`builder-model: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

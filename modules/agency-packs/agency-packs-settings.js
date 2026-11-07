@@ -230,7 +230,24 @@
                 <div class="mt-3 space-y-2">
                     ${packs.length ? packs.map(renderPack).join('') : '<div class="text-xs text-gray-500 italic">No agency packs installed.</div>'}
                 </div>
+                ${creditHtml()}
             </div>`;
+    }
+
+    // Acknowledgement for the officer whose Warrant Builder this feature is built on.
+    function creditHtml() {
+        return `
+                <div class="mt-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5 flex items-start gap-2.5" data-ap-credit>
+                    <svg class="w-4 h-4 mt-0.5 shrink-0 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                    </svg>
+                    <div class="text-xs text-gray-300 leading-relaxed">
+                        <span class="text-amber-200 font-semibold">Thank you, Det. Rob Aron — Westminster Police Department.</span>
+                        Agency template packs are built on the Warrant Builder that Det. Aron wrote and generously shared,
+                        including the code that turns an agency's Word templates into fillable forms. His work made this
+                        feature possible for investigators everywhere.
+                    </div>
+                </div>`;
     }
 
     function onClick(e) {

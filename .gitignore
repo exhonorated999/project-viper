@@ -29,6 +29,9 @@ sample-data/
 *.ufdr
 *.ufd
 *.oversight
+# Agency packs hold an agency's own templates; backups hold case data.
+*.viperpack
+*.vbak
 # Local list of real names/contacts/ids the guard refuses (never committed).
 .sensitive-terms.local
 plans/2026-05-03_cellebrite-module/

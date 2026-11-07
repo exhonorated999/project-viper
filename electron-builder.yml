@@ -41,7 +41,7 @@ files:
   - "!**/__tests__/**"
   - "!**/test_fixtures/**"
   - "!**/fixtures/**"
-  - "!**/*.{eml,msg,mbox,pst,ost,ufdr,ufd,oversight,log,py,pyc}"
+  - "!**/*.{eml,msg,mbox,pst,ost,ufdr,ufd,oversight,log,py,pyc,viperpack,vbak}"
   - "!_*.{js,py}"
   - "!.workshop/**"
   - "!.github/**"

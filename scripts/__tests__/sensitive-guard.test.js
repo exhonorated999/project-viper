@@ -23,7 +23,8 @@ ok(clean('modules/case-status-report/csr-build.js', 'var a = 1;'), 'case-status-
 
 // ── 2. Evidence / mail / media / binaries ────────────────────────────────
 ['x.mbox', 'a/b.eml', 'x.pst', 'dump.ufdr', 'offender.oversight', 'x.e01', 'chat.db', 'clip.mp4', 'v.wav',
- 'IMG_0001.heic', 'loc.kml', 'contacts.vcf', 'pack.zip', 'VIPER-setup.exe', 'app.asar', 'model.gguf'].forEach((p) =>
+ 'IMG_0001.heic', 'loc.kml', 'contacts.vcf', 'pack.zip', 'VIPER-setup.exe', 'app.asar', 'model.gguf',
+ 'agency.viperpack', 'VIPER_AutoBackup_2026-01-01.vbak'].forEach((p) =>
   ok(has(p, null, 'ext'), p + ' blocked'));
 ok(clean('test-sample.mbox', 'From: a@example.com'), 'reviewed synthetic mbox allowed (ALLOW list)');
 

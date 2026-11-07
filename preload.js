@@ -122,6 +122,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   autoBackupRun: (args) => ipcRenderer.invoke('auto-backup-run', args),
   backupList: (args) => ipcRenderer.invoke('backup-list', args),
 
+  // Agency packs (installed warrant template libraries)
+  agencyPackList: () => ipcRenderer.invoke('agency-pack-list'),
+  agencyPackGet: (id) => ipcRenderer.invoke('agency-pack-get', id),
+  agencyPackChoose: () => ipcRenderer.invoke('agency-pack-choose'),
+  agencyPackInstall: (filePath) => ipcRenderer.invoke('agency-pack-install', filePath),
+  agencyPackRemove: (id) => ipcRenderer.invoke('agency-pack-remove', id),
+  agencyPackVerify: (id) => ipcRenderer.invoke('agency-pack-verify', id),
+
   // Diagnostic Report (diagnostic-edition builds)
   isDiagnosticMode: () => ipcRenderer.invoke('is-diagnostic-mode'),
   generateDiagnosticReport: () => ipcRenderer.invoke('generate-diagnostic-report'),

@@ -76,6 +76,7 @@ const BLOCKED_EXT = [
   'wav', 'mp3', 'm4a', 'amr', 'opus', 'aac', 'caf', 'ogg',
   // archives / binaries / builds
   'zip', '7z', 'rar', 'tar', 'gz', 'tgz', 'bz2', 'xz', 'cab', 'iso',
+  'viperpack', 'vbak',   // agency packs (agency templates) and VIPER backups (case data)
   'exe', 'msi', 'dll', 'dmg', 'pkg', 'appx', 'asar', 'blockmap', 'gguf',
 ];
 

@@ -3985,6 +3985,22 @@ const _autoBackup = require('./modules/backup/auto-backup-main.js').createAutoBa
 });
 _autoBackup.register(ipcMain);
 
+// --- Agency packs (modules/agency-packs) ---
+// An agency's own warrant templates, installed by the officer from a .viperpack
+// into userData/agency-packs/<id>/ (backed up). Nothing agency-specific ships
+// with VIPER; the Builder only appears once a pack is installed.
+const _agencyPacks = (() => {
+  const P = require('./modules/agency-packs/pack-store.js');
+  const store = P.createPackStore({
+    fs, path, crypto,
+    rootDir: path.join(app.getPath('userData'), 'agency-packs'),
+  });
+  P.registerPackIpc(ipcMain, store, {
+    dialog, getWindow: () => mainWindow, audit: () => audit, AUDIT_EVENTS,
+  });
+  return store;
+})();
+
 // --- Report Pop-out Window ---
 ipcMain.handle('open-report-window', async (event, caseNumber) => {
   const reportWin = new BrowserWindow({

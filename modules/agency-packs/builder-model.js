@@ -474,6 +474,18 @@
             return profileValue(name, profile);
         }
 
+        // Where a field's autofill comes from, for the pack editor: 'case:<fact>', 'profile:<key>'
+        // or '' (nothing). Explicit settings first, then the name rules.
+        function autofillSource(name, f) {
+            const ex = explicitAutofill(f);
+            if (ex) return ex.src === 'none' ? '' : ex.src + ':' + ex.key;
+            const pk = profileByName.get(lc(name));
+            if (pk) return 'profile:' + pk;
+            if (fieldKind(name, f && f.type, f && f.kind) === 'richtext') return 'case:pcText';
+            const ck = caseByName.get(lc(name));
+            return ck ? 'case:' + ck : '';
+        }
+
         // Profile first, then a shared Global Field's defaultValue. Only fills empty slots.
         function applyProfile(model, values, profile) {
             model.sharedFields.forEach(({ field, key }) => {
@@ -712,7 +724,7 @@
             placeholderMapping, formModel, fieldKind, isHidden, priorityRank,
             isRichText, isPhotoField, isDateField, isDateRangeField, isDateTimeField, isLongNarrative, defaultTimezone,
             isCountyField, isJudicialDistrictField,
-            profileValue, applyProfile, applyCaseFacts, migrateValues,
+            profileValue, applyProfile, applyCaseFacts, migrateValues, autofillSource,
             counties: () => counties.slice(), countyRule, applyCounty, removeDaApproval,
             resolveValues, formatDateTime,
             caseNumberForFilename, autoOutputFilename, outputFilename, packetFilename, packetRequest,

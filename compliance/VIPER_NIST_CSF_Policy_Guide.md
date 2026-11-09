@@ -333,7 +333,7 @@ For a suspected **agency-side** compromise (lost device, unauthorized access, su
 - **Field Security** (when enabled) encrypts every case-data file written to disk with **AES-256-GCM**.
 - VIPENC magic header (6 bytes: `V`,`I`,`P`,`E`,`N`,`C`) plus version byte and 12-byte IV identify each encrypted blob.
 - Encryption is applied transparently at the IPC boundary in the Electron main process — case modules never see plaintext on disk.
-- Cases folder is hidden via `attrib +H` while Field Security is active (Windows).
+- The cases folder is left visible in Explorer; the files in it are encrypted, so hiding the folder adds no protection. (Versions before 5.5.9 hid it with `attrib +H`; current versions clear that flag at startup.)
 - Master passphrase is processed via PBKDF2 / scrypt and never stored in plaintext.
 
 **Policy Statement:** Field Security shall be enabled on every VIPER installation handling case data of any sensitivity above public-record. Master passphrases shall meet the agency's password-construction guideline.

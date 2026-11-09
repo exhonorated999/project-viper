@@ -887,12 +887,16 @@ async function saveVaultAndQuit() {
   mainWindow.destroy();
 }
 
-// Helper: set cases folder hidden/visible (Windows: attrib +H / -H)
-function _setCasesHidden(hidden) {
+// Helper: make sure the cases folder is visible in Explorer (Windows).
+// Before 5.5.9 VIPER hid it (attrib +H) while Field Security was on. The
+// hidden flag lives on the drive, so a USB moved to another PC showed no
+// cases folder. The files are encrypted anyway, so VIPER no longer hides
+// it and clears the flag it set earlier.
+function _unhideCasesDir() {
   try {
-    if (process.platform === 'win32' && fs.existsSync(casesDir)) {
-      const flag = hidden ? '+H' : '-H';
-      spawn('attrib', [flag, casesDir]);
+    if (process.platform === 'win32' && casesDir && fs.existsSync(casesDir)) {
+      const p = spawn('attrib', ['-H', casesDir], { windowsHide: true });
+      p.on('error', (e) => console.error('attrib error:', e.message));
     }
   } catch (e) { console.error('attrib error:', e.message); }
 }
@@ -1035,8 +1039,8 @@ app.whenReady().then(async () => {
       apertureData.setSecurityManager(security);
     }
 
-    // Keep cases folder hidden on disk when security is enabled
-    if (security.isEnabled()) _setCasesHidden(true);
+    // Undo the hidden flag older versions set on the cases folder
+    _unhideCasesDir();
 
     await startServer();
     createWindow();
@@ -2395,6 +2399,7 @@ ipcMain.handle('set-cases-path', async (_e, newPath) => {
   if (!_writeStorageOverrides(cfg)) return { success: false, error: 'Failed to save config' };
   casesDir = newPath;
   casesOverridden = true;
+  _unhideCasesDir();
   return { success: true, newPath, restartRequired: false };
 });
 
@@ -2422,6 +2427,7 @@ ipcMain.handle('reset-storage-path', async (_e, which) => {
     casesDir = defaultCasesDir;
     if (!fs.existsSync(casesDir)) fs.mkdirSync(casesDir, { recursive: true });
     casesOverridden = false;
+    _unhideCasesDir();
     return { success: true, newPath: casesDir, restartRequired: false };
   } else if (which === 'userData') {
     delete cfg.userDataPath;
@@ -6285,8 +6291,6 @@ ipcMain.handle('security-setup', async (event, { password, allowOverwriteEncrypt
       scanRoots,
       allowOverwriteEncrypted: !!allowOverwriteEncrypted
     });
-    // Hide the cases folder on disk
-    _setCasesHidden(true);
     try { audit && audit.write(AUDIT_EVENTS.SECURITY_ENABLED, {}); } catch (_) {}
     return { success: true, recoveryKey };
   } catch (e) {
@@ -6369,6 +6373,7 @@ ipcMain.handle('security-disable', async (event) => {
       try { sender && sender.send('security-disable-progress', p); } catch (_) {}
     };
     const report = security.disable({ scanRoots, onProgress });
+    _unhideCasesDir();
     try { audit && audit.write(AUDIT_EVENTS.SECURITY_DISABLED, {
       decrypted: (report && report.decrypted && report.decrypted.length) || 0,
       failed:    (report && report.failed    && report.failed.length)    || 0

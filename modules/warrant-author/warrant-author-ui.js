@@ -4308,7 +4308,7 @@ function renderCasePc(caseId) {
              and Date of Offense (see _resolveCaseCtxForDraft). Stored at
              the case level so a single edit propagates to every draft. -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-          <label class="block text-xs">
+          <label class="block text-xs min-w-0">
             <span class="text-slate-400 uppercase tracking-wider">Offense Description</span>
             <div class="mt-1 flex items-center gap-2">
               <input type="text"
@@ -4317,9 +4317,10 @@ function renderCasePc(caseId) {
                      placeholder="${inheritedDesc ? attr(inheritedDesc) : 'e.g. Aggravated Robbery, Sexual Assault on a Child…'}"
                      oninput="WarrantAuthorUI.bus.onCaseOffenseDescChange('${attr(caseId)}', this.value)"
                      onblur="WarrantAuthorUI.bus.onCaseOffenseDescBlur('${attr(caseId)}')"
-                     class="flex-1 px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
+                     class="flex-1 min-w-0 px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">
               ${offenseRefOpts ? `
                 <select onchange="WarrantAuthorUI.bus.onCaseOffensePickFromRef('${attr(caseId)}', this.value); this.value='';"
+                        style="width:10.5rem;flex:0 0 10.5rem;min-width:0;text-overflow:ellipsis"
                         class="px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-slate-300 text-xs"
                         title="Pick from your Offense Reference library">
                   <option value="">📚 From reference…</option>

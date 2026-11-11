@@ -1221,6 +1221,8 @@ function _resolveAzHeader(block, ctx) {
       cityLine = `CITY OF ${city}, ARIZONA`;
     } else {
       agencyLine = name;
+      // An explicit City override always prints its own header line.
+      if (city && _azS((ctx.draft || {}).azCity)) cityLine = `CITY OF ${city}, ARIZONA`;
     }
     if (!name) dangling.push('agency.agencyName');
   }

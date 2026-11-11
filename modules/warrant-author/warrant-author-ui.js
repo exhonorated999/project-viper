@@ -275,6 +275,10 @@ function _resolveAddendumListForDraft(draft, providersMerged) {
       providerName: String((p && (p.legalEntity || p.name)) || a.providerKey || '').trim(),
       businessName: String(a.businessName || '').trim(),
       pageLabel:    String(a.pageLabel || _pageLabelFallback(i)).trim(),
+      // Arizona lists every provider's address + statutory agent on the
+      // warrant and the affidavit.
+      address:          String((p && p.address) || '').trim(),
+      azStatutoryAgent: String(a.azStatutoryAgent || '').trim(),
     };
   });
 }
@@ -817,7 +821,7 @@ function harvestIdentifiers(caseId) {
 function _readWarrantAuthorState() {
   // Settings dropdown wins over agency.state; falls back to agency.state, then 'CA'.
   // Must mirror _WARRANT_AUTHOR_SUPPORTED_STATES in settings.html.
-  const SUPPORTED = ['CA', 'VA', 'CO', 'PA', 'AR', 'TX'];
+  const SUPPORTED = ['CA', 'VA', 'CO', 'PA', 'AR', 'TX', 'AZ'];
   try {
     const s = (localStorage.getItem('viperWarrantAuthorState') || '').toUpperCase();
     if (SUPPORTED.includes(s)) return s;
@@ -840,6 +844,7 @@ function _espTemplateForState(state) {
     case 'PA': return { id: 'pa-multi-business-esp',     label: 'PA — Search Warrant + Affidavit (AOPC 410A) · Beta' };
     case 'AR': return { id: 'ar-multi-business-esp',     label: 'AR — Circuit Court ESP (Affidavit + Search Warrant) · Beta' };
     case 'TX': return { id: 'tx-multi-business-esp',     label: 'TX — Warrant for Electronic Customer Data (Art. 18B) · Beta' };
+    case 'AZ': return { id: 'az-multi-business-esp',     label: 'AZ — Search Warrant + Affidavit (ARS 13-3911) · Beta' };
     default:   return { id: 'generic-us-multi-business-esp', label: 'US Generic — Multi-Business ESP (SCA §2703)' };
   }
 }
@@ -1622,6 +1627,116 @@ function _renderEditor(caseId, draftId) {
   `;
 }
 
+// Arizona: one Search Warrant + one Affidavit for every provider on the
+// draft, so every checkbox / option of the AZ form lives on the DRAFT.
+// City defaults from the agency address, county from the agency profile
+// (same override key as AR / TX), the judge line uses Court Name above.
+function _renderAzDraftFields(caseId, draft) {
+  const isAz = String(draft.template || '') === 'az-multi-business-esp'
+    || String(draft.jurisdiction || '').toUpperCase() === 'AZ';
+  if (!isAz) return '';
+  let profileCounty = '';
+  let profileCity = '';
+  if (typeof window !== 'undefined' && window.WarrantAuthorAgencyProfile) {
+    try {
+      const raw = localStorage.getItem('viperAgencyProfile');
+      const profile = window.WarrantAuthorAgencyProfile.normalize(raw ? JSON.parse(raw) : {});
+      profileCounty = String(profile.county || '');
+      const lines = String(profile.agencyAddress || '').split(/\r?\n|,/).map(s => s.trim()).filter(Boolean);
+      // "Street / City, ST 85000" → the part before the state + ZIP.
+      const m = String(profile.agencyAddress || '').match(/([A-Za-z .'-]+),\s*[A-Z]{2}\s+\d{5}/);
+      profileCity = m ? m[1].trim() : (lines.length >= 3 ? lines[lines.length - 2] : '');
+    } catch (_) { /* non-fatal */ }
+  }
+  const D = (field, how) =>
+    `WarrantAuthorUI.bus.onDraftFieldChange('${attr(caseId)}','${attr(draft.id)}','${field}',${how})`;
+  const eng = _engine();
+  const groundDefs = (eng && Array.isArray(eng.AZ_GROUND_DEFS)) ? eng.AZ_GROUND_DEFS : [];
+  const groundDefaults = (eng && eng.AZ_GROUND_DEFAULTS) || {};
+  const grounds = (draft.azGrounds && typeof draft.azGrounds === 'object') ? draft.azGrounds : groundDefaults;
+  const groundLabel = (t) => String(t || '')
+    .replace('{offense}', '<the offense>').replace('{person}', '<person>');
+  const input = 'mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm';
+  const box = (checked, onchange, label, title) => `
+        <label class="flex items-start gap-2 text-xs text-slate-300"${title ? ` title="${attr(title)}"` : ''}>
+          <input type="checkbox" class="mt-0.5" ${checked ? 'checked' : ''} onchange="${onchange}">
+          <span>${label}</span>
+        </label>`;
+  const ndoDays = String(draft.azNdoDays || '');
+  return `
+      <label class="text-xs">
+        <span class="text-slate-400 uppercase tracking-wider">City <span class="text-slate-600 normal-case tracking-normal">(override)</span></span>
+        <input type="text" value="${attr(draft.azCity || '')}" placeholder="${attr(profileCity || 'e.g. Example City')}"
+               onchange="${D('azCity', 'this.value')}" class="${input}">
+        <span class="block mt-0.5 text-[11px] text-slate-500">Header "CITY OF …" line + affidavit "in the City of …". Blank uses the agency address.</span>
+      </label>
+      <label class="text-xs">
+        <span class="text-slate-400 uppercase tracking-wider">County <span class="text-slate-600 normal-case tracking-normal">(override)</span></span>
+        <input type="text" value="${attr(draft.arCounty || '')}" placeholder="${attr(profileCounty || 'e.g. Example')}"
+               onchange="${D('arCounty', 'this.value')}" class="${input}">
+        <span class="block mt-0.5 text-[11px] text-slate-500">Blank uses the agency profile${profileCounty ? ` (<span class="text-slate-400">${esc(profileCounty)}</span>)` : ''}.</span>
+      </label>
+      <label class="text-xs col-span-2">
+        <span class="text-slate-400 uppercase tracking-wider">Offense <span class="text-slate-600 normal-case tracking-normal">(override)</span></span>
+        <input type="text" value="${attr(draft.azOffense || '')}" placeholder="Blank uses the case offense description"
+               onchange="${D('azOffense', 'this.value')}" class="${input}">
+        <span class="block mt-0.5 text-[11px] text-slate-500">Prints in the affidavit oath ("a violation of …") and in the grounds.</span>
+      </label>
+
+      <div class="col-span-2 grid grid-cols-2 gap-x-4 gap-y-2 pt-2 border-t border-slate-700" data-az-options>
+        <div class="col-span-2 text-[11px] text-slate-400 uppercase tracking-wider">Arizona form — search</div>
+        ${box(draft.azPremises !== false, D('azPremises', 'this.checked'), 'On the premise(s) known as — the provider servers', 'Lists every provider on this draft (with its statutory agent) under the premises box.')}
+        ${box(!!draft.azPerson, D('azPerson', 'this.checked'), 'On the person(s) of')}
+        <label class="text-xs">
+          <input type="text" value="${attr(draft.azPersonDesc || '')}" placeholder="Person description (optional)"
+                 onchange="${D('azPersonDesc', 'this.value')}" class="${input}">
+        </label>
+        ${box(!!draft.azVehicle, D('azVehicle', 'this.checked'), 'In the vehicle(s) described as')}
+        <label class="text-xs">
+          <input type="text" value="${attr(draft.azVehicleDesc || '')}" placeholder="Vehicle description (optional)"
+                 onchange="${D('azVehicleDesc', 'this.value')}" class="${input}">
+        </label>
+
+        <div class="col-span-2 text-[11px] text-slate-400 uppercase tracking-wider mt-1">Grounds — which property, persons or things</div>
+        ${groundDefs.map(g => box(!!grounds[g.key],
+          `WarrantAuthorUI.bus.onAzGroundChange('${attr(caseId)}','${attr(draft.id)}','${attr(g.key)}',this.checked)`,
+          esc(groundLabel(g.text)))).join('')}
+        <label class="text-xs col-span-2">
+          <span class="text-slate-400">Person concealing it <span class="text-slate-600">(only for the "in possession of" ground)</span></span>
+          <input type="text" value="${attr(draft.azConcealingPerson || '')}" placeholder="Blank leaves a line to fill in"
+                 onchange="${D('azConcealingPerson', 'this.value')}" class="${input}">
+        </label>
+
+        <div class="col-span-2 text-[11px] text-slate-400 uppercase tracking-wider mt-1">Service · facts · orders</div>
+        ${box(draft.azDaytime !== false, D('azDaytime', 'this.checked'), 'Daytime service (not 10 PM – 6:30 AM)')}
+        ${box(!!draft.azNighttime, D('azNighttime', 'this.checked'), 'Nighttime service (good cause shown)')}
+        <label class="text-xs col-span-2">
+          <span class="text-slate-400">Affidavit — check one</span>
+          <select onchange="${D('azInformant', 'this.value')}" class="${input}">
+            <option value="learned" ${draft.azInformant !== 'informant' ? 'selected' : ''}>The affiant learned the following information in the following manner</option>
+            <option value="informant" ${draft.azInformant === 'informant' ? 'selected' : ''}>The affiant received information from a (confidential) informant</option>
+          </select>
+        </label>
+        ${box(draft.azFelony !== false, D('azFelony', 'this.checked'), 'Felony-investigation warning paragraph', 'Bold paragraph: warning another person / suppressing evidence are separate felonies; notifying the user may jeopardize the investigation (18 U.S.C. 2705(b)).')}
+        ${box(draft.azNdo !== false, D('azNdo', 'this.checked'), 'Non-disclosure order (18 U.S.C. § 2705(b)) in the warrant', 'Orders every provider not to disclose the warrant or terminate the account. Rolled into the warrant — no separate order.')}
+        <label class="text-xs col-span-2">
+          <span class="text-slate-400">Non-disclosure period</span>
+          <select onchange="${D('azNdoDays', 'this.value')}" class="${input}" ${draft.azNdo === false ? 'disabled' : ''}>
+            <option value="" ${!ndoDays ? 'selected' : ''}>No time limit</option>
+            <option value="90" ${ndoDays === '90' ? 'selected' : ''}>90 days</option>
+            <option value="180" ${ndoDays === '180' ? 'selected' : ''}>180 days</option>
+            <option value="365" ${ndoDays === '365' ? 'selected' : ''}>1 year</option>
+          </select>
+        </label>
+        <div class="col-span-2 text-[11px] text-slate-500">
+          Judge line prints "Of the <span class="text-slate-400">${esc(draft.courtName || 'Court Name above')}</span>".
+          Case Facts = the case Probable Cause section (type <span class="text-slate-400">Synopsis:</span> / <span class="text-slate-400">Narrative:</span> headings there if you use them).
+          Each provider's statutory agent is entered on its provider page.
+        </div>
+      </div>
+  `;
+}
+
 function _renderDraftHeader(caseId, draft) {
   const tplOpts = [
     { v: 'ca-multi-business-esp', label: 'CA — CalECPA §1546.1' },
@@ -1630,6 +1745,7 @@ function _renderDraftHeader(caseId, draft) {
     { v: 'pa-multi-business-esp', label: 'PA — Search Warrant + Affidavit (AOPC 410A)' },
     { v: 'ar-multi-business-esp', label: 'AR — Circuit Court ESP (Affidavit + Search Warrant)' },
     { v: 'tx-multi-business-esp', label: 'TX — Electronic Customer Data Warrant + Affidavit (Art. 18B)' },
+    { v: 'az-multi-business-esp', label: 'AZ — Search Warrant + Affidavit (ARS 13-3911)' },
     { v: 'generic-us-multi-business-esp', label: 'US Generic — SCA §2703' },
   ];
   // Colorado: the agency profile carries a user-maintained list of courts
@@ -1716,6 +1832,7 @@ function _renderDraftHeader(caseId, draft) {
         <span class="block mt-0.5 text-[11px] text-slate-500">Prints as "<span class="text-slate-400">COURT: ${esc(draft.txDistrictCourt || '________')} DISTRICT COURT</span>". Blank leaves a line to fill in.</span>
       </label>
     ` : '';
+  const azFieldsHtml = _renderAzDraftFields(caseId, draft);
   // When CO template is active AND the agency has a Colorado Courts list,
   // the court picker (coCourtId) is the authoritative source for the
   // caption — the legacy free-text "Court Name" field is ignored by the
@@ -1786,6 +1903,7 @@ function _renderDraftHeader(caseId, draft) {
       ${courtPickerHtml}
       ${arFieldsHtml}
       ${txFieldsHtml}
+      ${azFieldsHtml}
 
       <div class="col-span-2 text-[11px] text-slate-500 flex items-center justify-between border-t border-slate-700 pt-2 mt-1">
         <span>
@@ -3077,6 +3195,7 @@ function _renderAddendumOptionalClauses(caseId, draft, ad) {
   const jx = (draft.jurisdiction || '').toUpperCase();
   const tpl = String(draft.template || '');
   if (jx === 'TX' || tpl.startsWith('tx-')) return _renderTxAddendumOptions(caseId, draft, ad);
+  if (jx === 'AZ' || tpl.startsWith('az-')) return _renderAzAddendumOptions(caseId, draft, ad);
   // CalECPA §1546.x clauses are California-specific. Show them ONLY when
   // the draft jurisdiction / template is CA. All other states (VA, CO,
   // US-generic, anything we add later) fall through to the federal SCA
@@ -3114,6 +3233,27 @@ function _renderAddendumOptionalClauses(caseId, draft, ad) {
           <input type="checkbox" ${ad.includeCalecpaSealing ? 'checked' : ''}
                  onchange="WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','includeCalecpaSealing',this.checked)">
           ${esc(labels.sealing.text)}
+        </label>
+      </div>
+  `;
+}
+
+// Arizona addendum options. NDO / felony warning / grounds are draft-wide
+// (one warrant for every provider) and live in the draft header; the only
+// per-provider field is the provider's Arizona statutory agent, printed
+// under its address on the warrant, the affidavit and its ADDENDUM.
+function _renderAzAddendumOptions(caseId, draft, ad) {
+  const on = (field, how) =>
+    `WarrantAuthorUI.bus.onAddendumFieldChange('${attr(caseId)}','${attr(draft.id)}','${attr(ad.id)}','${field}',${how})`;
+  return `
+      <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800" data-az-addendum-options>
+        <label class="text-xs col-span-2">
+          <span class="text-slate-400 uppercase tracking-wider">Arizona statutory agent <span class="text-slate-600 normal-case tracking-normal">(optional)</span></span>
+          <textarea rows="3"
+                 placeholder="Agent name&#10;Street&#10;City, AZ ZIP"
+                 onchange="${on('azStatutoryAgent', 'this.value')}"
+                 class="mt-1 w-full px-2 py-1.5 bg-viper-dark border border-slate-700 rounded text-white text-sm">${esc(ad.azStatutoryAgent || '')}</textarea>
+          <span class="block mt-0.5 text-[11px] text-slate-500">Prints as "Statutory Agent: …" under the provider address. Non-disclosure, grounds and service options are on the draft header (they apply to every provider).</span>
         </label>
       </div>
   `;
@@ -3258,6 +3398,67 @@ function _renderLivePreview(caseId, draft, activeId) {
     if (fl.includes('bold')) st.push('font-weight:700');
     return st.length ? ` style="${st.join(';')}"` : '';
   };
+  const isAzTpl = String(draft.template || '') === 'az-multi-business-esp';
+  // AZ: checkbox rows (☒/☐) + the face's centered/bold/right lines.
+  const azBox = (it, extra) => (it && (it.text || it.checked !== undefined))
+    ? `<div class="wa-pv-text" style="display:flex;gap:.5em;${extra || ''}"><span>${it.checked ? '☒' : '☐'}</span><span>${_safeMultilineHtml(it.text || '')}</span></div>`
+    : '';
+  const azLines = (arr) => (Array.isArray(arr) ? arr : []).map(s => esc(s)).join('<br>');
+  const azPreview = (b) => {
+    const ind = 'margin-left:1.5em';
+    switch (b.kind) {
+      case 'az-header':
+        if (b.variant === 'affidavit') {
+          return `<div class="wa-pv-text text-center font-bold">${esc(b.title || '')}<br>${esc(b.countyLine || '')}</div>`;
+        }
+        return `<div class="wa-pv-text text-center">${[b.agencyLine, b.cityLine].filter(Boolean).map(esc).join('<br>')}</div>
+                <div class="wa-pv-text text-center" style="font-size:1.6em;letter-spacing:.04em">${esc(b.title || '')}</div>
+                <div class="wa-pv-text text-center">${esc(b.countyLine || '')}</div>`;
+      case 'az-numbers':
+        return `<div class="wa-pv-text text-right">${esc(b.warrantNo || '')}</div><div class="wa-pv-text">${esc(b.drLine || '')}</div>`;
+      case 'az-places': {
+        const provs = (Array.isArray(b.providers) ? b.providers : []).map(p =>
+          `<div class="wa-pv-text font-bold" style="${ind}">${azLines(p.lines)}</div><div class="wa-pv-text" style="${ind}">(${esc(p.label || '')})</div>`).join('');
+        return azBox(b.person) + azBox(b.premises)
+          + `<div class="wa-pv-text" style="${ind}">${esc(b.lead || '')}</div>` + provs + azBox(b.vehicle);
+      }
+      case 'az-items-ref':
+        return `${b.lead ? `<div class="wa-pv-text">${esc(b.lead)}</div>` : ''}<div class="wa-pv-text font-bold" style="${ind}">${esc(b.ref || '')}</div>`;
+      case 'az-grounds':
+      case 'az-service':
+      case 'az-informant':
+        return `${b.lead ? `<div class="wa-pv-text${b.kind === 'az-service' ? ' font-bold' : ''}">${esc(b.lead)}</div>` : ''}`
+          + (Array.isArray(b.items) ? b.items : []).map(it => azBox(it)).join('');
+      case 'az-delivery':
+        return `<div class="wa-pv-text font-bold">${esc(b.lead || '')}</div><div class="wa-pv-text font-bold" style="${ind}">${azLines(b.lines)}</div><div class="wa-pv-text font-bold">${esc(b.portal || '')}</div>`;
+      case 'az-felony':
+        return b.text ? `<div class="wa-pv-text font-bold">${esc(b.text)}</div>` : '';
+      case 'az-ndo':
+        return b.text ? `<div class="wa-pv-text">${txRich(b.text)}</div>` : '';
+      case 'az-affiant-signature':
+        return `<div class="wa-pv-text">${txSigCol(['—', esc(b.nameLine || '[Affiant]'), esc(b.agencyName || '[Agency]')])}</div>`;
+      case 'az-judge':
+        return `<div class="wa-pv-text" style="margin-left:50%">${txSigCol(['—', esc(b.title || ''), esc(b.courtLine || '')])}</div>`;
+      case 'az-addendum-heading':
+        return `<div class="wa-pv-text text-center font-bold">${esc(b.title || '')}${b.providerName ? '<br>' + esc(b.providerName) : ''}</div>
+                <div class="wa-pv-text text-center">${esc(b.ref || '')}</div>
+                <div class="wa-pv-text">${esc(b.body || '')}</div>`;
+      case 'az-provider-block':
+        return `<div class="wa-pv-text font-bold">${azLines(b.lines)}</div>`;
+      case 'az-account':
+        return `<div class="wa-pv-text">${esc(b.lead || '')}</div><div class="wa-pv-text font-bold">${azLines(b.lines)}</div>`;
+      case 'az-records':
+        return `<div class="wa-pv-text font-bold">${esc(b.lead || '')}</div>`
+          + (Array.isArray(b.items) ? b.items : []).map((t, n) => `<div class="wa-pv-text" style="${ind}">${n + 1} – ${esc(t)}</div>`).join('');
+      default: {
+        const fl = String(b.format || '').split(/\s+/);
+        const st = [];
+        if (fl.includes('center')) st.push('text-align:center');
+        if (fl.includes('bold')) st.push('font-weight:700');
+        return b.text ? `<div class="wa-pv-text"${st.length ? ` style="${st.join(';')}"` : ''}>${txRich(b.text)}</div>` : '';
+      }
+    }
+  };
   const txSigCol = (rows) => rows.map(r => r === '—'
     ? '<div>______________________________</div>'
     : `<div>${r || '&nbsp;'}</div>`).join('');
@@ -3271,7 +3472,15 @@ function _renderLivePreview(caseId, draft, activeId) {
       ? `<div class="wa-pv-heading"${(isArTpl || (isTxTpl && !b.text)) ? ' style="text-align:center;text-decoration:underline"' : ''}>${esc(b.heading)}</div>`
       : '';
     let body = '';
-    if (isTxTpl && b.kind === 'tx-caption') {
+    if (isAzTpl && String(b.kind || '').startsWith('az-')) {
+      body = azPreview(b);
+    } else if (isAzTpl && b.kind === 'section-break') {
+      body = `<div class="wa-pv-text text-center text-amber-400 italic border-t border-b border-dashed border-amber-500/40 py-1 my-1">— Affidavit starts on a new page —</div>`;
+    } else if (isAzTpl && b.kind === 'page-break') {
+      body = `<div class="wa-pv-text text-center text-slate-500 italic text-[11px] border-t border-dashed border-slate-600 my-1">— page break —</div>`;
+    } else if (isAzTpl && b.text) {
+      body = azPreview(b);
+    } else if (isTxTpl && b.kind === 'tx-caption') {
       const cells = (b.rows || []).map(r =>
         `<div>${esc(r.left || '')}</div><div>§</div><div>${esc(r.right || '')}</div>`).join('');
       body = `<div class="wa-pv-text font-bold" style="display:grid;grid-template-columns:1fr 1.5em 1fr;column-gap:.6em">${cells}</div>`;
@@ -3430,6 +3639,7 @@ function _renderLivePreview(caseId, draft, activeId) {
         : draft.template === 'co-multi-business-esp' ? 'CO template'
         : draft.template === 'ar-multi-business-esp' ? 'AR template'
         : draft.template === 'tx-multi-business-esp' ? 'TX template'
+        : draft.template === 'az-multi-business-esp' ? 'AZ template'
         : 'US template'
       )} · Page ${esc(ad.pageLabel)}</div>
       ${issuesBar}
@@ -3779,6 +3989,7 @@ function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult,
               draft.template === 'pa-multi-business-esp'  ? 'PA · AOPC 410A' :
               draft.template === 'ar-multi-business-esp'  ? 'AR · Circuit Court' :
               draft.template === 'tx-multi-business-esp'  ? 'TX · Art. 18B ECD' :
+              draft.template === 'az-multi-business-esp'  ? 'AZ · ARS 13-3911' :
               (String(draft.jurisdiction || '').toUpperCase() === 'PA') ? 'PA · AOPC 410A' :
               draft.template === 'ca-residential-sw'      ? 'CA · Residential SW' :
               draft.template === 'ca-residential'         ? 'CA · Residential SW' :
@@ -4300,6 +4511,7 @@ const bus = {
                   : tpl.startsWith('pa-') ? 'PA'
                   : tpl.startsWith('ar-') ? 'AR'
                   : tpl.startsWith('tx-') ? 'TX'
+                  : tpl.startsWith('az-') ? 'AZ'
                   : 'US',
       agencyProfile: agency,
       crimeType: type === 'residential' ? crimeId : ''
@@ -4356,8 +4568,24 @@ const bus = {
       else if (v.startsWith('pa-')) d.jurisdiction = 'PA';
       else if (v.startsWith('ar-')) d.jurisdiction = 'AR';
       else if (v.startsWith('tx-')) d.jurisdiction = 'TX';
+      else if (v.startsWith('az-')) d.jurisdiction = 'AZ';
       else                          d.jurisdiction = 'US';
     }
+    ds.saveDraft(caseId, d, { silent: true });
+    _rerender();
+  },
+  /**
+   * Toggle one Arizona ground checkbox. The object starts from the
+   * template defaults (means + evidence) the first time it is touched.
+   */
+  onAzGroundChange(caseId, draftId, key, checked) {
+    const ds = _store(); if (!ds) return;
+    const d = ds.getDraft(caseId, draftId); if (!d) return;
+    if (!d.azGrounds || typeof d.azGrounds !== 'object') {
+      const eng = _engine();
+      d.azGrounds = Object.assign({}, (eng && eng.AZ_GROUND_DEFAULTS) || { means: true, evidence: true });
+    }
+    d.azGrounds[key] = !!checked;
     ds.saveDraft(caseId, d, { silent: true });
     _rerender();
   },
@@ -5593,6 +5821,7 @@ const bus = {
       : draft.template === 'co-multi-business-esp' ? 'CO'
       : draft.template === 'ar-multi-business-esp' ? 'AR'
       : draft.template === 'tx-multi-business-esp' ? 'TX'
+      : draft.template === 'az-multi-business-esp' ? 'AZ'
       : draft.template === 'pa-multi-business-esp' ? 'PA'
       : 'US'
     );

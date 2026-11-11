@@ -416,6 +416,49 @@ function validateDraft(input) {
         }
     }
 
+    // Arizona (ARS 13-3911) — county + city print in the header and the
+    // judge line; the offense fills the grounds; the affiant e-mail is
+    // the delivery address for the returned records. Warnings only.
+    const _isAzJurisdiction = _jx ? (_jx === 'AZ') : _tpl.startsWith('az-');
+    if (_isAzJurisdiction) {
+        if (!String(draft.arCounty || agency.county || '').trim()) {
+            warnings.push(_warn(
+                'agency.county.empty.az',
+                'AZ_COUNTY_EMPTY',
+                'No county on file — the AZ warrant and affidavit headers ("COUNTY OF …") will print a blank. Set it under Settings → Agency Profile → Agency Identity, or use the County override on the draft.',
+                { scope: 'agency', fieldPath: 'agency.county' }
+            ));
+        }
+        // Same "Street, City, ST 12345" tail the engine's _splitUsAddress reads.
+        const azAddr = String(agency.agencyAddress || '').replace(/\r?\n/g, ', ').replace(/\s+/g, ' ').trim();
+        const azCityGuess = /^(.*),\s*([^,]+),\s*([A-Za-z]{2})\.?\s+(\d{5}(?:-\d{4})?)\s*$/.test(azAddr);
+        if (!String(draft.azCity || '').trim() && !azCityGuess) {
+            warnings.push(_warn(
+                'agency.city.empty.az',
+                'AZ_CITY_EMPTY',
+                'No city could be read from the agency address — the AZ warrant header will print a blank city. Fill the City override on the draft, or set the agency address as "Street, City, ST ZIP".',
+                { scope: 'draft', fieldPath: 'draft.azCity' }
+            ));
+        }
+        const azOffense = String(draft.azOffense || caseCtx.offenseDescription || draft.offenseDescription || '').trim();
+        if (!azOffense) {
+            warnings.push(_warn(
+                'draft.offenseDescription.empty.az',
+                'AZ_OFFENSE_DESCRIPTION_EMPTY',
+                'No offense description — the AZ grounds read "that offense being …". Set the Primary Offense on the case Overview tab, or fill the Offense override on the draft.',
+                { scope: 'case', fieldPath: 'case.offenseDescription' }
+            ));
+        }
+        if (!String(agency.affiantEmail || '').trim()) {
+            warnings.push(_warn(
+                'agency.affiantEmail.empty.az',
+                'AZ_AFFIANT_EMAIL_EMPTY',
+                'No affiant e-mail on file — the AZ warrant tells the provider to deliver records to it. Set it under Settings → Agency Profile.',
+                { scope: 'agency', fieldPath: 'agency.affiantEmail' }
+            ));
+        }
+    }
+
     // Hobbs articulation warning
     if (draft.hobbsSealing === 'requested' && pcNarrative && !/hobbs/i.test(pcNarrative)) {
         warnings.push(_warn(

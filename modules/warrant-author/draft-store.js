@@ -171,6 +171,7 @@ function _defaultTemplateFor(type, jurisdiction) {
   if (jurisdiction === 'PA') return 'pa-multi-business-esp';
   if (jurisdiction === 'AR') return 'ar-multi-business-esp';
   if (jurisdiction === 'TX') return 'tx-multi-business-esp';
+  if (jurisdiction === 'AZ') return 'az-multi-business-esp';
   return 'generic-us-multi-business-esp';
 }
 

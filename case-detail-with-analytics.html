@@ -40236,19 +40236,32 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 });
             } catch (_) {}
 
-            // ── Global PDF drop zone for DMV and RMS imports ─────
-            // Routes a dropped PDF to the right importer based on the active
-            // tab. The RMS tab takes every PDF dropped (same as choosing
-            // several in the Import dialog); the DMV tabs take the first.
+            // ── Global PDF drop zone for DMV, RMS and CyberTip imports ─────
+            // Routes a dropped file to the right importer based on the active
+            // tab. The RMS and Cyber Tips tabs take every file dropped (same
+            // as choosing several in the Import dialog); the DMV tabs take
+            // the first PDF. A file dropped on the RMS Import / Cyber Tips
+            // tab button goes to that module from any tab.
             (function wireDmvDropZone() {
                 const TAB_ROUTERS = {
                     suspects: { label: 'DMV PDF', run: (paths) => importDmvPrintout(undefined, paths[0]) },
                     victims: { label: 'DMV PDF', run: (paths) => importDmvVictim(undefined, paths[0]) },
                     witnesses: { label: 'DMV PDF', run: (paths) => importDmvWitness(undefined, paths[0]) },
                     involvedPersons: { label: 'DMV PDF', run: (paths) => importDmvInvolvedPerson(undefined, paths[0]) },
-                    rmsImport: { label: 'RMS report PDFs', multiple: true, run: (paths) => handleRmsImport(paths) },
+                    rmsImport: { label: 'RMS report PDFs', multiple: true, viaTabButton: true,
+                        what: 'PDF reports', run: (paths) => handleRmsImport(paths) },
+                    cyberTips: { label: 'CyberTip PDF or ZIP', multiple: true, viaTabButton: true,
+                        exts: /\.(pdf|zip)$/i, what: 'CyberTip PDFs or ZIPs', run: (paths) => importCyberTipPdf(paths) },
                 };
-                const getTarget = () => TAB_ROUTERS[currentTab];
+                // { tabId, router } for the drag/drop event, or null.
+                const getTarget = (e) => {
+                    const btn = e && e.target && e.target.closest && e.target.closest('.tab-button[data-tab]');
+                    const btnTab = btn && btn.getAttribute('data-tab');
+                    if (btnTab && TAB_ROUTERS[btnTab] && TAB_ROUTERS[btnTab].viaTabButton) return { tabId: btnTab, router: TAB_ROUTERS[btnTab] };
+                    // Another tab's button that takes no drops: not the current tab's file.
+                    if (btnTab && btnTab !== currentTab) return null;
+                    return TAB_ROUTERS[currentTab] ? { tabId: currentTab, router: TAB_ROUTERS[currentTab] } : null;
+                };
 
                 const overlay = document.createElement('div');
                 overlay.id = 'dmvDropOverlay';
@@ -40269,41 +40282,46 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     if (fileItems.length && fileItems.every(it => /^image\//i.test(it.type || ''))) return false;
                     return fileItems.length > 0;
                 };
-                const showOverlay = () => {
-                    const t = getTarget();
+                const showOverlay = (t) => {
                     if (!t) return;
                     const txt = document.getElementById('dmvDropOverlayText');
-                    if (txt) txt.textContent = `📄 Drop ${t.label} to import`;
-                    overlay.style.display = 'block';
+                    const want = `📄 Drop ${t.router.label} to import`;
+                    if (txt && txt.textContent !== want) txt.textContent = want;
+                    if (overlay.style.display !== 'block') overlay.style.display = 'block';
                 };
                 const hideOverlay = () => { overlay.style.display = 'none'; };
 
                 window.addEventListener('dragenter', (e) => {
                     if (!isPdfDrag(e)) return;
-                    if (!getTarget()) return;
+                    const t = getTarget(e);
+                    if (!t) return;
                     depth++;
-                    showOverlay();
+                    showOverlay(t);
                 });
                 window.addEventListener('dragover', (e) => {
-                    if (!getTarget()) return;
+                    const t = getTarget(e);
+                    if (!t) return;
                     if (!isPdfDrag(e)) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'copy';
+                    showOverlay(t);
                 });
                 window.addEventListener('dragleave', () => {
                     depth = Math.max(0, depth - 1);
                     if (depth === 0) hideOverlay();
                 });
                 window.addEventListener('drop', (e) => {
-                    const router = getTarget();
+                    const t = getTarget(e);
                     depth = 0;
                     hideOverlay();
-                    if (!router) return;
+                    if (!t) return;
+                    const router = t.router;
                     e.preventDefault();
                     const files = Array.from(e.dataTransfer.files || []);
-                    const pdfs = files.filter(f => /\.pdf$/i.test(f.name));
+                    const fits = router.exts || /\.pdf$/i;
+                    const pdfs = files.filter(f => fits.test(f.name));
                     if (!pdfs.length) {
-                        if (typeof showToast === 'function') showToast(`Drop a PDF file to import ${router.multiple ? 'RMS reports' : 'DMV data'}`, 'warning');
+                        if (typeof showToast === 'function') showToast(router.what ? `Drop ${router.what} to import them here` : 'Drop a PDF file to import DMV data', 'warning');
                         return;
                     }
                     const pathOf = (f) => f.path || (window.electronAPI && window.electronAPI.getPathForFile && window.electronAPI.getPathForFile(f)) || '';
@@ -40314,8 +40332,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                     }
                     const skipped = files.length - pdfs.length;
                     if (router.multiple && skipped > 0 && typeof showToast === 'function') {
-                        showToast(`${skipped} file${skipped !== 1 ? 's were' : ' was'} skipped — only PDF reports can be imported here`, 'warning');
+                        showToast(`${skipped} file${skipped !== 1 ? 's were' : ' was'} skipped — only ${router.what} can be imported here`, 'warning');
                     }
+                    // Dropped on another module's tab button: open that tab
+                    // first so the import lands (and shows) where expected.
+                    if (t.tabId !== currentTab && typeof renderTabContent === 'function') renderTabContent(t.tabId);
                     router.run(paths);
                 });
             })();
@@ -47735,13 +47756,15 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             localStorage.setItem(`cyberTips_${currentCase.id}`, JSON.stringify(data));
         }
 
-        async function importCyberTipPdf() {
+        // droppedPaths: PDFs / ZIPs dragged onto the Cyber Tips tab (global
+        // drop zone); otherwise the file picker is shown.
+        async function importCyberTipPdf(droppedPaths) {
             try {
                 // The ICAC Data System sends each CyberTip as a ZIP, so the
                 // picker takes a PDF or a ZIP. The older PDF-only picker is the
                 // fallback for a preload that predates it.
                 const pick = window.electronAPI.selectCybertipFiles || window.electronAPI.selectRmsFiles;
-                const filePaths = await pick();
+                const filePaths = (Array.isArray(droppedPaths) && droppedPaths.length) ? droppedPaths : await pick();
                 if (!filePaths || filePaths.length === 0) return;
                 await _importCyberTipFiles(filePaths.map(p => ({ path: p })));
             } catch (err) {
@@ -48037,6 +48060,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                             Find in Evidence
                         </button>
                         </div>
+                        <p class="text-xs text-gray-500 mt-3">or drag and drop the PDF or ZIP anywhere on this tab</p>
                     </div>
                 </div>`;
             }
@@ -48057,7 +48081,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z"/></svg>
                         Find in Evidence
                     </button>
-                    <button onclick="importCyberTipPdf()" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 text-viper-orange rounded-lg border border-viper-orange/50 flex items-center gap-2 transition-colors">
+                    <button onclick="importCyberTipPdf()" title="Or drag and drop CyberTip PDFs or ZIPs onto this tab" class="px-4 py-2 bg-viper-orange/20 hover:bg-viper-orange/30 text-viper-orange rounded-lg border border-viper-orange/50 flex items-center gap-2 transition-colors">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"/></svg>
                         Import More
                     </button>

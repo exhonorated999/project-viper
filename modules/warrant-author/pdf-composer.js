@@ -665,8 +665,13 @@
     TEXT_X: 96,
   });
 
+  // Font face for the TX layout. Other layouts that reuse it (AZ) swap the
+  // face for the duration of one composePdf call via meta.txStyle.pdfFont.
+  let _txFace = 'times';
+  const TX_DEFAULT_MARGIN = MARGIN;
+
   function _txFont(doc, size, bold) {
-    doc.setFont('times', bold ? 'bold' : 'normal');
+    doc.setFont(_txFace, bold ? 'bold' : 'normal');
     doc.setFontSize(size);
   }
 
@@ -723,9 +728,16 @@
     return { lines, spaceW };
   }
 
-  function _flowTx(doc, blocks) {
+  // `style` (meta.txStyle) may override the margins: {margin, top, bottom}
+  // in points. Without it the geometry is exactly the Texas one.
+  function _flowTx(doc, blocks, style) {
+    const st = style || {};
+    const MARGIN = st.margin > 0 ? st.margin : TX_DEFAULT_MARGIN;
+    const CONTENT_W = PAGE_W - MARGIN * 2;
+    const TOP = st.top > 0 ? st.top : TX.TOP;
+    const BOTTOM = st.bottom > 0 ? PAGE_H - st.bottom : TX.BOTTOM;
     let pageIdx = 1;
-    let y = TX.TOP;
+    let y = TOP;
     let dirty = false;          // anything drawn on the current page?
     let pendingGap = 0;
     const sections = [{ start: 1, end: 1 }];
@@ -741,16 +753,16 @@
       doc.rect(MARGIN - TX.BOX_OUT, box.top, CONTENT_W + TX.BOX_OUT * 2, Math.max(4, bottom - box.top));
     }
     function newPage() {
-      if (box) drawBoxFrame(Math.min(TX.BOTTOM, y) + TX.BOX_PAD);
+      if (box) drawBoxFrame(Math.min(BOTTOM, y) + TX.BOX_PAD);
       doc.addPage();
       pageIdx += 1;
       sections[sections.length - 1].end = pageIdx;
-      y = TX.TOP;
+      y = TOP;
       dirty = false;
       pendingGap = 0;
       if (box) { box.top = y; y += TX.BOX_PAD; }
     }
-    function room(h) { if (y + h > TX.BOTTOM - (box ? TX.BOX_PAD : 0)) newPage(); }
+    function room(h) { if (y + h > BOTTOM - (box ? TX.BOX_PAD : 0)) newPage(); }
     function gap() {
       if (dirty && pendingGap) y += pendingGap;
       pendingGap = 0;
@@ -767,6 +779,7 @@
       if (opts.justify && !L.last && gaps > 0 && slack > 0 && slack < avail * 0.35) gapW = spaceW + slack / gaps;
       let cx = x + L.indent;
       if (opts.align === 'center') cx = x + (width - L.width) / 2;
+      else if (opts.align === 'right') cx = x + width - L.width;
       L.toks.forEach((t, i) => {
         if (i && !t.glue) cx += gapW;
         _txFont(doc, size, t.bold);
@@ -779,7 +792,8 @@
       const size = b.size || 10;
       const lh = size * TX.LH;
       const segs = _safeText(b.text).split(/\r?\n/);
-      const col = inner();
+      let col = inner();
+      if (b.indent > 0) col = { x: col.x + b.indent, w: col.w - b.indent };
       const laid = [];
       for (const seg of segs) {
         if (!seg.trim()) { laid.push(null); continue; }
@@ -789,7 +803,7 @@
       }
       // Short paragraphs stay together; longer ones keep ≥2 lines per side.
       const total = laid.length * lh;
-      const limit = TX.BOTTOM - (box ? TX.BOX_PAD : 0);
+      const limit = BOTTOM - (box ? TX.BOX_PAD : 0);
       if (dirty && y + total > limit) {
         const fit = Math.floor((limit - y) / lh);
         if (laid.length <= 3 || fit < 2 || laid.length - fit < 2) newPage();
@@ -829,6 +843,40 @@
           dirty = true;
         });
       }
+    }
+
+    // ☒ / ☐ item: a square at the item indent, text hanging after it.
+    function drawCheckbox(b) {
+      const size = b.size || 10;
+      const lh = size * TX.LH;
+      const col = inner();
+      const bx = col.x + (b.indent || 0);
+      const tx = bx + 22;
+      const w = col.x + col.w - tx;
+      const laid = [];
+      _safeText(b.text).split(/\r?\n/).filter(s => s.trim()).forEach((seg) => {
+        const { lines } = _txLayout(doc, _txTokens(_txRuns(seg, b.rich, b.bold)), size, w, 0);
+        lines.forEach(L => laid.push(L));
+      });
+      if (!laid.length) laid.push({ toks: [], width: 0, indent: 0, last: true });
+      if (laid.length <= 3) room(laid.length * lh); else room(2 * lh);
+      laid.forEach((L, i) => {
+        room(lh);
+        const base = y + size * 0.85;
+        if (i === 0) {
+          const s = size * 0.8;
+          const top = base - s + size * 0.05;
+          doc.setLineWidth(0.6);
+          doc.rect(bx, top, s, s);
+          if (b.checked) {
+            doc.line(bx + 1.5, top + 1.5, bx + s - 1.5, top + s - 1.5);
+            doc.line(bx + s - 1.5, top + 1.5, bx + 1.5, top + s - 1.5);
+          }
+        }
+        drawLine(L, tx, base, w, size, {});
+        y += lh;
+        dirty = true;
+      });
     }
 
     function drawCaption(b) {
@@ -878,7 +926,7 @@
       const right = Array.isArray(b.right) ? b.right : [];
       const rows = Math.max(left.length, right.length);
       const space = b.space || 0;
-      if (y + space + rows * lh > TX.BOTTOM) newPage();
+      if (y + space + rows * lh > BOTTOM) newPage();
       const y0 = y + space;
       const ruleW = b.ruleW || 200;
       const drawCol = (entries, x) => {
@@ -902,10 +950,10 @@
 
     function drawImage(b) {
       if (!b || !b.dataUrl) return;
-      const maxW = CONTENT_W, maxH = TX.BOTTOM - TX.TOP - 8;
+      const maxW = CONTENT_W, maxH = BOTTOM - TOP - 8;
       let w = maxW, h = maxW * 0.75;
       if (b.w > 0 && b.h > 0) { h = w * (b.h / b.w); if (h > maxH) { h = maxH; w = h * (b.w / b.h); } }
-      if (y + h > TX.BOTTOM) newPage();
+      if (y + h > BOTTOM) newPage();
       try {
         doc.addImage(b.dataUrl, /png/i.test(b.mime || '') ? 'PNG' : 'JPEG', MARGIN + (CONTENT_W - w) / 2, y, w, h, undefined, 'FAST');
         y += h + 8;
@@ -959,6 +1007,7 @@
         case 'heading-1': drawParagraph({ text: b.text, bold: true, size: 11 }); break;
         case 'paragraph': drawParagraph(b); break;
         case 'bullets': drawBullets(b); break;
+        case 'checkbox': drawCheckbox(b); break;
         case 'sig-columns': drawSigColumns(b); break;
         case 'exhibit-image': drawImage(b); break;
         default:
@@ -1015,9 +1064,15 @@
     }
 
     if (meta.layout === 'tx') {
-      const { pageCount: txPages, sections } = _flowTx(doc, blocks);
-      _stampTxHeaders(doc, sections, runningHeader);
-      return { arrayBuffer: doc.output('arraybuffer'), blob: doc.output('blob'), pageCount: txPages, sections };
+      const txStyle = meta.txStyle || null;
+      _txFace = (txStyle && txStyle.pdfFont) || 'times';
+      try {
+        const { pageCount: txPages, sections } = _flowTx(doc, blocks, txStyle);
+        if (!(meta.runningHeader && meta.runningHeader.enabled === false)) _stampTxHeaders(doc, sections, runningHeader);
+        return { arrayBuffer: doc.output('arraybuffer'), blob: doc.output('blob'), pageCount: txPages, sections };
+      } finally {
+        _txFace = 'times';
+      }
     }
 
     // When a CA running header is enabled, only push content start down if

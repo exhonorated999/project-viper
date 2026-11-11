@@ -1719,6 +1719,202 @@
     return blocks;
   }
 
+  // ─── AZ Search Warrant + Affidavit (ARS 13-3911 et seq.) ─────────────
+  // Rendered by the same flexible layout engine as Texas (meta.layout
+  // 'tx'), with meta.txStyle switching the face (Verdana in Word,
+  // Helvetica in the PDF), 0.5" margins on every side and no running
+  // header. Adds one primitive the TX documents never emit:
+  //   checkbox {checked, text, size, bold, rich, indent}
+  // and uses `indent` (whole-paragraph left indent, pt) on paragraphs.
+  //
+  // ONE WARRANT, MANY ADDENDUMS — same partition as Arkansas: the
+  // non-'ad-' blocks come from the FIRST compose (they already list every
+  // provider through ctx.addendums), then every provider's 'ad-' blocks.
+  const AZ_SIZE_BODY = 11;
+  const AZ_SIZE_LARGE = 12;
+  const AZ_SIZE_TITLE = 26;
+  const AZ_ITEM_INDENT = 18;
+  const AZ_STYLE = Object.freeze({
+    pdfFont: 'helvetica',
+    docxFont: 'Verdana',
+    margin: 36,
+    top: 36,
+    bottom: 36,
+  });
+
+  function _azPara(text, f, extra) {
+    const p = Object.assign({ kind: 'paragraph', text, size: f.large ? AZ_SIZE_LARGE : AZ_SIZE_BODY }, extra || {});
+    if (f.center) p.align = 'center';
+    if (f.bold) p.bold = true;
+    if (f.rich) p.rich = true;
+    if (f.tight) p.tight = true;
+    return p;
+  }
+
+  function _azChecks(items, extra) {
+    return (Array.isArray(items) ? items : []).map(it => Object.assign({
+      kind: 'checkbox',
+      checked: !!(it && it.checked),
+      text: _safe(it && it.text),
+      size: AZ_SIZE_BODY,
+    }, extra || {}));
+  }
+
+  function _mapAzBlock(rb) {
+    const out = [];
+    if (!rb || rb.omitted) return out;
+    const text = _safe(rb.text).trim();
+    const f = _txFlags(rb.format);
+    switch (rb.kind) {
+      case 'az-header':
+        if (rb.variant === 'affidavit') {
+          out.push({ kind: 'paragraph', text: _safe(rb.title), bold: true, align: 'center', size: AZ_SIZE_LARGE, tight: true });
+          out.push({ kind: 'paragraph', text: _safe(rb.countyLine), bold: true, align: 'center', size: AZ_SIZE_LARGE });
+        } else {
+          const top = [rb.agencyLine, rb.cityLine].map(_safe).filter(s => s.trim());
+          if (top.length) out.push({ kind: 'paragraph', text: top.join('\n'), align: 'center', size: AZ_SIZE_LARGE, tight: true });
+          out.push({ kind: 'paragraph', text: _safe(rb.title), align: 'center', size: AZ_SIZE_TITLE, tight: true });
+          out.push({ kind: 'paragraph', text: _safe(rb.countyLine), align: 'center', size: AZ_SIZE_LARGE });
+        }
+        break;
+      case 'az-numbers':
+        out.push({ kind: 'paragraph', text: _safe(rb.warrantNo), align: 'right', size: AZ_SIZE_LARGE, tight: true });
+        out.push({ kind: 'paragraph', text: _safe(rb.drLine), size: AZ_SIZE_LARGE });
+        break;
+      case 'az-places': {
+        for (const c of _azChecks([rb.person, rb.premises])) out.push(c);
+        out.push({ kind: 'paragraph', text: _safe(rb.lead), size: AZ_SIZE_BODY, indent: AZ_ITEM_INDENT });
+        for (const p of (Array.isArray(rb.providers) ? rb.providers : [])) {
+          const lines = (Array.isArray(p.lines) ? p.lines : []).map(_safe);
+          out.push({ kind: 'paragraph', text: lines.join('\n'), bold: true, size: AZ_SIZE_BODY, indent: AZ_ITEM_INDENT, tight: true });
+          out.push({ kind: 'paragraph', text: `(${_safe(p.label)})`, size: AZ_SIZE_BODY, indent: AZ_ITEM_INDENT });
+        }
+        for (const c of _azChecks([rb.vehicle])) out.push(c);
+        break;
+      }
+      case 'az-items-ref':
+        if (_safe(rb.lead).trim()) out.push({ kind: 'paragraph', text: _safe(rb.lead), size: AZ_SIZE_BODY });
+        out.push({ kind: 'paragraph', text: _safe(rb.ref), bold: true, size: AZ_SIZE_BODY, indent: AZ_ITEM_INDENT });
+        break;
+      case 'az-grounds':
+      case 'az-service':
+      case 'az-informant': {
+        const lead = _safe(rb.lead).trim();
+        if (lead) out.push({ kind: 'paragraph', text: lead, size: AZ_SIZE_BODY, bold: rb.kind === 'az-service' });
+        for (const c of _azChecks(rb.items)) out.push(c);
+        break;
+      }
+      case 'az-delivery':
+        out.push({ kind: 'paragraph', text: _safe(rb.lead), bold: true, size: AZ_SIZE_BODY });
+        out.push({ kind: 'paragraph', text: (Array.isArray(rb.lines) ? rb.lines : []).map(_safe).join('\n'), bold: true, size: AZ_SIZE_BODY, indent: AZ_ITEM_INDENT });
+        out.push({ kind: 'paragraph', text: _safe(rb.portal), bold: true, size: AZ_SIZE_BODY });
+        break;
+      case 'az-felony':
+        if (text) out.push({ kind: 'paragraph', text, bold: true, size: AZ_SIZE_BODY });
+        break;
+      case 'az-ndo':
+        if (text) out.push({ kind: 'paragraph', text, rich: true, size: AZ_SIZE_BODY });
+        break;
+      case 'az-affiant-signature':
+        out.push({
+          kind: 'sig-columns',
+          space: 24,
+          leftX: 0,
+          rightX: 288,
+          ruleW: 252,
+          left: [
+            { rule: true },
+            { text: _safe(rb.nameLine).trim() || '______________________________' },
+            { text: _safe(rb.agencyName).trim() || '______________________________' },
+          ],
+          right: [],
+        });
+        break;
+      case 'az-judge':
+        out.push({
+          kind: 'sig-columns',
+          space: 24,
+          rightX: 270,
+          ruleW: 270,
+          left: [],
+          right: [
+            { rule: true },
+            { text: _safe(rb.title) },
+            { text: _safe(rb.courtLine) },
+          ],
+        });
+        break;
+      case 'az-addendum-heading':
+        out.push({ kind: 'paragraph', text: _safe(rb.title), bold: true, align: 'center', size: AZ_SIZE_LARGE, tight: true });
+        if (_safe(rb.providerName).trim()) out.push({ kind: 'paragraph', text: _safe(rb.providerName), bold: true, align: 'center', size: AZ_SIZE_LARGE, tight: true });
+        out.push({ kind: 'paragraph', text: _safe(rb.ref), align: 'center', size: AZ_SIZE_BODY });
+        out.push({ kind: 'paragraph', text: _safe(rb.body), size: AZ_SIZE_BODY });
+        break;
+      case 'az-provider-block': {
+        const lines = (Array.isArray(rb.lines) ? rb.lines : []).map(_safe);
+        if (lines.length) out.push({ kind: 'paragraph', text: lines.join('\n'), bold: true, size: AZ_SIZE_BODY });
+        break;
+      }
+      case 'az-account':
+        out.push({ kind: 'paragraph', text: _safe(rb.lead), size: AZ_SIZE_BODY, tight: true });
+        out.push({ kind: 'paragraph', text: (Array.isArray(rb.lines) ? rb.lines : []).map(_safe).join('\n'), bold: true, size: AZ_SIZE_BODY });
+        break;
+      case 'az-records': {
+        out.push({ kind: 'paragraph', text: _safe(rb.lead), bold: true, size: AZ_SIZE_BODY });
+        const items = Array.isArray(rb.items) ? rb.items : [];
+        items.forEach((t, i) => {
+          out.push({ kind: 'paragraph', text: `${i + 1} \u2013 ${_safe(t)}`, size: AZ_SIZE_BODY, indent: AZ_ITEM_INDENT });
+        });
+        break;
+      }
+      case 'constant':
+      case 'verbatim-paragraph':
+      case 'az-paragraph':
+      case 'provider-slot-paragraph':
+      case 'optional-paragraph': {
+        const heading = _safe(rb.heading).trim();
+        if (heading) out.push({ kind: 'paragraph', text: heading, bold: true, size: AZ_SIZE_BODY, tight: !!text });
+        if (text) out.push(_azPara(text, f));
+        break;
+      }
+      case 'page-break':
+      case 'section-break':
+        out.push({ kind: rb.kind });
+        break;
+      default:
+        for (const m of _mapResolvedBlock(rb)) out.push(m);
+    }
+    return out;
+  }
+
+  function _buildAzEsp(draft, agency, caseInfo, addendumComposes) {
+    const blocks = [];
+    if (!Array.isArray(addendumComposes) || !addendumComposes.length) {
+      blocks.push({
+        kind: 'paragraph',
+        size: AZ_SIZE_BODY,
+        text: '[ No provider attached \u2014 add a provider addendum to render the AZ Search Warrant / Affidavit. ]',
+      });
+      return blocks;
+    }
+    const isAddendumBlock = rb => String((rb && rb.key) || '').startsWith(AR_ADDENDUM_KEY_PREFIX);
+    {
+      const composed = addendumComposes[0].compose || {};
+      for (const rb of (Array.isArray(composed.blocks) ? composed.blocks : [])) {
+        if (isAddendumBlock(rb)) continue;
+        for (const m of _mapAzBlock(rb)) blocks.push(m);
+      }
+    }
+    addendumComposes.forEach((ac) => {
+      const composed = ac.compose || {};
+      for (const rb of (Array.isArray(composed.blocks) ? composed.blocks : [])) {
+        if (!isAddendumBlock(rb)) continue;
+        for (const m of _mapAzBlock(rb)) blocks.push(m);
+      }
+    });
+    return blocks;
+  }
+
   /**
    * Top-level: build complete document block stream.
    */
@@ -1768,6 +1964,45 @@
       _safe(draft.template) === 'tx-multi-business-esp' ||
       _safe(draft.jurisdiction).toUpperCase() === 'TX'
     );
+    // Arizona — one Search Warrant + one Affidavit listing every provider,
+    // then one ADDENDUM per provider. Checked before VA for the same reason.
+    const isAz = (
+      _safe(draft.template) === 'az-multi-business-esp' ||
+      _safe(draft.jurisdiction).toUpperCase() === 'AZ'
+    );
+
+    // 0-AZ) Arizona ESP flow. Returns early; no cover, no disclaimer, no
+    //       generic addendum loop. Uses the TX layout engine with the AZ
+    //       style (Verdana / Helvetica, 0.5" margins, no running header).
+    if (isAz && !isResidential) {
+      for (const b of _buildAzEsp(draft, agency, caseInfo, addendumComposes)) blocks.push(b);
+      const allDanglingAz = [];
+      const seenAz = new Set();
+      addendumComposes.forEach((ac) => {
+        const cs = (ac.compose && Array.isArray(ac.compose.danglingSlots)) ? ac.compose.danglingSlots : [];
+        for (const d of cs) {
+          const k = `${ac.addendumId || ac.providerKey || '?'}/${d}`;
+          if (!seenAz.has(k)) { seenAz.add(k); allDanglingAz.push(k); }
+        }
+      });
+      return {
+        blocks,
+        meta: {
+          jurisdiction: 'AZ',
+          layout: 'tx',
+          txStyle: Object.assign({}, AZ_STYLE),
+          runningHeader: { enabled: false, lines: [] },
+          runningFooter: { enabled: false, none: true },
+        },
+        stats: {
+          addendums: addendumComposes.length,
+          totalBlocks: blocks.length,
+          danglingSlots: allDanglingAz,
+          pcAuthored: !!(pcNarrative && String(pcNarrative).trim().length > 0),
+          arizona: true,
+        },
+      };
+    }
 
     // 0-TX) Texas ESP flow. Returns early; no cover, no disclaimer (the
     //       document is filed as-is), no generic addendum loop.
@@ -2060,7 +2295,7 @@
 
   const api = Object.freeze({
     build,
-    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature, _buildCaStatementOfProbableCause, _buildVaEsp, _buildCoEsp, _buildArEsp, _buildTxEsp, _mapTxBlock },
+    _internals: { _mapResolvedBlock, _abc, _buildCover, _buildCaFacePage, _buildProbableCause, _buildAddendum, _buildSignature, _buildCaStatementOfProbableCause, _buildVaEsp, _buildCoEsp, _buildArEsp, _buildTxEsp, _mapTxBlock, _buildAzEsp, _mapAzBlock, AZ_STYLE },
   });
 
   if (typeof module !== 'undefined' && module.exports) {

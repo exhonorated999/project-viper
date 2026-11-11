@@ -1,0 +1,214 @@
+{
+  "id": "az-multi-business-esp",
+  "name": "Arizona Search Warrant + Affidavit (ESP, ARS 13-3911 et seq.)",
+  "jurisdiction": "AZ",
+  "version": 1,
+  "description": "Arizona Search Warrant followed by the Affidavit for a Search Warrant, for Electronic Service Providers. Modelled on an Arizona municipal police department's ESP search warrant exemplar (checkbox form: person / premises / vehicle, six grounds, daytime / nighttime service, regular information or informant form). Verdana 11pt, 0.5\" margins, no running header.\n\nONE WARRANT, MANY ADDENDUMS: the Search Warrant and the Affidavit are each emitted EXACTLY ONCE and list every provider (with its Arizona statutory agent when entered) under 'on the premise(s) known as'. The records to be produced live in one ADDENDUM per provider at the end of the document. The non-disclosure order is rolled into the warrant as an 18 U.S.C. 2705(b) paragraph (draft option, on by default, no time limit unless a period is picked).\n\nBLOCK KEY CONVENTION - LOAD BEARING: keys prefixed 'ad-' form the per-provider ADDENDUM section. block-builder._buildAzEsp() takes the document blocks from the FIRST composed provider only, then appends every provider's 'ad-' blocks in order. Paragraph 'format' is a space-separated list: bold, center, tight (no gap after), rich (inline **bold**), large (12pt).\n\nCity / county / court: City defaults from the agency profile address (draft override azCity); county from the agency profile (draft override arCounty); the judge line reads 'Of the <court>' from the draft Court Name or the agency Default Court Name. Offense: draft override azOffense, else the case offense description.",
+  "compatibleProviderTypes": [
+    "ESP",
+    "Phone",
+    "Internet",
+    "Financial",
+    "Other"
+  ],
+  "supportsMultipleProviders": true,
+  "blocks": [
+    {
+      "key": "w01-header",
+      "kind": "az-header",
+      "variant": "warrant"
+    },
+    {
+      "key": "w02-numbers",
+      "kind": "az-numbers",
+      "variant": "warrant"
+    },
+    {
+      "key": "w03-to",
+      "kind": "constant",
+      "format": "center large",
+      "text": "TO ANY PEACE OFFICER IN THE STATE OF ARIZONA:"
+    },
+    {
+      "key": "w04-proof",
+      "kind": "az-paragraph",
+      "text": "Proof by affidavit having been made this day to me by {{az.affiant}}, I am satisfied that there is probable cause to believe that:"
+    },
+    {
+      "key": "w05-places",
+      "kind": "az-places"
+    },
+    {
+      "key": "w06-concealed",
+      "kind": "az-items-ref",
+      "lead": "at the location(s) listed above, there is now being possessed or concealed certain property or things described as:"
+    },
+    {
+      "key": "w07-grounds",
+      "kind": "az-grounds",
+      "lead": "which property, persons or things"
+    },
+    {
+      "key": "w08-service",
+      "kind": "az-service"
+    },
+    {
+      "key": "w09-search",
+      "kind": "az-paragraph",
+      "text": "to make a search of the above named or described person(s), premises, and vehicles for the herein above described persons, property or things, and if you find the same or any part thereof, to retain such in your custody or in the custody of the {{az.agency}} as provided by ARS 13-3920."
+    },
+    {
+      "key": "w10-release",
+      "kind": "constant",
+      "text": "Pursuant to 13-3920, I hereby authorize release of any property seized which is no longer needed for criminal prosecution, to the person/s from whom it was seized or who is identified as the lawful owner, unless such property is contraband or otherwise prohibited."
+    },
+    {
+      "key": "w11-delivery",
+      "kind": "az-delivery"
+    },
+    {
+      "key": "w12-felony",
+      "kind": "az-felony",
+      "text": "This is a felony investigation. Warning another person of impending felony prosecution or suppressing physical evidence by concealment, alteration, or destruction in a felony investigation are each separate felonies. Notifying the user may jeopardize an ongoing investigation per 18 U.S.C. 2705(b)."
+    },
+    {
+      "key": "w13-ndo",
+      "kind": "az-ndo"
+    },
+    {
+      "key": "w14-return",
+      "kind": "constant",
+      "text": "Return this warrant to me within three (3) days of the date thereof, as directed by ARS 13-3918."
+    },
+    {
+      "key": "w15-given",
+      "kind": "constant",
+      "text": "Given under my hand and dated this ______ day of ____________________, 20____."
+    },
+    {
+      "key": "w16-judge",
+      "kind": "az-judge",
+      "variant": "warrant"
+    },
+    {
+      "key": "a01-page-break",
+      "kind": "page-break"
+    },
+    {
+      "key": "a02-header",
+      "kind": "az-header",
+      "variant": "affidavit"
+    },
+    {
+      "key": "a03-numbers",
+      "kind": "az-numbers",
+      "variant": "affidavit"
+    },
+    {
+      "key": "a04-oath",
+      "kind": "az-paragraph",
+      "format": "bold",
+      "text": "Your affiant, {{az.affiant}}, a Peace Officer in the State of Arizona, being first duly sworn, upon oath, deposes and says: that on or about {{az.offenseDate}}, in the City of {{az.city}}, County of {{az.county}}, State of Arizona, a violation of {{az.offense}} has been committed."
+    },
+    {
+      "key": "a05-pc-lead",
+      "kind": "constant",
+      "text": "THAT THE AFFIANT has probable cause to believe that:"
+    },
+    {
+      "key": "a06-places",
+      "kind": "az-places"
+    },
+    {
+      "key": "a07-concealed",
+      "kind": "constant",
+      "text": "at the location(s) listed above, there is now being possessed or concealed certain property, persons or things which"
+    },
+    {
+      "key": "a08-grounds",
+      "kind": "az-grounds",
+      "lead": ""
+    },
+    {
+      "key": "a09-described",
+      "kind": "az-items-ref",
+      "lead": "That said property, persons or things are described as follows:"
+    },
+    {
+      "key": "a10-form-title",
+      "kind": "constant",
+      "format": "center bold",
+      "text": "REGULAR INFORMATION OR INFORMANT FORM"
+    },
+    {
+      "key": "a11-facts-lead",
+      "kind": "constant",
+      "text": "That the following facts establish probable cause for believing that grounds for the issuance of a search warrant for the aforementioned property, persons or things exist:"
+    },
+    {
+      "key": "a12-informant",
+      "kind": "az-informant"
+    },
+    {
+      "key": "a13-background-head",
+      "kind": "constant",
+      "format": "bold tight",
+      "text": "Background:"
+    },
+    {
+      "key": "a14-background",
+      "kind": "verbatim-paragraph",
+      "text": "{{agency.trainingExperienceBoilerplate}}"
+    },
+    {
+      "key": "a15-facts-head",
+      "kind": "constant",
+      "format": "bold tight",
+      "text": "Case Facts:"
+    },
+    {
+      "key": "a16-probable-cause",
+      "kind": "verbatim-paragraph",
+      "text": "{{addendum.probableCause}}"
+    },
+    {
+      "key": "a17-wherefore",
+      "kind": "constant",
+      "text": "Wherefore affiant prays that a search warrant be issued commanding that an immediate search be made of the persons, premises and buildings, and vehicles described herein for the property, persons and things herein described, and that the same be retained in the custody of affiant or in custody of the agency which affiant represents and disposed of according to law, pursuant to A.R.S. 13-3920."
+    },
+    {
+      "key": "a18-affiant-signature",
+      "kind": "az-affiant-signature"
+    },
+    {
+      "key": "a19-sworn",
+      "kind": "constant",
+      "text": "SUBSCRIBED AND SWORN to before me this _____ day of ____________________, 20____."
+    },
+    {
+      "key": "a20-judge",
+      "kind": "az-judge",
+      "variant": "affidavit"
+    },
+    {
+      "key": "ad-01-page-break",
+      "kind": "page-break"
+    },
+    {
+      "key": "ad-02-heading",
+      "kind": "az-addendum-heading"
+    },
+    {
+      "key": "ad-03-provider-block",
+      "kind": "az-provider-block"
+    },
+    {
+      "key": "ad-04-account",
+      "kind": "az-account"
+    },
+    {
+      "key": "ad-05-records",
+      "kind": "az-records"
+    }
+  ]
+}

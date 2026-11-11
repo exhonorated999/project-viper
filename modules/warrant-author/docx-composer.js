@@ -19,7 +19,7 @@ const {
   PageBreak, PageOrientation, Header, Footer, PageNumber,
   TabStopType, TabStopPosition, BorderStyle, ImageRun,
   Table, TableRow, TableCell, WidthType, TableLayoutType, LineRuleType,
-  SectionType,
+  SectionType, CheckBox,
 } = docxLib;
 
 // Convert inches → twentieths-of-a-point (TWIPs) — Word's unit.
@@ -417,12 +417,18 @@ const TXD = Object.freeze({
 });
 const _TX_LINE = { style: BorderStyle.SINGLE, size: 5, color: '000000' };
 
+// Font + text-column width for the TX layout. Layouts that reuse it (AZ)
+// swap them for the duration of one _composeTxDocx call (the element tree
+// is built synchronously, so nothing else can observe the swap).
+let _txdFont = 'Times New Roman';
+let _txdContentTw = TXD.CONTENT_TW;
+
 function _txSz(b, dflt) { return Math.round(((b && b.size) || dflt || 10) * 2); }
 
 // "**bold** plain" → TextRuns (unbalanced markers fall back to plain).
 function _txRunsDocx(text, rich, bold, sizeHalf) {
   const s = _safe(text);
-  const mk = (t, bb) => new TextRun({ text: t, font: 'Times New Roman', size: sizeHalf, bold: !!bb });
+  const mk = (t, bb) => new TextRun({ text: t, font: _txdFont, size: sizeHalf, bold: !!bb });
   if (!rich || s.indexOf('**') === -1) return [mk(s, bold)];
   const parts = s.split('**');
   if (parts.length % 2 === 0) return [mk(s.replace(/\*\*/g, ''), bold)];
@@ -443,11 +449,15 @@ function _txParagraphs(b, beforeTw) {
               : (b.align === 'right') ? AlignmentType.RIGHT
               : AlignmentType.LEFT;
   const firstLine = (b.firstIndent | 0) ? Math.round((b.firstIndent | 0) * 20) : 0;
+  const left = (b.indent > 0) ? Math.round(b.indent * 20) : 0;
+  const ind = (firstLine || left)
+    ? Object.assign({}, firstLine ? { firstLine } : {}, left ? { left } : {})
+    : undefined;
   const segs = _safe(b.text).split(/\r?\n/);
   return segs.map((seg, i) => new Paragraph({
     children: seg.trim() ? _txRunsDocx(seg, b.rich, b.bold, sizeHalf) : [],
     alignment: align,
-    indent: firstLine ? { firstLine } : undefined,
+    indent: ind,
     keepLines: segs.length === 1 && seg.length < 320,
     keepNext: i < segs.length - 1,
     widowControl: true,
@@ -458,7 +468,7 @@ function _txParagraphs(b, beforeTw) {
 function _txTitle(b, beforeTw) {
   return new Paragraph({
     children: [new TextRun({
-      text: _safe(b.text), font: 'Times New Roman', size: _txSz(b, 11), bold: true,
+      text: _safe(b.text), font: _txdFont, size: _txSz(b, 11), bold: true,
       underline: b.underline ? {} : undefined,
     })],
     alignment: AlignmentType.CENTER,
@@ -475,10 +485,10 @@ function _txBullets(b, beforeTw, inBox) {
   const items = Array.isArray(b.items) ? b.items : [];
   return items.map((it, idx) => {
     const segs = _safe((it && it.text) || '').split(/\r?\n/).filter(s => s.trim());
-    const kids = [new TextRun({ text: '\u2022\t', font: 'Times New Roman', size: sizeHalf })];
+    const kids = [new TextRun({ text: '\u2022\t', font: _txdFont, size: sizeHalf })];
     segs.forEach((seg, i) => {
       const runs = _txRunsDocx(seg, it && it.rich, it && it.bold, sizeHalf);
-      if (i > 0) kids.push(new TextRun({ text: '', break: 1, font: 'Times New Roman', size: sizeHalf }));
+      if (i > 0) kids.push(new TextRun({ text: '', break: 1, font: _txdFont, size: sizeHalf }));
       runs.forEach(r => kids.push(r));
     });
     return new Paragraph({
@@ -498,9 +508,9 @@ function _txCaption(b) {
   const sizeHalf = _txSz(b, 11);
   const col1 = Math.round((b.sepCol || 216) * 20);
   const col2 = Math.max(200, Math.round(((b.rightCol || 256) - (b.sepCol || 216)) * 20));
-  const col3 = Math.max(1440, TXD.CONTENT_TW - col1 - col2);
+  const col3 = Math.max(1440, _txdContentTw - col1 - col2);
   const cp = (t) => new Paragraph({
-    children: t ? [new TextRun({ text: _safe(t), font: 'Times New Roman', size: sizeHalf, bold: !!b.bold })] : [],
+    children: t ? [new TextRun({ text: _safe(t), font: _txdFont, size: sizeHalf, bold: !!b.bold })] : [],
     keepNext: true,
     spacing: { before: 0, after: 0, line: 240 },
   });
@@ -528,7 +538,7 @@ function _txSigColumns(b) {
   const n = Math.max(left.length, right.length);
   if (!n) return [];
   const col1 = Math.round((b.rightX || 252) * 20);
-  const col2 = TXD.CONTENT_TW - col1;
+  const col2 = _txdContentTw - col1;
   const ruleTw = Math.round((b.ruleW || 200) * 20);
   const ep = (e, colTw, last) => {
     const base = { keepNext: !last, keepLines: true, spacing: { before: 0, after: 0, line: 240 } };
@@ -541,7 +551,7 @@ function _txSigColumns(b) {
       }, base));
     }
     return new Paragraph(Object.assign({
-      children: [new TextRun({ text: _safe(e.text), font: 'Times New Roman', size: sizeHalf, bold: !!e.bold })],
+      children: [new TextRun({ text: _safe(e.text), font: _txdFont, size: sizeHalf, bold: !!e.bold })],
       indent: e.indent ? { left: Math.round(e.indent * 20) } : undefined,
     }, base));
   };
@@ -568,10 +578,38 @@ function _txSigColumns(b) {
   return out;
 }
 
+// ☒ / ☐ item → a clickable Word checkbox (content control) + tab, with
+// the text hanging 22pt after the box (same geometry as the PDF).
+function _txCheckbox(b, beforeTw) {
+  const sizeHalf = _txSz(b, 10);
+  const leftPt = (b.indent > 0 ? b.indent : 0) + 22;
+  const leftTw = Math.round(leftPt * 20);
+  const kids = [];
+  try {
+    kids.push(new CheckBox({ checked: !!b.checked }));
+  } catch (_e) {
+    kids.push(new TextRun({ text: b.checked ? '\u2612' : '\u2610', font: 'MS Gothic', size: sizeHalf }));
+  }
+  kids.push(new TextRun({ text: '\t', font: _txdFont, size: sizeHalf }));
+  const segs = _safe(b.text).split(/\r?\n/).filter(s => s.trim());
+  segs.forEach((seg, i) => {
+    if (i > 0) kids.push(new TextRun({ text: '', break: 1, font: _txdFont, size: sizeHalf }));
+    _txRunsDocx(seg, b.rich, b.bold, sizeHalf).forEach(r => kids.push(r));
+  });
+  return [new Paragraph({
+    children: kids,
+    indent: { left: leftTw, hanging: Math.round(22 * 20) },
+    tabStops: [{ type: TabStopType.LEFT, position: leftTw }],
+    keepLines: segs.join(' ').length < 320,
+    widowControl: true,
+    spacing: { before: beforeTw || 0, after: 0, line: 240 },
+  })];
+}
+
 function _txBox(children) {
   const pad = Math.round(TXD.BOX_PAD * 20);
   const out = Math.round(TXD.BOX_OUT * 20);
-  const w = TXD.CONTENT_TW + out * 2;
+  const w = _txdContentTw + out * 2;
   return new Table({
     layout: TableLayoutType.FIXED,
     width: { size: w, type: WidthType.DXA },
@@ -652,6 +690,7 @@ function _txSectionChildren(blocks) {
         break;
       case 'paragraph': els = _txParagraphs(b, beforeTw()); break;
       case 'bullets':   els = _txBullets(b, beforeTw(), !!box); break;
+      case 'checkbox':  els = _txCheckbox(b, beforeTw()); break;
       case 'exhibit-image': els = _exhibitImage(b); break;
       default:
         els = b.text ? _txParagraphs({ text: b.text, size: 10 }, beforeTw()) : [];
@@ -670,6 +709,15 @@ async function _composeTxDocx({ blockStream, draft }) {
   const meta = blockStream.meta || {};
   const rh = meta.runningHeader || {};
   const leftText = _safe(rh.left || 'SEARCH WARRANT NO:');
+  // meta.txStyle (AZ): {docxFont, margin, top, bottom} in points.
+  const st = meta.txStyle || {};
+  const font = st.docxFont || 'Times New Roman';
+  const sideTw = st.margin > 0 ? Math.round(st.margin * 20) : 1440;
+  const topTw = st.top > 0 ? Math.round(st.top * 20) : 720;
+  const bottomTw = st.bottom > 0 ? Math.round(st.bottom * 20) : 720;
+  const contentTw = st.margin > 0 ? (_in(8.5) - sideTw * 2) : TXD.CONTENT_TW;
+  const withHeader = !(meta.runningHeader && meta.runningHeader.enabled === false);
+  const bodyHalf = st.docxFont ? 22 : 20;
 
   // Split on section-break; drop empty sections.
   const groups = [[]];
@@ -679,7 +727,7 @@ async function _composeTxDocx({ blockStream, draft }) {
   }
   if (!groups[groups.length - 1].length && groups.length > 1) groups.pop();
 
-  const hdrRun = (o) => new TextRun(Object.assign({ font: 'Times New Roman', size: 22 }, o));
+  const hdrRun = (o) => new TextRun(Object.assign({ font, size: 22 }, o));
   const makeHeader = () => new Header({
     children: [new Paragraph({
       children: [
@@ -690,31 +738,42 @@ async function _composeTxDocx({ blockStream, draft }) {
         hdrRun({ children: [PageNumber.TOTAL_PAGES_IN_SECTION] }),
       ],
       indent: { left: Math.round(TXD.HDR_LEFT * 20) },
-      tabStops: [{ type: TabStopType.RIGHT, position: TXD.CONTENT_TW }],
+      tabStops: [{ type: TabStopType.RIGHT, position: contentTw }],
       spacing: { before: 0, after: 240, line: 240 },
     })],
   });
   const makeFooter = () => new Footer({ children: [new Paragraph({ children: [] })] });
 
-  const sections = groups.map((blocks, i) => ({
-    properties: {
-      type: i === 0 ? undefined : SectionType.NEXT_PAGE,
-      page: {
-        size: { width: _in(8.5), height: _in(11), orientation: PageOrientation.PORTRAIT },
-        margin: { top: 720, bottom: 720, left: 1440, right: 1440, header: 720, footer: 720 },
-        pageNumbers: { start: 1 },
+  let sections;
+  _txdFont = font;
+  _txdContentTw = contentTw;
+  try {
+    sections = groups.map((blocks, i) => ({
+      properties: {
+        type: i === 0 ? undefined : SectionType.NEXT_PAGE,
+        page: {
+          size: { width: _in(8.5), height: _in(11), orientation: PageOrientation.PORTRAIT },
+          margin: {
+            top: topTw, bottom: bottomTw, left: sideTw, right: sideTw,
+            header: withHeader ? 720 : Math.min(720, topTw), footer: withHeader ? 720 : Math.min(720, bottomTw),
+          },
+          pageNumbers: { start: 1 },
+        },
       },
-    },
-    headers: { default: makeHeader() },
-    footers: { default: makeFooter() },
-    children: _txSectionChildren(blocks),
-  }));
+      headers: withHeader ? { default: makeHeader() } : undefined,
+      footers: { default: makeFooter() },
+      children: _txSectionChildren(blocks),
+    }));
+  } finally {
+    _txdFont = 'Times New Roman';
+    _txdContentTw = TXD.CONTENT_TW;
+  }
 
   const doc = new Document({
     creator: 'Affiant',
     title: `Search Warrant Draft ${(draft && draft.id) || ''}`,
-    description: 'Warrant for Electronic Customer Data and Affidavit',
-    styles: { default: { document: { run: { font: 'Times New Roman', size: 20 } } } },
+    description: st.docxFont ? 'Search Warrant and Affidavit' : 'Warrant for Electronic Customer Data and Affidavit',
+    styles: { default: { document: { run: { font, size: bodyHalf } } } },
     sections,
   });
   return Packer.toBuffer(doc);

@@ -1026,6 +1026,431 @@ function _resolveTxSignatures(block, ctx) {
   };
 }
 
+// ─── AZ-SPECIFIC RESOLVERS ─────────────────────────────────────────────────
+// Arizona Search Warrant + Affidavit for a Search Warrant (ARS 13-3911 et
+// seq.), modelled on an Arizona municipal department's ESP exemplar. One
+// warrant and one affidavit list EVERY provider (ctx.addendums); the
+// records live in one 'ad-' ADDENDUM per provider (see _buildAzEsp).
+// Nothing agency-specific is hard-coded: agency, city, county, court and
+// affiant all come from the agency profile or the draft.
+//
+// Draft options (all optional; defaults mirror the exemplar):
+//   azPremises (default on), azPerson + azPersonDesc, azVehicle + azVehicleDesc
+//   azGrounds {stolen, means, intent, concealing, evidence, warrant}
+//             (default means + evidence), azConcealingPerson
+//   azDaytime (default on), azNighttime
+//   azInformant 'learned' (default) | 'informant'
+//   azFelony (default on), azNdo (default on), azNdoDays '' | 90 | 180 | 365
+//   azOffense (else case offense), azCity (else city of the agency address),
+//   arCounty (else agency county), courtName (else agency defaultCourtName)
+
+const AZ_BLANK = '__________';
+
+const AZ_GROUND_DEFS = Object.freeze([
+  { key: 'stolen',     text: 'were stolen or embezzled' },
+  { key: 'means',      text: 'were used as a means for committing a public offense, that offense being {offense}' },
+  { key: 'intent',     text: 'is (are) being possessed with the intent to use as a means of committing a public offense' },
+  { key: 'concealing', text: 'is (are) in possession of {person} to whom it was delivered for the purpose of concealing it or preventing it from being discovered' },
+  { key: 'evidence',   text: 'constitute(s) any evidence tending to show that a public offense has been committed, that offense being {offense}' },
+  { key: 'warrant',    text: 'such person is the subject of an outstanding arrest warrant' },
+]);
+const AZ_GROUND_DEFAULTS = Object.freeze({ means: true, evidence: true });
+
+const AZ_NDO_PERIODS = Object.freeze({
+  '90':  'ninety (90) days',
+  '180': 'one hundred eighty (180) days',
+  '365': 'one (1) year',
+});
+
+const AZ_TARGET_LABELS = Object.freeze({
+  'esp-user-id': 'Account ID',
+  'user-id': 'Account ID',
+  'uid': 'Account ID',
+  'account-id': 'Account ID',
+  'email': 'Email',
+  'phone': 'Phone Number',
+  'username': 'Username',
+  'handle': 'Username',
+  'screen-name': 'Screen Name',
+  'ip': 'IP Address',
+  'name': 'Name',
+});
+
+function _azS(v) { return String(v == null ? '' : v).trim(); }
+
+function _azAffiantLine(agency) {
+  const a = agency || {};
+  const who = [a.affiantRank, a.affiantName].map(_azS).filter(Boolean).join(' ');
+  const badge = _azS(a.affiantBadge);
+  return who + (who && badge ? ` # ${badge}` : '');
+}
+
+function _azCity(ctx) {
+  const draft = ctx.draft || {};
+  const agency = ctx.agency || {};
+  return _azS(draft.azCity) || _splitUsAddress(agency.agencyAddress).city;
+}
+
+function _azCounty(ctx) {
+  const draft = ctx.draft || {};
+  return _azS(draft.arCounty) || _arCounty(ctx);
+}
+
+function _azOffense(ctx) {
+  const draft = ctx.draft || {};
+  const cs = ctx.case || {};
+  return _azS(draft.azOffense) || _azS(cs.offenseDescription);
+}
+
+function _azCourt(ctx) {
+  const draft = ctx.draft || {};
+  const agency = ctx.agency || {};
+  return _azS(draft.courtName) || _azS(agency.defaultCourtName);
+}
+
+// Every {{az.*}} slot. Empty values print as a blank line on the form;
+// the REQUIRED ones are also reported as dangling so the issues list and
+// the validator flag them.
+function _azValues(ctx) {
+  const agency = ctx.agency || {};
+  const cs = ctx.case || {};
+  const draft = ctx.draft || {};
+  return {
+    affiant: _azAffiantLine(agency),
+    agency: _azS(agency.agencyName),
+    city: _azCity(ctx),
+    county: _azCounty(ctx),
+    offense: _azOffense(ctx),
+    offenseDate: _txLongDate(_azS(cs.offenseDate)),
+    court: _azCourt(ctx),
+    caseNumber: _azS(cs.number) || _azS(draft.caseRef),
+  };
+}
+const AZ_REQUIRED = Object.freeze({
+  affiant: 'agency.affiantName',
+  agency: 'agency.agencyName',
+  county: 'court.county',
+  offense: 'case.offenseDescription',
+});
+
+// Substitutes {{az.*}} first (blank line when empty), then the ordinary
+// slots.
+function _azSubstitute(text, ctx) {
+  const vals = _azValues(ctx);
+  const dangling = [];
+  const pre = String(text || '').replace(/\{\{\s*az\.(\w+)\s*\}\}/g, (m, k) => {
+    const v = vals[k];
+    if (v) return v;
+    if (AZ_REQUIRED[k]) dangling.push(AZ_REQUIRED[k]);
+    return AZ_BLANK;
+  });
+  const res = substituteSlots(pre, ctx);
+  return { text: res.text, danglingSlots: dangling.concat(res.danglingSlots) };
+}
+
+// Provider block lines: name / street / city, ST zip / Statutory Agent: …
+function _azProviderLines(p) {
+  const lines = [];
+  if (p.name) lines.push(p.name);
+  const parts = _splitUsAddress(p.address);
+  if (parts.street) lines.push(parts.street);
+  if (parts.city) lines.push(`${parts.city}, ${parts.state} ${parts.zip}`.trim());
+  const agent = String(p.statutoryAgent || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (agent.length) {
+    lines.push('Statutory Agent: ' + agent[0]);
+    for (const l of agent.slice(1)) lines.push(l);
+  }
+  return lines;
+}
+
+// Full provider list (with address + Arizona statutory agent) for the
+// warrant / affidavit. ctx.addendums carries it from the UI; a bare ctx
+// degrades to the provider being composed.
+function _azProviders(ctx) {
+  const raw = Array.isArray(ctx.addendums) ? ctx.addendums : null;
+  if (raw && raw.length) {
+    return raw.map((a, i) => ({
+      pageLabel: _azS(a && a.pageLabel) || _arFallbackLabel(i),
+      name: _azS(a && (a.providerName || a.provider || a.providerKey)),
+      address: _azS(a && a.address),
+      statutoryAgent: String((a && a.azStatutoryAgent) || ''),
+    })).filter(e => e.name);
+  }
+  const provider = ctx.provider || {};
+  const ad = ctx.addendum || {};
+  const name = _azS(provider.legalEntity || provider.name);
+  if (!name) return [];
+  return [{
+    pageLabel: _azS(ad.pageLabel) || 'A',
+    name,
+    address: _azS(provider.address),
+    statutoryAgent: String(ad.azStatutoryAgent || ''),
+  }];
+}
+
+function _azJoin(list) {
+  if (list.length <= 1) return list.join('');
+  if (list.length === 2) return list.join(' and ');
+  return list.slice(0, -1).join(', ') + ', and ' + list[list.length - 1];
+}
+
+function _azBase(block, extra) {
+  return Object.assign({ key: block.key, kind: block.kind, heading: '', text: '', danglingSlots: [] }, extra);
+}
+
+function _resolveAzParagraph(block, ctx) {
+  const res = _azSubstitute(block.text || '', ctx);
+  return _azBase(block, { text: res.text, danglingSlots: res.danglingSlots });
+}
+
+function _resolveAzHeader(block, ctx) {
+  const v = _azValues(ctx);
+  const variant = block.variant === 'affidavit' ? 'affidavit' : 'warrant';
+  const C = (v.county || AZ_BLANK).toUpperCase();
+  const dangling = v.county ? [] : ['court.county'];
+  let agencyLine = '';
+  let cityLine = '';
+  if (variant === 'warrant') {
+    // "Example City Police Department" + city "Example City" →
+    // POLICE DEPARTMENT / CITY OF EXAMPLE CITY, ARIZONA (the exemplar).
+    // Any other agency name prints in full with no city line.
+    const name = v.agency.toUpperCase();
+    const city = v.city.toUpperCase();
+    if (name && city && name.startsWith(city + ' ') && name.length > city.length + 1) {
+      agencyLine = name.slice(city.length + 1).trim();
+      cityLine = `CITY OF ${city}, ARIZONA`;
+    } else {
+      agencyLine = name;
+    }
+    if (!name) dangling.push('agency.agencyName');
+  }
+  return _azBase(block, {
+    variant,
+    agencyLine,
+    cityLine,
+    title: variant === 'affidavit' ? 'AFFIDAVIT FOR A SEARCH WARRANT' : 'SEARCH WARRANT',
+    countyLine: `COUNTY OF ${C}, STATE OF ARIZONA`,
+    text: [agencyLine, cityLine, variant === 'affidavit' ? 'AFFIDAVIT FOR A SEARCH WARRANT' : 'SEARCH WARRANT', `COUNTY OF ${C}, STATE OF ARIZONA`].filter(Boolean).join('\n'),
+    danglingSlots: dangling,
+  });
+}
+
+function _resolveAzNumbers(block, ctx) {
+  const v = _azValues(ctx);
+  const draft = ctx.draft || {};
+  const sw = _azS(draft.swNumber);
+  const variant = block.variant === 'affidavit' ? 'affidavit' : 'warrant';
+  const warrantNo = `${variant === 'affidavit' ? 'NO.' : 'WARRANT NO.'} ${sw || '____________________'}`;
+  const drLine = `DR # ${v.caseNumber || '____________________'}`;
+  return _azBase(block, { variant, warrantNo, drLine, text: warrantNo + '\n' + drLine });
+}
+
+function _resolveAzPlaces(block, ctx) {
+  const draft = ctx.draft || {};
+  const providers = _azProviders(ctx).map(p => ({
+    label: 'Addendum ' + p.pageLabel,
+    lines: _azProviderLines(p),
+  }));
+  const dangling = providers.length ? [] : ['provider.name'];
+  const personDesc = _azS(draft.azPersonDesc);
+  const vehicleDesc = _azS(draft.azVehicleDesc);
+  const person = { checked: !!draft.azPerson, text: 'on the person(s) of' + (personDesc ? ': ' + personDesc : '') };
+  const premises = { checked: draft.azPremises !== false, text: 'on the premise(s) known as:' };
+  const vehicle = { checked: !!draft.azVehicle, text: 'in the vehicle(s) described as' + (vehicleDesc ? ': ' + vehicleDesc : '') };
+  const lead = 'computer servers which are owned and operated by:';
+  const box = (c) => (c ? '[X] ' : '[ ] ');
+  const text = [
+    box(person.checked) + person.text,
+    box(premises.checked) + premises.text,
+    lead,
+  ].concat(providers.map(p => p.lines.concat('(' + p.label + ')').join('\n')), [box(vehicle.checked) + vehicle.text]).join('\n');
+  return _azBase(block, { person, premises, vehicle, lead, providers, text, danglingSlots: dangling });
+}
+
+function _resolveAzItemsRef(block, ctx) {
+  const list = _azProviders(ctx);
+  const refs = list.map(p => `Addendum ${p.pageLabel} (${p.name})`);
+  const dangling = refs.length ? [] : ['provider.name'];
+  const ref = refs.length
+    ? `The records and information described in ${_azJoin(refs)}, attached hereto and incorporated herein by reference.`
+    : 'The records and information described in the attached Addendum, incorporated herein by reference.';
+  return _azBase(block, { lead: String(block.lead || ''), ref, text: [block.lead || '', ref].filter(Boolean).join('\n'), danglingSlots: dangling });
+}
+
+function _resolveAzGrounds(block, ctx) {
+  const draft = ctx.draft || {};
+  const chosen = (draft.azGrounds && typeof draft.azGrounds === 'object') ? draft.azGrounds : AZ_GROUND_DEFAULTS;
+  const offense = _azOffense(ctx);
+  const person = _azS(draft.azConcealingPerson) || AZ_BLANK;
+  const dangling = [];
+  const items = AZ_GROUND_DEFS.map(g => {
+    const checked = !!chosen[g.key];
+    if (checked && g.text.indexOf('{offense}') !== -1 && !offense && dangling.indexOf('case.offenseDescription') === -1) {
+      dangling.push('case.offenseDescription');
+    }
+    const t = g.text.replace('{offense}', offense || AZ_BLANK).replace('{person}', person);
+    return { key: g.key, checked, text: /[.]$/.test(t) ? t : t + '.' };
+  });
+  const lead = String(block.lead || '');
+  return _azBase(block, {
+    lead,
+    items,
+    text: [lead].concat(items.map(i => (i.checked ? '[X] ' : '[ ] ') + i.text)).filter(Boolean).join('\n'),
+    danglingSlots: dangling,
+  });
+}
+
+function _resolveAzService(block, ctx) {
+  const draft = ctx.draft || {};
+  const items = [
+    { key: 'day', checked: draft.azDaytime !== false, text: 'in the daytime (excluding the time period between 10 PM and 6:30 AM)' },
+    { key: 'night', checked: !!draft.azNighttime, text: 'or nighttime (good cause therefore having been shown)' },
+  ];
+  const lead = 'YOU ARE THEREFORE COMMANDED';
+  return _azBase(block, { lead, items, text: [lead].concat(items.map(i => (i.checked ? '[X] ' : '[ ] ') + i.text)).join('\n') });
+}
+
+function _resolveAzDelivery(block, ctx) {
+  const agency = ctx.agency || {};
+  const providers = _azProviders(ctx);
+  const who = _azAffiantLine(agency) || '{{agency.affiantName}}';
+  const dangling = [];
+  if (!_azS(agency.affiantName)) dangling.push('agency.affiantName');
+  const email = _azS(agency.affiantEmail);
+  if (!email) dangling.push('agency.affiantEmail');
+  const subject = providers.length === 1 ? providers[0].name : 'Each provider named above';
+  const lead = `${subject} may send response materials for the search warrant to ${who} at the following address:`;
+  const lines = [];
+  lines.push(email || '{{agency.affiantEmail}}');
+  if (_azS(agency.agencyName)) lines.push(_azS(agency.agencyName));
+  const addr = _splitUsAddress(agency.agencyAddress);
+  if (addr.street) lines.push(addr.street);
+  if (addr.city) lines.push(`${addr.city}, ${addr.state} ${addr.zip}`.trim());
+  const portalOwner = providers.length === 1 ? `the ${providers[0].name}` : "the provider's";
+  const portal = `If able, the responsive data may also be delivered to ${who} through ${portalOwner} law enforcement request portal.`;
+  return _azBase(block, { lead, lines, portal, text: [lead].concat(lines, [portal]).join('\n'), danglingSlots: dangling });
+}
+
+function _resolveAzFelony(block, ctx) {
+  const draft = ctx.draft || {};
+  if (draft.azFelony === false) return _azBase(block, { omitted: true });
+  return _azBase(block, { text: String(block.text || '') });
+}
+
+function _resolveAzNdo(block, ctx) {
+  const draft = ctx.draft || {};
+  if (draft.azNdo === false) return _azBase(block, { omitted: true });
+  const names = _azProviders(ctx).map(p => p.name);
+  const many = names.length > 1;
+  const who = names.length ? _azJoin(names) : 'the provider';
+  const period = AZ_NDO_PERIODS[String(draft.azNdoDays || '').trim()] || '';
+  const text = `**IT IS FURTHER ORDERED**, pursuant to 18 U.S.C. \u00a7 2705(b), that ${who}, ${many ? 'the recipients' : 'the recipient'} of this search warrant, ${many ? 'are' : 'is'} not to disclose the existence or contents of this search warrant, or any subsequent compliance with it, to the subscriber/account holder or to any other person, except as necessary to comply with this warrant${period ? `, for a period of ${period} from the date of this order` : ''}, nor ${many ? 'are they' : 'is it'} to terminate service to the account(s) identified in the attached Addendum${many ? 's' : ''}.`;
+  return _azBase(block, { text, period: period ? String(draft.azNdoDays) : '' });
+}
+
+function _resolveAzInformant(block, ctx) {
+  const draft = ctx.draft || {};
+  const informant = String(draft.azInformant || '') === 'informant';
+  const items = [
+    { key: 'learned', checked: !informant, text: 'The affiant learned the following information in the following manner:' },
+    { key: 'informant', checked: informant, text: 'The affiant received information from a/an (confidential informant) the information is as follows:' },
+  ];
+  const lead = 'CHECK ONE:';
+  return _azBase(block, { lead, items, text: [lead].concat(items.map(i => (i.checked ? '[X] ' : '[ ] ') + i.text)).join('\n') });
+}
+
+function _resolveAzAffiantSignature(block, ctx) {
+  const agency = ctx.agency || {};
+  const dangling = [];
+  if (!_azS(agency.affiantName)) dangling.push('agency.affiantName');
+  if (!_azS(agency.agencyName)) dangling.push('agency.agencyName');
+  const nameLine = _azAffiantLine(agency);
+  return _azBase(block, { nameLine, agencyName: _azS(agency.agencyName), text: [nameLine, _azS(agency.agencyName)].filter(Boolean).join('\n'), danglingSlots: dangling });
+}
+
+function _resolveAzJudge(block, ctx) {
+  const court = _azCourt(ctx);
+  const title = block.variant === 'affidavit'
+    ? 'JUDGE, JUSTICE OF THE PEACE, MAGISTRATE'
+    : 'JUDGE, JUSTICE OF THE PEACE, OR MAGISTRATE';
+  const courtLine = `Of the ${court || '______________________________'}`;
+  return _azBase(block, { title, court, courtLine, text: title + '\n' + courtLine });
+}
+
+function _resolveAzAddendumHeading(block, ctx) {
+  const ad = ctx.addendum || {};
+  const draft = ctx.draft || {};
+  const provider = ctx.provider || {};
+  const v = _azValues(ctx);
+  const label = _azS(ad.pageLabel) || 'A';
+  const name = _azS(provider.legalEntity || provider.name);
+  const sw = _azS(draft.swNumber);
+  const ref = `Search Warrant No. ${sw || '__________'} \u00b7 DR # ${v.caseNumber || '__________'}`;
+  const body = 'This Addendum is attached to and incorporated into the Search Warrant and the Affidavit for a Search Warrant issued in this matter.';
+  return _azBase(block, {
+    title: `ADDENDUM ${label}`,
+    providerName: name,
+    ref,
+    body,
+    text: [`ADDENDUM ${label}`, name, ref, body].filter(Boolean).join('\n'),
+    danglingSlots: name ? [] : ['provider.name'],
+  });
+}
+
+function _resolveAzProviderBlock(block, ctx) {
+  const provider = ctx.provider || {};
+  const ad = ctx.addendum || {};
+  const name = _azS(provider.legalEntity || provider.name);
+  const dangling = [];
+  if (!name) dangling.push('provider.name');
+  if (!_azS(provider.address)) dangling.push('provider.address');
+  const lines = _azProviderLines({ name, address: provider.address, statutoryAgent: ad.azStatutoryAgent });
+  return _azBase(block, { lines, text: lines.join('\n'), danglingSlots: dangling });
+}
+
+function _resolveAzAccount(block, ctx) {
+  const ad = ctx.addendum || {};
+  const provider = ctx.provider || {};
+  const name = _azS(provider.name || provider.legalEntity);
+  const targets = (Array.isArray(ad.targets) ? ad.targets : []).filter(t => t && _azS(t.value));
+  const dangling = targets.length ? [] : ['addendum.targets'];
+  const lines = targets.map(t => {
+    const type = _azS(t.type).toLowerCase();
+    const label = AZ_TARGET_LABELS[type] || (type ? type.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Identifier');
+    return `${label}: ${_azS(t.value)}${_azS(t.helper) ? ` (${_azS(t.helper)})` : ''}`;
+  });
+  const lead = `For the following ${name ? name + ' ' : ''}account holder:`;
+  return _azBase(block, { lead, lines: lines.length ? lines : ['{{addendum.targets}}'], text: [lead].concat(lines).join('\n'), danglingSlots: dangling });
+}
+
+function _resolveAzRecords(block, ctx) {
+  const ad = ctx.addendum || {};
+  const dangling = [];
+  const range = ad.dateRange || {};
+  let lead;
+  if (range.allAvailable) {
+    lead = 'All information below requested for all dates the records exist:';
+  } else if (range.start && range.end) {
+    lead = `All information below requested from ${_txLongDate(range.start)} to ${_txLongDate(range.end)}:`;
+  } else if (range.start) {
+    lead = `All information below requested from ${_txLongDate(range.start)} to the present:`;
+  } else {
+    dangling.push('addendum.dateRange.start');
+    lead = `All information below requested from ${AZ_BLANK} to ${AZ_BLANK}:`;
+  }
+  const itemsRes = _resolveItemsToSeize({ key: block.key, kind: 'items-to-seize' }, ctx);
+  const items = (itemsRes.items || [])
+    .map(it => String(it.description || it.label || '').trim())
+    .filter(Boolean);
+  for (const d of itemsRes.danglingSlots || []) dangling.push(d);
+  return _azBase(block, {
+    lead,
+    items,
+    text: [lead].concat(items.map((t, i) => `${i + 1} \u2013 ${t}`)).join('\n'),
+    danglingSlots: dangling,
+  });
+}
+
 // ─── BLOCK DISPATCH TABLE ──────────────────────────────────────────────────
 const RESOLVERS = Object.freeze({
   'constant':                _resolveConstant,
@@ -1059,6 +1484,24 @@ const RESOLVERS = Object.freeze({
   'tx-grounds':              _resolveTxGrounds,
   'tx-magistrate-signature': _resolveTxMagistrateSignature,
   'tx-signatures':           _resolveTxSignatures,
+  // AZ-specific
+  'az-paragraph':            _resolveAzParagraph,
+  'az-header':               _resolveAzHeader,
+  'az-numbers':              _resolveAzNumbers,
+  'az-places':               _resolveAzPlaces,
+  'az-items-ref':            _resolveAzItemsRef,
+  'az-grounds':              _resolveAzGrounds,
+  'az-service':              _resolveAzService,
+  'az-delivery':             _resolveAzDelivery,
+  'az-felony':               _resolveAzFelony,
+  'az-ndo':                  _resolveAzNdo,
+  'az-informant':            _resolveAzInformant,
+  'az-affiant-signature':    _resolveAzAffiantSignature,
+  'az-judge':                _resolveAzJudge,
+  'az-addendum-heading':     _resolveAzAddendumHeading,
+  'az-provider-block':       _resolveAzProviderBlock,
+  'az-account':              _resolveAzAccount,
+  'az-records':              _resolveAzRecords,
   // Layout markers (pass-through, no slots)
   'section-break':           _resolvePageBreak,
   'box-start':               _resolvePageBreak,
@@ -1200,6 +1643,10 @@ const api = Object.freeze({
   _splitUsAddress,
   _formatItemsText,
   _txLongDate,
+  _azValues,
+  _azProviders,
+  AZ_GROUND_DEFS,
+  AZ_GROUND_DEFAULTS,
 });
 
 if (typeof module !== 'undefined' && module.exports) {

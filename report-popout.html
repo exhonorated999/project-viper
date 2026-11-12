@@ -201,7 +201,9 @@
         <span>Ctrl+S to save</span>
     </div>
 
+    <script src="modules/_shared/case-storage.js"></script>
     <script src="modules/reports/rich-editor.js"></script>
+    <script src="modules/reports/report-store.js"></script>
     <script>
         const params = new URLSearchParams(window.location.search);
         const caseNumber = params.get('case') || '';
@@ -213,6 +215,10 @@
         const lastSavedEl = document.getElementById('lastSaved');
         const api = window.electronAPI;
         let hasUnsaved = false;
+        // Pictures live in cases/<case>/Reports/; the report keeps references.
+        const store = window.ViperReportStore
+            ? ViperReportStore.create({ api, caseNumber, cs: window.VpCaseStorage || null })
+            : null;
 
         function fmt(cmd) { document.execCommand(cmd, false, null); editor.focus(); }
 
@@ -238,6 +244,7 @@
             const data = await api.reportGet(caseNumber);
             if (data) {
                 editor.innerHTML = data.content || '';
+                if (store) store.hydrateDom(editor).catch(() => {});
                 if (data.lastSaved) {
                     lastSavedEl.textContent = 'Loaded from main: ' + new Date(data.lastSaved).toLocaleString();
                 }
@@ -253,7 +260,20 @@
             const now = new Date().toISOString();
             let result = false;
             try {
-                result = await api.reportSave(caseNumber, editorHtml(), now);
+                // New pictures go to the case folder; the main window gets the
+                // lean copy (references) and loads them itself.
+                let failed = 0;
+                if (store && store.available()) failed = (await store.persistDom(editor)).failed;
+                const html = editorHtml();
+                result = await api.reportSave(caseNumber, store ? store.lean(html) : html, now);
+                if (failed && result) {
+                    lastSavedEl.textContent = 'Saved — but a picture could not go into the case folder (is Field Security locked?); it is kept in the report for now.';
+                    lastSavedEl.style.color = '#fbbf24';
+                    hasUnsaved = false;
+                    saveBtn.innerHTML = '💾 Save to Main';
+                    saveBtn.className = 'save-btn';
+                    return;
+                }
             } catch (e) {
                 lastSavedEl.textContent = 'NOT saved — ' + (/quota/i.test(String(e && e.message)) ? 'report storage is full; remove some pictures and try again.' : ((e && e.message) || e));
                 lastSavedEl.style.color = '#f87171';

@@ -51,6 +51,17 @@ async function pageTests() {
     r = S('<svg><script>__pwned=4</script></svg><math></math><p>m</p>');
     await tick();
     ok('sanitize: svg/math dropped', r.html === '<p>m</p>' && window.__pwned === 0, r.html);
+    // Case-folder picture references (report-store.js)
+    const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    r = S('<img src="' + png + '" data-vp-img="report-image-k1-ab12cd.png" data-vp-img-kind="reports" data-x="1">');
+    ok('sanitize: a report picture keeps its case-folder reference', /data-vp-img="report-image-k1-ab12cd\.png"/.test(r.html) && /data-vp-img-kind="reports"/.test(r.html) && !/data-x/.test(r.html), r.html);
+    r = S('<img src="' + BLANK + '" data-vp-img="report-image-k1-ab12cd.png" data-vp-img-kind="reports">');
+    ok('sanitize: …also while its picture is not loaded yet (nothing lost on save)', /data-vp-img=/.test(r.html) && r.droppedImages === 0, r.html);
+    r = S('<img src="' + png + '" data-vp-img="../../x.png" data-vp-img-kind="reports"><img src="' + png + '" data-vp-img="n.png" data-vp-img-kind="notes">');
+    ok('sanitize: a path or another kind is not a reference', !/data-vp-img/.test(r.html) && (r.html.match(/<img/g) || []).length === 2, r.html);
+    r = RE.sanitize('<img src="' + png + '" data-vp-img="report-image-k1-ab12cd.png" data-vp-img-kind="reports"><img src="' + BLANK + '" data-vp-img="report-image-k2.png" data-vp-img-kind="reports">', document, { pasted: true });
+    ok('sanitize (pasted): the reference is dropped so the picture is saved again for this case', !/data-vp-img/.test(r.html) && (r.html.match(/<img/g) || []).length === 1, r.html);
+    ok('sanitize (pasted): …an unloaded one cannot come across and is counted', r.droppedImages === 1, r);
 
     // ── attach ──
     const mk = (html) => {

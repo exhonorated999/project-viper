@@ -10,7 +10,10 @@
  *                            between cells), pictures (insert, paste, drop; wrap
  *                            left/right, in line, top-and-bottom; drag any corner
  *                            to resize; size presets), page breaks, undo/redo.
- *   sanitize(html, doc)      allow-list cleaner for pasted HTML and for printing.
+ *   sanitize(html, doc, { pasted })
+ *                            allow-list cleaner for pasted HTML and for printing.
+ *                            Keeps a picture's case-folder reference (data-vp-img,
+ *                            report-store.js) unless `pasted`.
  *                            → { html, droppedImages }
  *   cleanHtml(editor)        editor HTML without editor-only selection marks.
  *   isRichReport(html)       true when the report has layout that plain text
@@ -84,6 +87,8 @@
     const WRAPS = ['inline', 'left', 'right', 'center'];
     const live = new Set();
     const IMG_SRC = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,[a-z0-9+/=\s]+$/i;
+    const REF_NAME = /^[\w][\w .()-]{0,150}\.(?:png|jpe?g|gif|webp|bmp)$/i;
+    const BLANK_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
     /** Keep only allow-listed declarations with harmless values. */
     function cleanStyle(style, tag) {
@@ -126,7 +131,15 @@
         if (tag === 'IMG') {
             const src = String(el.getAttribute('src') || '').trim();
             if (!IMG_SRC.test(src)) { stats.droppedImages++; return null; }
+            // A picture stored in the case folder (report-store.js) keeps its
+            // reference — except when pasted, where it may belong to another
+            // case: then it is saved again as a new picture of this one, and
+            // one whose bytes never loaded cannot come across at all.
+            const ref = el.getAttribute('data-vp-img');
+            const refOk = REF_NAME.test(String(ref || '')) && (el.getAttribute('data-vp-img-kind') || 'reports') === 'reports';
+            if (stats.stripRefs && ref && src === BLANK_IMG) { stats.droppedImages++; return null; }
             keep.src = src;
+            if (refOk && !stats.stripRefs) { keep['data-vp-img'] = ref; keep['data-vp-img-kind'] = 'reports'; }
             const alt = el.getAttribute('alt');
             if (alt) keep.alt = String(alt).slice(0, 200);
             const w = el.getAttribute('data-wrap');
@@ -182,12 +195,12 @@
      * Allow-list clean of an HTML string. `doc` defaults to the page document;
      * parsing happens in an inert <template>, so nothing loads or runs.
      */
-    function sanitize(html, doc) {
+    function sanitize(html, doc, opts) {
         const d = doc || (typeof document !== 'undefined' ? document : null);
         if (!d) throw new Error('sanitize needs a DOM document');
         const tpl = d.createElement('template');
         tpl.innerHTML = String(html == null ? '' : html);
-        const stats = { droppedImages: 0 };
+        const stats = { droppedImages: 0, stripRefs: !!(opts && opts.pasted) };
         walkClean(tpl.content, stats, d);
         const box = d.createElement('div');
         box.appendChild(tpl.content);
@@ -806,7 +819,7 @@
             const imgs = Array.from(cd.items || []).filter((it) => it.kind === 'file' && /^image\//i.test(it.type || '')).map((it) => it.getAsFile()).filter(Boolean);
             if (html && /<[a-z]/i.test(html)) {
                 e.preventDefault(); e.stopImmediatePropagation();
-                const r = sanitize(html, doc);
+                const r = sanitize(html, doc, { pasted: true });
                 const body = r.html.replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '');
                 if (body.trim()) insertHtml(body);
                 else if (imgs.length) { insertFiles(imgs); return; }

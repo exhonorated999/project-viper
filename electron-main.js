@@ -2790,7 +2790,10 @@ const CASE_ATTACHMENT_DIRS = Object.freeze({
   // .ampcase bundles, Aperture mailboxes and single e-mails.
   cyberTips:      'CyberTips',
   cdrSources:     'CDR/Original Files',
-  emailSources:   'Email Sources'
+  emailSources:   'Email Sources',
+  // Pictures in the case report (modules/reports/report-store.js); the
+  // report text keeps only a reference to each.
+  reports:        'Reports'
 });
 
 function _caseAttachmentDir(caseNumber, kind) {
@@ -4060,6 +4063,9 @@ ipcMain.handle('report-save', async (event, caseNumber, content, lastSaved) => {
     const r = JSON.parse(localStorage.getItem('viperCaseReports') || '{}');
     r[d.caseNumber] = { content: d.content, lastSaved: d.lastSaved };
     localStorage.setItem('viperCaseReports', JSON.stringify(r));
+    // The case page puts it in its live editor itself (same case only, and
+    // the pictures, stored as case-folder references, are loaded back).
+    if (typeof window._applyPoppedOutReport === 'function') return window._applyPoppedOutReport(d) !== false;
     // Also update the live editor DOM and JS variables so auto-save doesn't overwrite
     const ed = document.getElementById('reportEditor');
     if (ed) ed.innerHTML = d.content;

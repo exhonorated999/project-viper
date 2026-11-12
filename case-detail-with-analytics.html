@@ -162,6 +162,7 @@
          print layout used by Export to PDF / Export to DA. -->
     <script src="modules/reports/rich-editor.js"></script>
     <script src="modules/reports/report-print.js"></script>
+    <script src="modules/reports/report-store.js"></script>
     <!-- Optional phone carrier on phone identifiers. Synchronous: the
          identifier renderers call it while painting. -->
     <script src="modules/_shared/phone-carrier.js"></script>
@@ -1389,6 +1390,103 @@
             try { if (typeof currentTab !== 'undefined' && currentTab === 'notes') renderTabContent('notes'); } catch (_) {}
         }
 
+        /*
+         * Case report pictures (modules/reports/report-store.js) live in
+         * cases/<case>/Reports/, encrypted under Field Security; the stored
+         * report HTML (viperCaseReports) only references them. In memory —
+         * caseReport and the editor — they are loaded, so every reader keeps
+         * seeing ordinary HTML; saveReport() stores the lean copy.
+         */
+        let _reportStoreInst = null;
+        function _reportStore() {
+            if (!_reportStoreInst && window.ViperReportStore) {
+                _reportStoreInst = ViperReportStore.create({
+                    api: () => window.electronAPI,
+                    caseNumber: () => (currentCase && currentCase.caseNumber) || '',
+                    cs: _CS,
+                    warn: (m) => console.warn('[VIPER] report picture:', m),
+                });
+            }
+            return _reportStoreInst;
+        }
+        /* Stored report HTML with its pictures loaded (Export to DA). */
+        function _reportImagesFromDisk(html) {
+            const st = _reportStore();
+            return st ? st.hydrateHtml(html) : Promise.resolve(html);
+        }
+
+        /*
+         * Once per case open, in the background, like _noteStorageMaintenance:
+         * pass 1 moves pictures saved inside the report before 5.6.1 out to
+         * the case folder (giving the officer their storage back), pass 2
+         * loads the pictures for display.
+         */
+        let _reportStorageMaintenanceRun = false;
+        async function _reportStorageMaintenance() {
+            const st = _reportStore();
+            if (_reportStorageMaintenanceRun || !st || !currentCase || !st.available()) return;
+            _reportStorageMaintenanceRun = true;
+            const cn = currentCase.caseNumber;
+            const editorUp = () => !!document.getElementById('reportEditor');
+
+            // Pass 1. While the editor is open its own saves do this, so the
+            // string copy is left alone then (it would save each picture twice).
+            try {
+                const rec = _lsParse('viperCaseReports', {})[cn];
+                if (!editorUp() && rec && typeof rec.content === 'string' && st.hasInlinePictures(rec.content)) {
+                    const res = await st.dehydrateHtml(rec.content);
+                    const now = _lsParse('viperCaseReports', {});
+                    if (res.moved && !editorUp() && currentCase && currentCase.caseNumber === cn
+                        && now[cn] && now[cn].content === rec.content) {
+                        now[cn] = Object.assign({}, now[cn], { content: res.html });
+                        localStorage.setItem('viperCaseReports', JSON.stringify(now));
+                        if (caseReport === rec.content) caseReport = res.html;
+                        try {
+                            viperToast(`Freed ${_CS.formatBytes(res.bytesFreed || 0)} of storage — ${res.moved} report picture${res.moved === 1 ? '' : 's'} moved into the case folder.`, 'success', 8000);
+                        } catch (_) {}
+                    }
+                }
+            } catch (e) {
+                console.error('[VIPER] report picture migration failed:', e);
+            }
+
+            // Pass 2.
+            try {
+                if (!currentCase || currentCase.caseNumber !== cn) return;
+                const before = caseReport;
+                if (typeof before === 'string' && before.indexOf('data-vp-img') !== -1) {
+                    const h = await st.hydrateHtml(before);
+                    if (caseReport === before && currentCase && currentCase.caseNumber === cn) caseReport = h;
+                }
+                const ed = document.getElementById('reportEditor');
+                if (ed) await st.hydrateDom(ed);
+            } catch (e) {
+                console.error('[VIPER] report picture loading failed:', e);
+            }
+        }
+
+        /* report-popout.html saved: the main process wrote viperCaseReports
+           and hands the report here (electron-main.js report-save). */
+        window._applyPoppedOutReport = function (d) {
+            if (!d || !currentCase || currentCase.caseNumber !== d.caseNumber) return true;   // another case: storage only
+            caseReport = d.content;
+            reportLastSaved = d.lastSaved;
+            const ts = document.getElementById('reportLastSavedText');
+            if (ts && d.lastSaved) ts.textContent = 'Last saved: ' + new Date(d.lastSaved).toLocaleString();
+            const ed = document.getElementById('reportEditor');
+            const st = _reportStore();
+            if (ed) {
+                if (ed._vre && ed._vre.deselect) { try { ed._vre.deselect(); } catch (_) {} }
+                ed.innerHTML = d.content;
+                if (st) st.hydrateDom(ed).then(() => {
+                    if (caseReport === d.content && ed.isConnected) caseReport = window.ViperRichEditor ? ViperRichEditor.cleanHtml(ed) : ed.innerHTML;
+                }).catch(() => {});
+            } else if (st) {
+                st.hydrateHtml(d.content).then((h) => { if (caseReport === d.content) caseReport = h; }).catch(() => {});
+            }
+            return true;
+        };
+
         // ---------------------------------------------------------------------
         // Defensive localStorage parse helper (v3.8.3 hotfix)
         // Wraps JSON.parse(localStorage.getItem(...)) so that corrupted/truncated
@@ -1604,6 +1702,8 @@
             const reportData = allReports[currentCase.caseNumber] || { content: '', lastSaved: null };
             caseReport = reportData.content;
             reportLastSaved = reportData.lastSaved;
+            // Same for the report's pictures (cases/<case>/Reports/).
+            setTimeout(() => { _reportStorageMaintenance(); }, 0);
             
             // Load evidence for this case
             const allEvidence = _lsParse('viperCaseEvidence', {});
@@ -4821,7 +4921,9 @@
                     if (rpt && rpt.content) {
                         // Tables / pictures / wrapping → laid out by Chromium
                         // and stamped in; plain text stays native jsPDF text.
-                        await viperReportPages(rpt.content);
+                        // Pictures are stored in the case folder; load them.
+                        const body = typeof _reportImagesFromDisk === 'function' ? await _reportImagesFromDisk(rpt.content) : rpt.content;
+                        await viperReportPages(body);
                     } else emptyMsg('No report content.');
                     break;
                 }
@@ -9800,6 +9902,8 @@
             
             // Load existing content
             editor.innerHTML = caseReport || '<p>Start typing your report here...</p>';
+            // Pictures stored in the case folder (normally already loaded).
+            { const st = _reportStore(); if (st) st.hydrateDom(editor).catch(() => {}); }
             
             // Auto-save every 30 seconds (one timer, however often the tab is re-rendered)
             if (_reportAutosaveTimer) clearInterval(_reportAutosaveTimer);
@@ -9903,8 +10007,8 @@
         }
 
         async function openReportPopout() {
-            // Save current report first
-            saveReport(true);
+            // Save current report first (the pop-out reads the stored copy)
+            await saveReport(true);
 
             try {
                 if (window.electronAPI && window.electronAPI.openReportWindow) {
@@ -9953,17 +10057,34 @@
             }, 2000);
         }
 
-        function saveReport(silent = false) {
+        let _reportPicWarnAt = 0;
+        async function saveReport(silent = false) {
             const editor = document.getElementById('reportEditor');
-            if (!editor) return;
+            if (!editor || !currentCase) return;
+            // Read before any await (the global `event` is gone after one).
+            const clickBtn = (!silent && typeof event !== 'undefined' && event && event.target && event.target.closest) ? event.target.closest('button') : null;
+            const cn = currentCase.caseNumber;
+
+            // New pictures → cases/<case>/Reports/ (report-store.js). One that
+            // cannot be written stays in the report itself for now.
+            const st = _reportStore();
+            if (st && st.available()) {
+                let r = { failed: 0 };
+                try { r = await st.persistDom(editor); } catch (_) {}
+                if (!currentCase || currentCase.caseNumber !== cn) return;
+                if (r.failed && Date.now() - _reportPicWarnAt > 120000) {
+                    _reportPicWarnAt = Date.now();
+                    viperToast('A picture could not be saved in the case folder (is Field Security locked?). It is kept inside the report for now and will be moved on a later save.', 'warning', 9000);
+                }
+            }
             
             caseReport = window.ViperRichEditor ? ViperRichEditor.cleanHtml(editor) : editor.innerHTML;
             reportLastSaved = new Date().toISOString();
             
-            // Save to localStorage
+            // Save to localStorage — the lean copy: stored pictures as references.
             const allReports = _lsParse('viperCaseReports', {});
-            allReports[currentCase.caseNumber] = {
-                content: caseReport,
+            allReports[cn] = {
+                content: st ? st.lean(caseReport) : caseReport,
                 lastSaved: reportLastSaved
             };
             try {
@@ -9986,7 +10107,7 @@
             
             if (!silent) {
                 // Show save confirmation (Ctrl+S has no button to flash)
-                const saveBtn = (typeof event !== 'undefined' && event && event.target && event.target.closest) ? event.target.closest('button') : null;
+                const saveBtn = clickBtn;
                 if (!saveBtn) { viperToast('Report saved.', 'success'); return; }
                 const originalHTML = saveBtn.innerHTML;
                 saveBtn.innerHTML = `
@@ -10018,7 +10139,8 @@
             if (_reportPdfBusy) return;
             _reportPdfBusy = true;
             try {
-                saveReport(true);
+                await saveReport(true);
+                { const st = _reportStore(); if (st) await st.hydrateDom(editor); }
                 const cn = currentCase.caseNumber;
                 const html = RP.buildPrintHtml({
                     bodyHtml: RE.sanitize(RE.cleanHtml(editor)).html,

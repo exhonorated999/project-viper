@@ -158,6 +158,10 @@
          WITHOUT defer: renderWarrantsTab() calls it while rendering. -->
     <script src="modules/warrants/working-docs-ui.js"></script>
     <script src="modules/reports/word-report-ui.js"></script>
+    <!-- Report editor toolbar (tables, pictures, wrap, resize) and the
+         print layout used by Export to PDF / Export to DA. -->
+    <script src="modules/reports/rich-editor.js"></script>
+    <script src="modules/reports/report-print.js"></script>
     <!-- Optional phone carrier on phone identifiers. Synchronous: the
          identifier renderers call it while painting. -->
     <script src="modules/_shared/phone-carrier.js"></script>
@@ -4815,7 +4819,9 @@
                     const rd = _lsParse('viperCaseReports', {});
                     const rpt = rd[caseNum];
                     if (rpt && rpt.content) {
-                        await renderReportHtml(rpt.content);
+                        // Tables / pictures / wrapping → laid out by Chromium
+                        // and stamped in; plain text stays native jsPDF text.
+                        await viperReportPages(rpt.content);
                     } else emptyMsg('No report content.');
                     break;
                 }
@@ -5111,6 +5117,39 @@
                 y = PH;   // anything after this starts on a fresh page
             }
 
+            // ========== VIPER-EDITOR REPORT WITH LAYOUT ==========
+            // A report with tables, pictures (sized / wrapped), alignment,
+            // headings or font sizes is printed by Chromium at exactly the size
+            // of this report's content box (report-print.js) and its pages are
+            // stamped on like the Word pages — frameless, at 1:1, the first one
+            // under the section title. A plain-text report keeps the native
+            // text rendering (renderReportHtml), as before.
+            const _viperReportNotes = [];
+            async function viperReportPages(html) {
+                const RE = window.ViperRichEditor, RP = window.ViperReportPrint, api = window.electronAPI;
+                if (!RE || !RP || !RE.isRichReport(html)) { await renderReportHtml(html); return; }
+                if (!api || !api.reportHtmlPdfPages || !api.reportDocsStampPdf) { await renderReportHtml(html); return; }
+                const box = { top: 16, bottom: 14, left: M, right: M };
+                if (y > PH * 0.6) newPage();
+                const firstTop = Math.max(0, y - 4 - box.top);
+                let r;
+                try {
+                    const printHtml = RP.buildPrintHtml({ bodyHtml: RE.sanitize(html).html, firstPageTopMm: firstTop });
+                    r = await api.reportHtmlPdfPages(printHtml, (PW - box.left - box.right) / 25.4, (PH - box.top - box.bottom) / 25.4);
+                } catch (e) { r = { success: false, error: (e && e.message) || String(e) }; }
+                if (!r || !r.success || !(r.pages > 0) || !r.id) {
+                    const why = (r && r.error) || 'unknown error';
+                    _viperReportNotes.push(`The case report could not be laid out as pages (${why}) — it was printed as plain text, without its table and picture layout.`);
+                    await renderReportHtml(html);
+                    return;
+                }
+                for (let p = 0; p < r.pages; p++) {
+                    if (p > 0) newPage();
+                    _wordPlacements.push({ page: doc.getNumberOfPages(), id: r.id, index: p, frame: false, box });
+                }
+                y = PH;   // anything after this starts on a fresh page
+            }
+
             // ========== CONTENT — track page numbers ==========
             const tocEntries = [];
 
@@ -5349,14 +5388,20 @@
                     } else why = (st && st.error) || 'unknown error';
                 } catch (e) { why = (e && e.message) || String(e); }
                 if (!_stampedB64) {
-                    const msg = 'The Word reports could not be placed into the PDF: ' + why;
+                    // Framed placements are Word pages; frameless ones are the
+                    // VIPER-editor report laid out with its tables/pictures.
+                    const hasWord = _wordPlacements.some((p) => p.frame !== false);
+                    const msg = (hasWord ? 'The Word reports' : 'The case report') + ' could not be placed into the PDF: ' + why;
                     if (_returnPdf) return { success: false, error: msg };
-                    viperToast(msg + '\n\nNothing was exported. Try again; if it keeps failing, use "Save a copy…" on the Reports tab.', 'error');
+                    viperToast(msg + '\n\nNothing was exported. Try again' + (hasWord ? '; if it keeps failing, use "Save a copy…" on the Reports tab.' : '.'), 'error');
                     return;
                 }
             }
             if (_wordReportNotes.length) {
                 viperToast('Word reports in this export:\n• ' + _wordReportNotes.join('\n• '), 'warning');
+            }
+            if (typeof _viperReportNotes !== 'undefined' && _viperReportNotes.length) {
+                viperToast('Case report in this export:\n• ' + _viperReportNotes.join('\n• '), 'warning');
             }
 
             // Supervisor Link path: hand the bytes back instead of writing a
@@ -9675,8 +9720,11 @@
                     
                     <!-- Editor Container -->
                     <div class="glass-card rounded-xl overflow-hidden">
-                        <!-- Toolbar -->
-                        <div class="bg-viper-card/70 border-b border-gray-700 p-3 flex items-center space-x-2">
+                        <!-- Toolbar: ViperRichEditor (modules/reports/rich-editor.js)
+                             fills #reportRichToolbar; the old B/I/U bar is the
+                             fallback if that module is missing. -->
+                        <div class="bg-viper-card/70 border-b border-gray-700 p-3 flex items-start gap-2">
+                            ${window.ViperRichEditor ? `<div id="reportRichToolbar" class="flex-1 min-w-0"></div>` : `<div class="flex items-center space-x-2 flex-1 min-w-0">
                             <button onclick="formatText('bold')" title="Bold (Ctrl+B)" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan transition-colors">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <text x="4" y="18" font-family="Arial" font-weight="bold" font-size="16" fill="currentColor">B</text>
@@ -9703,9 +9751,9 @@
                                 <option value="20">20</option>
                                 <option value="24">24</option>
                             </select>
+                            </div>`}
                             
-                            <div class="flex-1"></div>
-                            
+                            <div class="flex items-center flex-shrink-0">
                             <button onclick="ViperDictation.toggle()" id="dictateBtn" title="Dictate (voice → report)" class="px-3 py-1.5 rounded-lg border border-viper-purple/40 bg-viper-purple/15 text-gray-300 hover:text-viper-purple hover:bg-viper-purple/25 transition-colors text-sm font-medium flex items-center space-x-2">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-14 0m7 7v3m0-3a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3z"/>
@@ -9718,7 +9766,8 @@
                             
                             <div class="w-px h-6 bg-gray-600 mx-2"></div>
                             
-                            <span class="text-xs text-gray-400">Arial Font • Auto-save enabled</span>
+                            <span class="text-xs text-gray-400 whitespace-nowrap">Auto-save on</span>
+                            </div>
                         </div>
                         
                         <!-- Editor Area -->
@@ -9736,13 +9785,15 @@
                         </svg>
                         <div class="text-sm">
                             <p class="text-viper-cyan font-medium mb-1">Report Features</p>
-                            <p class="text-gray-300">• Use the toolbar to format text • Paste images directly (Ctrl+V) • Click "Pop Out" to view the report in a separate window • Changes are auto-saved every 30 seconds</p>
+                            <p class="text-gray-300">• Headings, font sizes, alignment, bulleted and numbered lists • Tables: insert from the toolbar, then click inside one to add or remove rows and columns (Tab moves to the next cell) • Pictures: paste, drop or use Picture; click one to wrap text around it, pick a size, or drag a corner to resize • Page break starts a new page in the PDF and in Export to DA • Click "Pop Out" to write in a separate window • Changes are auto-saved</p>
                         </div>
                     </div>
                 </div>
             `;
         }
         
+        let _reportAutosaveTimer = null;
+        let _reportChangeTimer = null;
         function initializeReportEditor() {
             const editor = document.getElementById('reportEditor');
             if (!editor) return;
@@ -9750,10 +9801,22 @@
             // Load existing content
             editor.innerHTML = caseReport || '<p>Start typing your report here...</p>';
             
-            // Auto-save every 30 seconds
-            setInterval(() => {
+            // Auto-save every 30 seconds (one timer, however often the tab is re-rendered)
+            if (_reportAutosaveTimer) clearInterval(_reportAutosaveTimer);
+            _reportAutosaveTimer = setInterval(() => {
                 saveReport(true);
             }, 30000);
+
+            // Toolbar: tables, pictures (wrap / resize), headings, lists…
+            const richBar = document.getElementById('reportRichToolbar');
+            const rich = !!(window.ViperRichEditor && richBar);
+            if (rich) {
+                ViperRichEditor.attach({
+                    editor, toolbar: richBar,
+                    onChange: () => { clearTimeout(_reportChangeTimer); _reportChangeTimer = setTimeout(() => saveReport(true), 1000); },
+                    toast: (m, t) => viperToast(m, t),
+                });
+            }
             
             // Handle keyboard shortcuts
             editor.addEventListener('keydown', function(e) {
@@ -9773,6 +9836,8 @@
                     }
                 }
             });
+            // The rich editor handles paste, drop and picture selection itself.
+            if (rich) return;
             
             // Handle image pasting
             editor.addEventListener('paste', function(e) {
@@ -9826,7 +9891,9 @@
         
         function formatText(command) {
             document.execCommand(command, false, null);
-            document.getElementById('reportEditor').focus();
+            const ed = document.getElementById('reportEditor');
+            ed.focus();
+            if (ed._vre) ed._vre.refresh();
         }
         
         function changeFontSize(size) {
@@ -9890,7 +9957,7 @@
             const editor = document.getElementById('reportEditor');
             if (!editor) return;
             
-            caseReport = editor.innerHTML;
+            caseReport = window.ViperRichEditor ? ViperRichEditor.cleanHtml(editor) : editor.innerHTML;
             reportLastSaved = new Date().toISOString();
             
             // Save to localStorage
@@ -9899,7 +9966,17 @@
                 content: caseReport,
                 lastSaved: reportLastSaved
             };
-            localStorage.setItem('viperCaseReports', JSON.stringify(allReports));
+            try {
+                localStorage.setItem('viperCaseReports', JSON.stringify(allReports));
+            } catch (err) {
+                // Pictures make reports large; a full store must not fail silently.
+                const now = Date.now();
+                if (!silent || !saveReport._warnedAt || now - saveReport._warnedAt > 120000) {
+                    saveReport._warnedAt = now;
+                    viperToast('The report could NOT be saved — VIPER\u2019s report storage is full. Remove some pictures (or use smaller picture files), then save again.', 'error');
+                }
+                return;
+            }
             
             // Update last saved text
             const lastSavedText = document.getElementById('reportLastSavedText');
@@ -9908,8 +9985,9 @@
             }
             
             if (!silent) {
-                // Show save confirmation
-                const saveBtn = event.target.closest('button');
+                // Show save confirmation (Ctrl+S has no button to flash)
+                const saveBtn = (typeof event !== 'undefined' && event && event.target && event.target.closest) ? event.target.closest('button') : null;
+                if (!saveBtn) { viperToast('Report saved.', 'success'); return; }
                 const originalHTML = saveBtn.innerHTML;
                 saveBtn.innerHTML = `
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -9923,7 +10001,53 @@
             }
         }
         
-        function exportReportToPDF() {
+        // Export PDF (Reports tab): the report printed by Chromium, so tables,
+        // pictures, text wrap, alignment and page breaks come out as written.
+        // Falls back to the old text-only jsPDF export without that path.
+        let _reportPdfBusy = false;
+        async function exportReportToPDF() {
+            const editor = document.getElementById('reportEditor');
+            if (!editor) return;
+            const RE = window.ViperRichEditor, RP = window.ViperReportPrint, api = window.electronAPI;
+            if (!RE || !RP || !api || !api.saveHtmlAsPdf) return _exportReportToPDFLegacy();
+            const text = (editor.innerText || editor.textContent || '').trim();
+            if ((!text || text === 'Start typing your report here...') && !editor.querySelector('img,table')) {
+                viperToast('Report is empty. Please add content before exporting.', 'info');
+                return;
+            }
+            if (_reportPdfBusy) return;
+            _reportPdfBusy = true;
+            try {
+                saveReport(true);
+                const cn = currentCase.caseNumber;
+                const html = RP.buildPrintHtml({
+                    bodyHtml: RE.sanitize(RE.cleanHtml(editor)).html,
+                    header: {
+                        title: 'Case Report', caseNumber: cn,
+                        lines: [
+                            `Generated: ${new Date().toLocaleString()}`,
+                            currentCase.createdBy ? `Created By: ${currentCase.createdBy}` : '',
+                            reportLastSaved ? `Last Modified: ${new Date(reportLastSaved).toLocaleString()}` : '',
+                        ],
+                    },
+                    marginsFromPrinter: true,
+                });
+                const r = await api.saveHtmlAsPdf({
+                    html,
+                    defaultFileName: `Case_${cn}_Report_${new Date().toISOString().split('T')[0]}.pdf`,
+                    options: { settleMs: 400, pageSize: 'Letter', footerText: `Case ${cn} — Report` },
+                });
+                if (r && r.canceled) return;
+                if (!r || !r.success) { viperToast('The report could not be exported: ' + ((r && r.error) || 'unknown error'), 'error'); return; }
+                viperToast('Report exported successfully!', 'success');
+            } catch (e) {
+                viperToast('The report could not be exported: ' + ((e && e.message) || e), 'error');
+            } finally {
+                _reportPdfBusy = false;
+            }
+        }
+
+        function _exportReportToPDFLegacy() {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
             

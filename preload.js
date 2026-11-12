@@ -549,6 +549,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // in main), then those pages drawn onto the pages the report reserved.
   reportDocsToPdf: (caseNumber) => ipcRenderer.invoke('report-docs-to-pdf', { caseNumber }),
   reportDocsStampPdf: (base64, placements) => ipcRenderer.invoke('report-docs-stamp-pdf', { base64, placements }),
+  reportHtmlPdfPages: (html, widthIn, heightIn) => ipcRenderer.invoke('report-html-pdf-pages', { html, widthIn, heightIn }),
   onReportDocEvent: (cb) => {
     const handler = (_e, payload) => { try { cb(payload); } catch (_) {} };
     ipcRenderer.on('report-doc-event', handler);

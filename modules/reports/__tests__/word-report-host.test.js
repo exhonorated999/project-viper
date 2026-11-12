@@ -145,6 +145,7 @@ function makeEnv(over) {
             currentCase: { reportFormat: 'word', caseNumber: '24-1' }, caseNum: '24-1', y: 30, M: 20, CW: 170, LGRAY: [1, 1, 1],
             need: () => {}, emptyMsg: (m) => printed.push(['empty', m]),
             renderReportHtml: async (h) => printed.push(['html', h]),
+            viperReportPages: async (h) => printed.push(['html', h, 'layout']),
             wordReportPages: async () => printed.push(['word']),
             _lsParse: () => ({ '24-1': { content: '<p>VIPER narrative text.</p>' } }),
             doc: { setFontSize() {}, setFont() {}, setTextColor() {}, splitTextToSize: (t) => [t], text: (t) => printed.push(['text', [].concat(t).join(' ')]) },
@@ -160,6 +161,7 @@ function makeEnv(over) {
         env.currentCase.reportFormat = 'viper';
         await vm.runInContext(body, env);
         ok('VIPER mode: the PDF prints the VIPER report as before', printed.length === 1 && printed[0][0] === 'html' && /VIPER narrative/.test(printed[0][1]));
+        ok('…through viperReportPages (tables/pictures laid out; plain text stays native)', printed[0][2] === 'layout');
     }
 
     console.log('\n[asset tag]');
@@ -167,6 +169,9 @@ function makeEnv(over) {
         const iWd = HTML.indexOf('<script src="modules/warrants/working-docs-ui.js"></script>');
         const iWr = HTML.indexOf('<script src="modules/reports/word-report-ui.js"></script>');
         ok('the module is loaded by the case page, synchronously', iWr > 0 && iWr > iWd && !/word-report-ui\.js"\s+defer/.test(HTML));
+        const iRe = HTML.indexOf('<script src="modules/reports/rich-editor.js"></script>');
+        const iRp = HTML.indexOf('<script src="modules/reports/report-print.js"></script>');
+        ok('the report editor toolbar and print layout are loaded too', iRe > 0 && iRp > 0);
     }
 
     console.log('\n' + pass + ' passed, ' + fail + ' failed\n');

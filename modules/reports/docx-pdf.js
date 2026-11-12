@@ -316,12 +316,38 @@ function createDocxPdf(deps) {
     }
 
     /**
+     * Register a PDF rendered elsewhere (the VIPER-editor report printed by
+     * Chromium) so stamp() can place its pages. → { id, pages }
+     */
+    async function addPdf(pdf, method) {
+        if (!Buffer.isBuffer(pdf) || !pdf.length) throw new Error('No PDF to add.');
+        if (pdf.length > MAX_DOC_BYTES) throw new Error('The PDF is too large.');
+        const pages = await pageCount(pdf);
+        const id = sha(Buffer.concat([pdf, Buffer.from('|' + (method || 'pdf'))]));
+        cachePut(id, { pdf, pages, method: method || 'pdf', revisions: 0, comments: 0 });
+        return { id, pages };
+    }
+
+    const numBox = (b) => {
+        if (!b || typeof b !== 'object') return null;
+        const out = {};
+        for (const k of ['top', 'bottom', 'left', 'right']) {
+            const v = +b[k];
+            if (!isFinite(v) || v < 0 || v > 150) throw new Error('Bad placement box.');
+            out[k] = v;
+        }
+        return out;
+    };
+
+    /**
      * Draw converted pages onto reserved pages of a finished report PDF.
-     * placements: [{ page: 1-based page of base, id, index: 0-based page of the source }]
+     * placements: [{ page: 1-based page of base, id, index: 0-based page of the source,
+     *                frame?: false → no border, top-left aligned (a page laid out for the box),
+     *                box?: { top, bottom, left, right } mm — overrides opts.box }]
      */
     async function stamp(basePdf, placements, opts) {
         const { PDFDocument, rgb } = getPdfLib();
-        const box = Object.assign({}, DEFAULT_BOX, (opts && opts.box) || {});
+        const box0 = Object.assign({}, DEFAULT_BOX, (opts && opts.box) || {});
         const out = await PDFDocument.load(basePdf);
         const pages = out.getPages();
         const byId = new Map();
@@ -330,10 +356,10 @@ function createDocxPdf(deps) {
             const page = p.page | 0, index = p.index | 0;
             if (page < 1 || page > pages.length) throw new Error('Placement page ' + page + ' is outside the report.');
             const src = cacheGet(p.id);
-            if (!src) throw new Error('A converted Word report is no longer available — export again.');
-            if (index < 0 || index >= src.pages) throw new Error('Placement refers to a page the Word report does not have.');
+            if (!src) throw new Error('A converted report is no longer available — export again.');
+            if (index < 0 || index >= src.pages) throw new Error('Placement refers to a page the converted report does not have.');
             if (!byId.has(p.id)) byId.set(p.id, []);
-            byId.get(p.id).push({ page, index });
+            byId.get(p.id).push({ page, index, frame: p.frame !== false, box: numBox(p.box) || box0 });
         }
         for (const [id, list] of byId) {
             const src = cacheGet(id);
@@ -343,11 +369,16 @@ function createDocxPdf(deps) {
             for (const pl of list) {
                 const target = pages[pl.page - 1];
                 const ep = byIndex.get(pl.index);
+                const box = pl.box;
                 const { width: W, height: H } = target.getSize();
                 const bx = box.left * MM, by = box.bottom * MM;
                 const bw = W - (box.left + box.right) * MM, bh = H - (box.top + box.bottom) * MM;
                 const s = Math.min(bw / ep.width, bh / ep.height);
                 const w = ep.width * s, h = ep.height * s;
+                if (!pl.frame) {
+                    target.drawPage(ep, { x: bx, y: by + bh - h, width: w, height: h });
+                    continue;
+                }
                 const x = bx + (bw - w) / 2, y = by + (bh - h) / 2;
                 target.drawPage(ep, { x, y, width: w, height: h });
                 target.drawRectangle({ x, y, width: w, height: h, borderColor: rgb(0.72, 0.72, 0.72), borderWidth: 0.5 });
@@ -356,7 +387,7 @@ function createDocxPdf(deps) {
         return Buffer.from(await out.save({ useObjectStreams: true }));
     }
 
-    return { convertMany, stamp, _cache: cache, _viaWord: viaWord };
+    return { convertMany, stamp, addPdf, _cache: cache, _viaWord: viaWord };
 }
 
 module.exports = { createDocxPdf, PS_SCRIPT, fallbackHtml, firstLine, DEFAULT_BOX, extOf };

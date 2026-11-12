@@ -234,6 +234,55 @@ const leftovers = () => { try { return fs.readdirSync(path.join(TMP, 'work')); }
         ok('an unknown / evicted report is refused (export again)', /no longer available/.test(e3 || ''), e3);
     }
 
+    console.log('\n[addPdf() + frameless placement: a VIPER report printed for the box]');
+    {
+        const PL = require(path.join(ROOT, 'node_modules', 'pdf-lib'));
+        const t = make({ behave: async () => ({}) });
+        const MM = 72 / 25.4;
+        const box = { top: 16, bottom: 14, left: 20, right: 20 };
+        // A page printed at exactly the box size (what report-html-pdf-pages does).
+        const bwPt = 595.28 - 40 * MM, bhPt = 841.89 - 30 * MM;
+        const printed = await makePdf(2, [bwPt, bhPt]);
+        const a = await t.svc.addPdf(printed, 'viper');
+        ok('addPdf counts the pages and returns an id', a.pages === 2 && /^[0-9a-f]{64}$/.test(a.id), a);
+        const b = await t.svc.addPdf(printed, 'viper');
+        ok('…the same PDF gives the same id (cache, not a second copy)', b.id === a.id);
+        const c = await t.svc.addPdf(printed, 'other');
+        ok('…a different method is a different entry', c.id !== a.id);
+        let e0 = null; try { await t.svc.addPdf(Buffer.from('not a pdf'), 'viper'); } catch (e) { e0 = e.message; }
+        ok('…a non-PDF is refused', !!e0, e0);
+
+        const base = await makePdf(3, [595.28, 841.89]);
+        const out = await t.svc.stamp(base, [{ page: 2, id: a.id, index: 0, frame: false, box }, { page: 3, id: a.id, index: 1, frame: false, box }]);
+        const d = await PDFDocument.load(out);
+        const ops = (n) => {
+            const pg = d.getPage(n).node;
+            const cs = pg.Contents();
+            const refs = cs instanceof PL.PDFArray ? cs.asArray() : [cs];
+            return refs.map((r) => {
+                const st = r instanceof PL.PDFRef ? d.context.lookup(r) : r;
+                try { return Buffer.from(PL.decodePDFRawStream(st).decode()).toString('latin1'); }
+                catch (_) { return Buffer.from(st.getContents ? st.getContents() : []).toString('latin1'); }
+            }).join('\n');
+        };
+        const s2 = ops(1);
+        // Compose every `a 0 0 d e f cm` of the q…Do block that draws the page.
+        const blk = /q\n((?:[^q]|q(?!\n))*?)\/EmbeddedPdfPage[^\s]* Do/.exec(s2);
+        let x = 0, y = 0, sc = 1;
+        if (blk) {
+            const re = /([-\d.]+) 0 0 ([-\d.]+) ([-\d.]+) ([-\d.]+) cm/g; let mm;
+            while ((mm = re.exec(blk[1]))) { x += +mm[3] * sc; y += +mm[4] * sc; sc *= +mm[1]; }
+        } else { x = y = sc = NaN; }
+        ok('the printed page is drawn on its reserved page', /Do/.test(s2) && /Do/.test(ops(2)) && !/Do/.test(ops(0)));
+        ok('…without a frame (no rectangle around it)', !/\bre\b/.test(s2), s2.slice(0, 400));
+        ok('…at 1:1 (a page printed for the box is not rescaled)', Math.abs(sc - 1) < 0.001, { sc, snippet: s2.slice(0, 300) });
+        ok('…top-left of the box: x = left margin, y = bottom margin', Math.abs(x - 20 * MM) < 0.05 && Math.abs(y - 14 * MM) < 0.05, { x, y, snippet: s2.slice(0, 300) });
+        let e4 = null; try { await t.svc.stamp(base, [{ page: 2, id: a.id, index: 0, frame: false, box: { top: -1, bottom: 0, left: 0, right: 0 } }]); } catch (e) { e4 = e.message; }
+        ok('a bad box is refused', /Bad placement box/.test(e4 || ''), e4);
+        let e5 = null; try { await t.svc.stamp(base, [{ page: 2, id: a.id, index: 0, frame: false, box: { top: 'x', bottom: 0, left: 0, right: 0 } }]); } catch (e) { e5 = e.message; }
+        ok('…including a non-number', /Bad placement box/.test(e5 || ''), e5);
+    }
+
     console.log('\n[the PowerShell script]');
     {
         const S = LIB.PS_SCRIPT;

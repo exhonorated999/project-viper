@@ -198,6 +198,86 @@ function makeEnv(api) {
         ok('the notes reach the officer as a warning toast', env.toasts.some((t) => t.t === 'warning' && /Word reports in this export:\n• "R\.docx" is open in Word/.test(t.m)));
     }
 
+    console.log('\n[VIPER-editor report with tables / pictures]');
+    const RE = require(path.join(ROOT, 'modules', 'reports', 'rich-editor.js'));
+    function vEnv(api, opts) {
+        const env = makeEnv(api);
+        const o = opts || {};
+        env.rendered = [];
+        env.renderReportHtml = async (h) => { env.rendered.push(h); };
+        env.printed = [];
+        env.window.ViperRichEditor = o.noRich ? undefined : { isRichReport: RE.isRichReport, sanitize: (h) => ({ html: '[clean]' + h, droppedImages: 0 }) };
+        env.window.ViperReportPrint = { buildPrintHtml: (x) => { env.printed.push(x); return '<html>' + x.bodyHtml + '</html>'; } };
+        vm.runInContext('this.__v = { viperReportPages, _viperReportNotes };', env);
+        return env;
+    }
+    const RICH = '<p>Narrative</p><table><tr><td>Item</td></tr></table>';
+    {
+        const calls = [];
+        const env = vEnv({ reportHtmlPdfPages: async (h, w, hh) => { calls.push([h, w, hh]); return { success: true, id: 'f'.repeat(64), pages: 3 }; }, reportDocsStampPdf: async () => ({}) });
+        env.y = 60;
+        await env.__v.viperReportPages(RICH);
+        const P = env.__w._wordPlacements;
+        ok('a report with a table is printed by Chromium, sanitized', calls.length === 1 && calls[0][0] === '<html>[clean]' + RICH + '</html>' && env.rendered.length === 0);
+        ok('…at exactly the report box size (A4 minus 20/20 mm sides, 16 top, 14 bottom)', Math.abs(calls[0][1] - 170 / 25.4) < 1e-9 && Math.abs(calls[0][2] - 267 / 25.4) < 1e-9, calls[0].slice(1));
+        ok('…its first page starting under the section title already on the page', env.printed[0].firstPageTopMm === 60 - 4 - 16, env.printed[0]);
+        ok('one placement per printed page, on consecutive pages starting with the section page', P.length === 3 && P.map((p) => p.page).join() === '3,4,5', P.map((p) => p.page));
+        ok('…frameless, with the report box, naming the printed page', P.every((p, i) => p.frame === false && p.index === i && p.id === 'f'.repeat(64) && p.box.top === 16 && p.box.bottom === 14 && p.box.left === 20 && p.box.right === 20));
+        ok('anything after starts on a fresh page', env.y === env.PH);
+        ok('no note when it worked', env.__v._viperReportNotes.length === 0);
+    }
+    {
+        const env = vEnv({ reportHtmlPdfPages: async () => ({ success: true, id: 'f'.repeat(64), pages: 1 }), reportDocsStampPdf: async () => ({}) });
+        env.y = 250;
+        await env.__v.viperReportPages(RICH);
+        ok('low on the page → the report starts on a new page', env.__w._wordPlacements[0].page === 4 && env.printed[0].firstPageTopMm === env.M + 15 - 4 - 16, [env.__w._wordPlacements, env.printed[0].firstPageTopMm]);
+    }
+    {
+        const calls = [];
+        const env = vEnv({ reportHtmlPdfPages: async () => { calls.push(1); return {}; }, reportDocsStampPdf: async () => ({}) });
+        await env.__v.viperReportPages('<p>Plain <b>text</b> only.</p>');
+        ok('a plain-text report stays native PDF text (no Chromium round trip)', calls.length === 0 && env.rendered.length === 1 && env.__w._wordPlacements.length === 0);
+    }
+    {
+        const env = vEnv({});
+        await env.__v.viperReportPages(RICH);
+        ok('an older main (no print call) → native text, no placements', env.rendered.length === 1 && env.__w._wordPlacements.length === 0 && env.__v._viperReportNotes.length === 0);
+        const env2 = vEnv({ reportHtmlPdfPages: async () => ({ success: true, id: 'a'.repeat(64), pages: 1 }), reportDocsStampPdf: async () => ({}) }, { noRich: true });
+        await env2.__v.viperReportPages(RICH);
+        ok('…and so does a page without the editor module', env2.rendered.length === 1 && env2.__w._wordPlacements.length === 0);
+    }
+    {
+        const env = vEnv({ reportHtmlPdfPages: async () => ({ success: false, error: 'PDF render timed out after 60s' }), reportDocsStampPdf: async () => ({}) });
+        await env.__v.viperReportPages(RICH);
+        ok('a failed print falls back to text, never a gap', env.rendered.length === 1 && env.rendered[0] === RICH && env.__w._wordPlacements.length === 0);
+        ok('…and the officer is told why, and what was lost', env.__v._viperReportNotes.some((n) => /could not be laid out as pages \(PDF render timed out after 60s\)/.test(n) && /without its table and picture layout/.test(n)), env.__v._viperReportNotes);
+        const env2 = vEnv({ reportHtmlPdfPages: async () => { throw new Error('IPC gone'); }, reportDocsStampPdf: async () => ({}) });
+        await env2.__v.viperReportPages(RICH);
+        ok('…a thrown IPC error too', env2.rendered.length === 1 && env2.__v._viperReportNotes.some((n) => /\(IPC gone\)/.test(n)));
+        const env3 = vEnv({ reportHtmlPdfPages: async () => ({ success: true, id: 'a'.repeat(64), pages: 0 }), reportDocsStampPdf: async () => ({}) });
+        await env3.__v.viperReportPages(RICH);
+        ok('…and zero pages counts as a failure', env3.rendered.length === 1 && env3.__w._wordPlacements.length === 0);
+    }
+    {
+        const env = vEnv({ reportDocsStampPdf: async () => ({ success: false, error: 'A converted report is no longer available — export again.' }) });
+        env._wordPlacements = [{ page: 3, id: 'e'.repeat(64), index: 0, frame: false, box: { top: 16, bottom: 14, left: 20, right: 20 } }]; env._wordReportNotes = [];
+        const r = await runSave(env, false);
+        const t = env.toasts.find((x) => x.t === 'error');
+        ok('a failed stamp of the case report stops the export, naming the case report', r === undefined && t && /^The case report could not be placed into the PDF: A converted report is no longer available/.test(t.m), env.toasts);
+        ok('…without the Word "Save a copy" advice', t && !/Save a copy/.test(t.m) && /Nothing was exported\. Try again\.$/.test(t.m));
+        const env2 = vEnv({ reportDocsStampPdf: async () => ({}) });
+        env2._wordPlacements = [{ page: 3, id: 'e'.repeat(64), index: 0, frame: false }, { page: 4, id: 'd'.repeat(64), index: 0 }]; env2._wordReportNotes = [];
+        await runSave(env2, false);
+        ok('with Word pages in the mix it still names the Word reports', env2.toasts.some((x) => x.t === 'error' && /^The Word reports could not be placed/.test(x.m) && /Save a copy/.test(x.m)));
+    }
+    {
+        const env = vEnv({ reportHtmlPdfPages: async () => ({ success: false, error: 'boom' }), reportDocsStampPdf: async () => ({}) });
+        await env.__v.viperReportPages(RICH);
+        env._wordPlacements = []; env._wordReportNotes = [];
+        await runSave(env, false);
+        ok('the case-report note reaches the officer as a warning toast', env.toasts.some((t) => t.t === 'warning' && /^Case report in this export:\n• The case report could not be laid out as pages \(boom\)/.test(t.m)), env.toasts);
+    }
+
     console.log('\n[wiring]');
     {
         const gen = slice('        async function generateCaseReportPDF(', '            // ========== BACKFILL TOC ==========');

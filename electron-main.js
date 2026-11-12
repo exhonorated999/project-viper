@@ -9684,6 +9684,26 @@ ipcMain.handle('report-docs-stamp-pdf', async (event, { base64, placements } = {
   } catch (e) { return _wdFail(e); }
 });
 
+// A report written in the VIPER editor, printed by Chromium at the size of
+// the Export to DA content box (tables, pictures and text wrap kept), then
+// registered so report-docs-stamp-pdf can place its pages. The renderer
+// builds the HTML (modules/reports/report-print.js: CSP, cleaned body).
+ipcMain.handle('report-html-pdf-pages', async (event, { html, widthIn, heightIn } = {}) => {
+  try {
+    if (typeof html !== 'string' || !html) throw new Error('No report to print.');
+    const w = +widthIn, h = +heightIn;
+    if (!(w >= 2 && w <= 20 && h >= 2 && h <= 30)) throw new Error('Bad page size.');
+    const job = () => _doSaveHtmlAsPdf({ html, returnBase64: true, defaultFileName: 'report.pdf',
+      options: { settleMs: 300, marginType: 'none', pageSize: { width: w, height: h } } });
+    const run = _pdfChain.then(job, job);
+    _pdfChain = run.catch(() => {});
+    const r = await run;
+    if (!r || !r.success || !r.base64) throw new Error((r && r.error) || 'The report could not be printed to PDF.');
+    const added = await _docxPdf().addPdf(Buffer.from(r.base64, 'base64'), 'viper');
+    return { success: true, id: added.id, pages: added.pages };
+  } catch (e) { return _wdFail(e); }
+});
+
 // --- Save warrant file to disk ---
 ipcMain.handle('save-warrant-file', async (event, data) => {
   try {

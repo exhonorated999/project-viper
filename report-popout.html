@@ -117,6 +117,16 @@
             font-size: 12px;
             cursor: pointer;
         }
+        .rich-toolbar {
+            background: #161921;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 6px 16px;
+            flex-shrink: 0;
+            -webkit-app-region: no-drag;
+        }
+        .rich-toolbar[hidden], .toolbar[hidden] { display: none; }
+        #editor p { margin: 0 0 .4em; }
+        #editor .vre-pagebreak::after { background: #1a1d2e; }
         .editor-wrap {
             flex: 1;
             padding: 16px;
@@ -164,7 +174,10 @@
         </button>
     </div>
 
-    <div class="toolbar">
+    <!-- ViperRichEditor fills #richBar (tables, pictures, wrap, resize);
+         the plain bar below is the fallback if the module is missing. -->
+    <div class="rich-toolbar" id="richBar" hidden></div>
+    <div class="toolbar" id="plainBar">
         <button onclick="fmt('bold')" title="Bold"><b>B</b></button>
         <button onclick="fmt('italic')" title="Italic"><i>I</i></button>
         <button onclick="fmt('underline')" title="Underline"><u>U</u></button>
@@ -188,6 +201,7 @@
         <span>Ctrl+S to save</span>
     </div>
 
+    <script src="modules/reports/rich-editor.js"></script>
     <script>
         const params = new URLSearchParams(window.location.search);
         const caseNumber = params.get('case') || '';
@@ -201,6 +215,22 @@
         let hasUnsaved = false;
 
         function fmt(cmd) { document.execCommand(cmd, false, null); editor.focus(); }
+
+        // Word-like toolbar (changes reach the unsaved marker via 'input').
+        const RE = window.ViperRichEditor;
+        if (RE) {
+            const bar = document.getElementById('richBar');
+            bar.hidden = false;
+            document.getElementById('plainBar').hidden = true;
+            RE.attach({
+                editor, toolbar: bar,
+                toast: (m, t) => {
+                    lastSavedEl.textContent = m;
+                    lastSavedEl.style.color = t === 'error' || t === 'warning' ? '#fbbf24' : '#67e8f9';
+                },
+            });
+        }
+        const editorHtml = () => (RE ? RE.cleanHtml(editor) : editor.innerHTML);
 
         // Load report from main window on open
         async function loadReport() {
@@ -221,7 +251,14 @@
                 return;
             }
             const now = new Date().toISOString();
-            const result = await api.reportSave(caseNumber, editor.innerHTML, now);
+            let result = false;
+            try {
+                result = await api.reportSave(caseNumber, editorHtml(), now);
+            } catch (e) {
+                lastSavedEl.textContent = 'NOT saved — ' + (/quota/i.test(String(e && e.message)) ? 'report storage is full; remove some pictures and try again.' : ((e && e.message) || e));
+                lastSavedEl.style.color = '#f87171';
+                return;
+            }
             if (result) {
                 lastSavedEl.textContent = 'Saved to main: ' + new Date(now).toLocaleString();
                 lastSavedEl.style.color = '#4ade80';

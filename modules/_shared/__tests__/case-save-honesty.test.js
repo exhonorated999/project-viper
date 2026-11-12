@@ -189,11 +189,13 @@ function hits(hay, needle) {
             < PAGE.indexOf('note.contentHtml = await _noteImagesFromDisk(note.contentHtml);'));
     check('the person-note editor offloads images too',
         /savePersonNote[\s\S]{0,900}_noteImagesToDisk/.test(PAGE));
-    // Both PDF exports walk note HTML. Neither may draw a blank placeholder
-    // because the background hydration had not finished yet.
+    // Both PDF exports walk note HTML (the notes PDF twice: once for the
+    // plain text path, once for the layout-faithful rich-note path). None
+    // may draw a blank placeholder because background hydration had not
+    // finished yet.
     check('both PDF exports read the pictures back before drawing',
-        hits(PAGE, 'html = await _noteImagesFromDisk(html)') === 2,
-        hits(PAGE, 'html = await _noteImagesFromDisk(html)') + ' of 2');
+        hits(PAGE, 'html = await _noteImagesFromDisk(html)') === 3,
+        hits(PAGE, 'html = await _noteImagesFromDisk(html)') + ' of 3');
 
     check('pasted screenshots are downscaled in the main editor',
         /_CS\.shrinkImageDataUrl\(ev\.target\.result\)/.test(PAGE));

@@ -346,6 +346,58 @@ async function pageTests() {
         ok('exhibit photo: next number counts it', CI.nextExhibitNumber(RE.cleanHtml(ed)) === 4);
         c.destroy();
     } else ok('case-inserts.js loaded in the page', false);
+
+    // ── case notes options: links, onDropFiles, noun, an already-handled paste ──
+    const lk = RE.sanitize('<p><a href="https://x.test/a?b=1" onclick="__pwned=7" class="evil" target="_top">site</a> <a href="javascript:__pwned=8">js</a> <a href="file:///c:/x">f</a></p>', document, { links: true }).html;
+    ok('sanitize links: an http(s) link keeps only its href', /<a href="https:\/\/x\.test\/a\?b=1">site<\/a>/.test(lk) && !/onclick|evil|target/.test(lk), lk);
+    ok('sanitize links: javascript: / file: links become text', !/javascript|file:/.test(lk) && /js/.test(lk) && /\bf\b/.test(lk), lk);
+    const nolk = RE.sanitize('<a href="https://x.test/">site</a>').html;
+    ok('sanitize: links still dropped without the option (reports)', nolk === 'site', nolk);
+    ({ ed, bar } = mk('<p>n</p>'));
+    toasts = [];
+    const dropped = [];
+    c = RE.attach({ editor: ed, toolbar: bar, noun: 'note', links: true, toast: (m) => toasts.push(m), onDropFiles: (f) => dropped.push(...f.map((x) => x.name)) });
+    const atEnd = () => { const r0 = document.createRange(); r0.selectNodeContents(ed.lastChild); r0.collapse(false); const s0 = window.getSelection(); s0.removeAllRanges(); s0.addRange(r0); };
+    atEnd();
+    const dtl = new DataTransfer();
+    dtl.setData('text/html', '<p>see <a href="https://drive.example.test/f/1">the folder</a></p>');
+    ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dtl, bubbles: true, cancelable: true }));
+    await tick();
+    ok('notes paste: a pasted link stays a link', /<a href="https:\/\/drive\.example\.test\/f\/1">the folder<\/a>/.test(ed.innerHTML), ed.innerHTML);
+    const dd = new DataTransfer();
+    dd.items.add(new File(['%PDF-1.4'], 'warrant.pdf', { type: 'application/pdf' }));
+    ed.dispatchEvent(new DragEvent('drop', { dataTransfer: dd, bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    await tick();
+    ok('notes drop: a non-picture file goes to onDropFiles, no refusal toast', dropped.join() === 'warrant.pdf' && !toasts.some((m) => /Only pictures/.test(m)), [dropped, toasts]);
+    c.destroy();
+    ({ ed, bar } = mk('<p>n</p>'));
+    toasts = [];
+    let firstSaw = 0;
+    ed.addEventListener('paste', (e) => { firstSaw++; e.preventDefault(); }, true);   // like NoteLinks.pasteAsLink
+    c = RE.attach({ editor: ed, toolbar: bar, noun: 'note', toast: (m) => toasts.push(m) });
+    atEnd();
+    const dtp = new DataTransfer();
+    dtp.setData('text/html', '<p>SHOULD-NOT-LAND</p>');
+    ed.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dtp, bubbles: true, cancelable: true }));
+    await tick();
+    ok('paste: one an earlier capture listener handled is left alone', firstSaw === 1 && !/SHOULD-NOT-LAND/.test(ed.innerHTML), ed.innerHTML);
+    const dd2 = new DataTransfer();
+    dd2.items.add(new File(['x'], 'notes.txt', { type: 'text/plain' }));
+    ed.dispatchEvent(new DragEvent('drop', { dataTransfer: dd2, bubbles: true, cancelable: true, clientX: 5, clientY: 5 }));
+    await tick();
+    ok('noun: the refusal names the note', toasts.some((m) => m === 'Only pictures can be dropped into the note.'), toasts);
+    c.destroy();
+    // .vre-doc: saved notes shown read-only get the editor's content styles.
+    RE.ensureCss(document);
+    const docBox = document.createElement('div');
+    docBox.className = 'vre-doc';
+    docBox.style.fontSize = '16px';
+    docBox.innerHTML = '<h1>T</h1><ul><li>a</li></ul><div class="vre-pagebreak"></div>';
+    document.body.appendChild(docBox);
+    const h1px = parseFloat(getComputedStyle(docBox.querySelector('h1')).fontSize);
+    ok('vre-doc: headings, lists and page breaks styled outside the editor', h1px === 28 && getComputedStyle(docBox.querySelector('ul')).listStyleType === 'disc' && getComputedStyle(docBox.querySelector('.vre-pagebreak')).borderTopStyle === 'dashed', h1px);
+    docBox.remove();
+    ok('ensureCss: one style element', document.querySelectorAll('#vre-style').length === 1);
     return R;
 }
 

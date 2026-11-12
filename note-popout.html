@@ -80,6 +80,15 @@
             padding: 3px 6px;
             font-size: 12px;
         }
+        .rich-toolbar {
+            background: #161921;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            padding: 6px 12px;
+            flex-shrink: 0;
+        }
+        .rich-toolbar[hidden], .toolbar[hidden] { display: none; }
+        #editor p { margin: 0 0 .4em; }
+        #editor .vre-pagebreak::after { background: #0f1117; }
         .editor-wrap { flex: 1; overflow: auto; padding: 20px 24px; }
         .title-wrap { padding: 14px 24px 0; flex-shrink: 0; }
         #noteTitle {
@@ -128,7 +137,11 @@
         <button class="save-btn" id="saveBtn" onclick="saveToMain()">Save to Main</button>
     </div>
 
-    <div class="toolbar">
+    <!-- ViperRichEditor fills #richBar (the case report's tools: tables,
+         pictures, wrap, resize, find & replace); the plain bar below is the
+         fallback if the module is missing. -->
+    <div class="rich-toolbar" id="richBar" hidden></div>
+    <div class="toolbar" id="plainBar">
         <button onclick="fmt('bold')" title="Bold (Ctrl+B)"><b>B</b></button>
         <button onclick="fmt('italic')" title="Italic (Ctrl+I)"><i>I</i></button>
         <button onclick="fmt('underline')" title="Underline (Ctrl+U)"><u>U</u></button>
@@ -163,6 +176,7 @@
     <script src="modules/_shared/case-storage.js"></script>
     <!-- Web links: paste a bare address → link; Ctrl+click → VIPER browser. -->
     <script src="modules/case-notes/note-links.js"></script>
+    <script src="modules/reports/rich-editor.js"></script>
     <script>
         // Case Note pop-out.
         //
@@ -202,6 +216,30 @@
         }
 
         function fmt(cmd) { document.execCommand(cmd, false, null); editor.focus(); }
+
+        // A bare web address pasted becomes a link. Capture phase and first,
+        // so it runs before the rich editor's paste handling.
+        editor.addEventListener('paste', (e) => {
+            if (window.NoteLinks && window.NoteLinks.pasteAsLink(e, document)) markDirty();
+        }, true);
+
+        // Word-like toolbar (changes reach the unsaved marker via 'input').
+        const RE = window.ViperRichEditor;
+        if (RE) {
+            const bar = document.getElementById('richBar');
+            bar.hidden = false;
+            document.getElementById('plainBar').hidden = true;
+            RE.attach({
+                editor, toolbar: bar, noun: 'note', links: true,
+                toast: (m, t) => {
+                    statusLeft.textContent = m;
+                    statusLeft.style.color = t === 'error' || t === 'warning' ? '#fbbf24' : '#67e8f9';
+                    setTimeout(() => { statusLeft.style.color = ''; }, 6000);
+                },
+            });
+        }
+        /** Editor HTML without the rich editor's selection marks. */
+        const editorHtml = () => String(RE ? RE.cleanHtml(editor) : editor.innerHTML).trim();
         function setSize(px) { editor.style.fontSize = px + 'px'; editor.focus(); }
 
         function markDirty() {
@@ -215,7 +253,7 @@
         }
 
         function isDirty() {
-            return loaded && (editor.innerHTML.trim() !== (lastCommitted || '')
+            return loaded && (editorHtml() !== (lastCommitted || '')
                 || cleanTitle(titleInput.value) !== lastCommittedTitle);
         }
 
@@ -232,7 +270,7 @@
                     return;
                 }
                 editor.innerHTML = data.contentHtml || '';
-                lastCommitted = editor.innerHTML.trim();
+                lastCommitted = editorHtml();
                 titleInput.value = cleanTitle(data.title);
                 lastCommittedTitle = cleanTitle(titleInput.value);
                 showTitleInWindow(lastCommittedTitle);
@@ -253,7 +291,7 @@
                 statusLeft.textContent = 'Cannot save \u2014 desktop app required.';
                 return false;
             }
-            const html = editor.innerHTML.trim();
+            const html = editorHtml();
             const title = cleanTitle(titleInput.value);
             let ok = false;
             try {
@@ -287,9 +325,10 @@
             if (e.key === 'Enter') { e.preventDefault(); editor.focus(); }
         });
 
-        // Paste images straight in, same as the main note editor.
-        editor.addEventListener('paste', (e) => {
-            if (window.NoteLinks && window.NoteLinks.pasteAsLink(e, document)) { markDirty(); return; }
+        // Paste images straight in, same as the main note editor (the rich
+        // editor does its own paste and picture handling).
+        if (!RE) editor.addEventListener('paste', (e) => {
+            if (e.defaultPrevented) return;   // NoteLinks took it (above)
             const items = (e.clipboardData && e.clipboardData.items) || [];
             for (let i = 0; i < items.length; i++) {
                 if (items[i].type.indexOf('image') === -1) continue;

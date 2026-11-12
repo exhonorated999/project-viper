@@ -263,7 +263,7 @@ function makeEnv(api) {
         env._wordPlacements = [{ page: 3, id: 'e'.repeat(64), index: 0, frame: false, box: { top: 16, bottom: 14, left: 20, right: 20 } }]; env._wordReportNotes = [];
         const r = await runSave(env, false);
         const t = env.toasts.find((x) => x.t === 'error');
-        ok('a failed stamp of the case report stops the export, naming the case report', r === undefined && t && /^The case report could not be placed into the PDF: A converted report is no longer available/.test(t.m), env.toasts);
+        ok('a failed stamp of the case report stops the export, naming the case report', r === undefined && t && /^The case report \/ note pages could not be placed into the PDF: A converted report is no longer available/.test(t.m), env.toasts);
         ok('…without the Word "Save a copy" advice', t && !/Save a copy/.test(t.m) && /Nothing was exported\. Try again\.$/.test(t.m));
         const env2 = vEnv({ reportDocsStampPdf: async () => ({}) });
         env2._wordPlacements = [{ page: 3, id: 'e'.repeat(64), index: 0, frame: false }, { page: 4, id: 'd'.repeat(64), index: 0 }]; env2._wordReportNotes = [];
@@ -275,7 +275,24 @@ function makeEnv(api) {
         await env.__v.viperReportPages(RICH);
         env._wordPlacements = []; env._wordReportNotes = [];
         await runSave(env, false);
-        ok('the case-report note reaches the officer as a warning toast', env.toasts.some((t) => t.t === 'warning' && /^Case report in this export:\n• The case report could not be laid out as pages \(boom\)/.test(t.m)), env.toasts);
+        ok('the case-report note reaches the officer as a warning toast', env.toasts.some((t) => t.t === 'warning' && /^Page layout in this export:\n• The case report could not be laid out as pages \(boom\)/.test(t.m)), env.toasts);
+    }
+    {
+        // Case notes: same layout path, their own fallback and name.
+        const plain = [];
+        const env = vEnv({ reportHtmlPdfPages: async () => ({ success: false, error: 'boom' }), reportDocsStampPdf: async () => ({}) });
+        await env.__v.viperReportPages(RICH, { label: 'Note "Canvass"', fallback: async (h) => { plain.push(h); } });
+        ok('a note that cannot be laid out falls back to the note renderer, not the report one', plain.length === 1 && plain[0] === RICH && env.rendered.length === 0);
+        ok('…and the warning names the note', env.__v._viperReportNotes.some((n) => /^Note "Canvass" could not be laid out as pages \(boom\)/.test(n)), env.__v._viperReportNotes);
+        const plain2 = [];
+        const env2 = vEnv({ reportHtmlPdfPages: async () => ({}), reportDocsStampPdf: async () => ({}) });
+        await env2.__v.viperReportPages('<p>just text</p>', { fallback: async (h) => { plain2.push(h); } });
+        ok('a plain note stays on its own renderer', plain2.length === 1 && env2.rendered.length === 0);
+        const notesCase = slice("                case 'notes': {", "                case 'reports': {");
+        ok('the Notes section lays out rich notes through viperReportPages (pictures read from disk first)',
+            /RE\.isRichReport\(n\.contentHtml\)/.test(notesCase) && /_noteImagesFromDisk\(h\)/.test(notesCase)
+            && /await viperReportPages\(h, \{ label: [^\n]*fallback: renderNoteContentHtml \}\)/.test(notesCase)
+            && /await renderNoteContentHtml\(n\.contentHtml\)/.test(notesCase));
     }
 
     console.log('\n[wiring]');

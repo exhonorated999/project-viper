@@ -15,14 +15,23 @@
  *                            `inserts`: [{ label, title?, sep?, run(ctx) }] adds
  *                            a "From case" menu; run() returns HTML (or a
  *                            Promise of it) to put in at the caret.
- *   sanitize(html, doc, { pasted })
+ *                            `links`: pasted web links stay links (case notes).
+ *                            `onDropFiles(files)`: dropped files that are not
+ *                            pictures go here (case notes attach them) instead
+ *                            of being refused. `noun`: 'report' | 'note' for
+ *                            messages. A paste another capture listener has
+ *                            already handled (defaultPrevented) is left alone.
+ *   sanitize(html, doc, { pasted, links })
  *                            allow-list cleaner for pasted HTML and for printing.
  *                            Keeps a picture's case-folder reference (data-vp-img,
- *                            report-store.js) unless `pasted`.
+ *                            report-store.js) unless `pasted`; `links` keeps
+ *                            http(s) links (href only).
  *                            → { html, droppedImages }
  *   cleanHtml(editor)        editor HTML without editor-only selection marks.
  *   isRichReport(html)       true when the report has layout that plain text
  *                            rendering would lose (tables, pictures, alignment…).
+ *   ensureCss(doc)           adds the editor CSS; content styled by it also
+ *                            applies to `.vre-doc` (saved notes shown read-only).
  *
  * Everything the editor writes is inline style on the element (width as a % of
  * the column, float, margins), so the saved HTML prints the same way in the
@@ -93,6 +102,7 @@
     const live = new Set();
     const IMG_SRC = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,[a-z0-9+/=\s]+$/i;
     const REF_NAME = /^[\w][\w .()-]{0,150}\.(?:png|jpe?g|gif|webp|bmp)$/i;
+    const WEB_HREF = /^https?:\/\/[^\s]{1,2000}$/i;
     const BLANK_IMG = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
     /** Keep only allow-listed declarations with harmless values. */
@@ -185,6 +195,15 @@
                 if (!span.attributes.length) unwrap(span);
                 return;
             }
+            if (tag === 'A' && stats.links) {
+                const href = String(n.getAttribute('href') || '').trim();
+                if (WEB_HREF.test(href) && !/[\s"'<>\\]/.test(href)) {
+                    Array.from(n.attributes).map((a) => a.name).forEach((a) => n.removeAttribute(a));
+                    n.setAttribute('href', href);
+                    walkClean(n, stats, doc);
+                    return;
+                }
+            }
             if (!KEEP_TAGS.has(tag)) {           // A, o:p, unknown → keep the text
                 walkClean(n, stats, doc);
                 unwrap(n);
@@ -205,7 +224,7 @@
         if (!d) throw new Error('sanitize needs a DOM document');
         const tpl = d.createElement('template');
         tpl.innerHTML = String(html == null ? '' : html);
-        const stats = { droppedImages: 0, stripRefs: !!(opts && opts.pasted) };
+        const stats = { droppedImages: 0, stripRefs: !!(opts && opts.pasted), links: !!(opts && opts.links) };
         walkClean(tpl.content, stats, d);
         const box = d.createElement('div');
         box.appendChild(tpl.content);
@@ -396,26 +415,26 @@
         '.vre-chk{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#cbd5e1;margin:0 4px;cursor:pointer;user-select:none}',
         '::highlight(vre-find){background-color:rgba(250,204,21,.5);color:inherit}',
         '::highlight(vre-find-cur){background-color:#f97316;color:#fff}',
-        '.vre-editor table{border-collapse:collapse}',
-        '.vre-editor td,.vre-editor th{min-width:2.2em;vertical-align:top}',
-        '.vre-editor th{font-weight:700}',
-        '.vre-editor h1{font-size:1.75em;font-weight:700;line-height:1.25;margin:.5em 0 .3em}',
-        '.vre-editor h2{font-size:1.4em;font-weight:700;line-height:1.3;margin:.5em 0 .3em}',
-        '.vre-editor h3{font-size:1.17em;font-weight:700;line-height:1.35;margin:.45em 0 .25em}',
-        '.vre-editor ul{list-style:disc;padding-left:1.7em;margin:.3em 0}',
-        '.vre-editor ol{list-style:decimal;padding-left:1.7em;margin:.3em 0}',
-        '.vre-editor ul ul{list-style:circle}',
-        '.vre-editor blockquote{margin:0 0 0 40px}',
-        '.vre-editor .vre-pagebreak{display:block;height:0;border-top:2px dashed #64748b;margin:18px 0;position:relative;clear:both}',
-        '.vre-editor .vre-pagebreak::after{content:"Page break";position:absolute;left:50%;top:-9px;transform:translateX(-50%);font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:0 8px;background:#2a3441;color:#94a3b8}',
-        '.vre-editor::after{content:"";display:block;clear:both}',
+        '.vre-editor table,.vre-doc table{border-collapse:collapse}',
+        '.vre-editor td,.vre-editor th,.vre-doc td,.vre-doc th{min-width:2.2em;vertical-align:top}',
+        '.vre-editor th,.vre-doc th{font-weight:700}',
+        '.vre-editor h1,.vre-doc h1{font-size:1.75em;font-weight:700;line-height:1.25;margin:.5em 0 .3em}',
+        '.vre-editor h2,.vre-doc h2{font-size:1.4em;font-weight:700;line-height:1.3;margin:.5em 0 .3em}',
+        '.vre-editor h3,.vre-doc h3{font-size:1.17em;font-weight:700;line-height:1.35;margin:.45em 0 .25em}',
+        '.vre-editor ul,.vre-doc ul{list-style:disc;padding-left:1.7em;margin:.3em 0}',
+        '.vre-editor ol,.vre-doc ol{list-style:decimal;padding-left:1.7em;margin:.3em 0}',
+        '.vre-editor ul ul,.vre-doc ul ul{list-style:circle}',
+        '.vre-editor blockquote,.vre-doc blockquote{margin:0 0 0 40px}',
+        '.vre-editor .vre-pagebreak,.vre-doc .vre-pagebreak{display:block;height:0;border-top:2px dashed #64748b;margin:18px 0;position:relative;clear:both}',
+        '.vre-editor .vre-pagebreak::after,.vre-doc .vre-pagebreak::after{content:"Page break";position:absolute;left:50%;top:-9px;transform:translateX(-50%);font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:0 8px;background:#2a3441;color:#94a3b8}',
+        '.vre-editor::after,.vre-doc::after{content:"";display:block;clear:both}',
         '.vre-frame{position:fixed;pointer-events:none;border:2px solid #00d9ff;z-index:10050;box-shadow:0 0 0 3px rgba(0,217,255,.2)}',
         '.vre-h{position:fixed;width:12px;height:12px;background:#00d9ff;border:2px solid #0a0e14;border-radius:3px;z-index:10051}',
         '.vre-h[data-c=nw],.vre-h[data-c=se]{cursor:nwse-resize}.vre-h[data-c=ne],.vre-h[data-c=sw]{cursor:nesw-resize}',
         '.vre-badge{position:fixed;z-index:10052;background:#0a0e14;color:#67e8f9;font:600 11px/1 Arial,sans-serif;padding:4px 6px;border-radius:4px;border:1px solid rgba(0,217,255,.5);pointer-events:none}',
         'body.light-mode .vre-btn{color:#334155}body.light-mode .vre-sel,body.light-mode .vre-in{background:#fff;color:#0f172a}',
         'body.light-mode .vre-chk,body.light-mode .vre-count{color:#334155}',
-        'body.light-mode .vre-editor .vre-pagebreak::after{background:#fff}',
+        'body.light-mode .vre-editor .vre-pagebreak::after,body.light-mode .vre-doc .vre-pagebreak::after{background:#fff}',
     ].join('\n');
 
     function injectCss(doc) {
@@ -476,6 +495,9 @@
         const onChange = typeof opts.onChange === 'function' ? opts.onChange : () => {};
         const toast = typeof opts.toast === 'function' ? opts.toast : () => {};
         const inserts = Array.isArray(opts.inserts) ? opts.inserts.filter((it) => it && typeof it.run === 'function') : [];
+        const keepLinks = !!opts.links;
+        const onDropFiles = typeof opts.onDropFiles === 'function' ? opts.onDropFiles : null;
+        const noun = opts.noun === 'note' ? 'note' : 'report';
         injectCss(doc);
         editor.classList.add('vre-editor');
         if (!bar.querySelector('[data-vre-bar]')) bar.insertAdjacentHTML('afterbegin', toolbarHtml({ inserts }));
@@ -1128,13 +1150,13 @@
         }, true);
         on(editor, 'paste', (e) => {
             const cd = e.clipboardData;
-            if (!cd) return;
+            if (!cd || e.defaultPrevented) return;
             let html = '';
             try { html = cd.getData('text/html') || ''; } catch (_) {}
             const imgs = Array.from(cd.items || []).filter((it) => it.kind === 'file' && /^image\//i.test(it.type || '')).map((it) => it.getAsFile()).filter(Boolean);
             if (html && /<[a-z]/i.test(html)) {
                 e.preventDefault(); e.stopImmediatePropagation();
-                const r = sanitize(html, doc, { pasted: true });
+                const r = sanitize(html, doc, { pasted: true, links: keepLinks });
                 const body = r.html.replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '');
                 if (body.trim()) insertHtml(body);
                 else if (imgs.length) { insertFiles(imgs); return; }
@@ -1161,7 +1183,9 @@
             const files = Array.from(e.dataTransfer.files || []);
             const pics = files.filter((f) => /^image\//i.test(f.type || '') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name || ''));
             e.preventDefault(); e.stopPropagation();
-            if (!pics.length) { toast('Only pictures can be dropped into the report.', 'warning'); return; }
+            const rest = files.filter((f) => pics.indexOf(f) < 0);
+            if (rest.length && onDropFiles) { try { onDropFiles(rest, e); } catch (err) { toast((err && err.message) || 'Those files could not be added.', 'error'); } }
+            if (!pics.length) { if (!onDropFiles) toast('Only pictures can be dropped into the ' + noun + '.', 'warning'); return; }
             let r = null;
             try { r = doc.caretRangeFromPoint(e.clientX, e.clientY); } catch (_) {}
             if (r && inEditor(r.startContainer)) { savedRange = r; const s = win.getSelection(); s.removeAllRanges(); s.addRange(r); }
@@ -1192,5 +1216,5 @@
         return ctl;
     }
 
-    return { FONT_SIZES, attach, toolbarHtml, sanitize, cleanStyle, cleanHtml, isRichReport, tableHtml, imgStyle, wrapOf, prepareImage, CSS };
+    return { FONT_SIZES, attach, toolbarHtml, sanitize, cleanStyle, cleanHtml, isRichReport, tableHtml, imgStyle, wrapOf, prepareImage, ensureCss: injectCss, CSS };
 });

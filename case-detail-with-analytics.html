@@ -1562,7 +1562,7 @@
                 return (await RE.prepareImage(blob, window, document)).src;
             }
             const ev = (caseEvidence || []).find(e => e && String(e.id) === String(item.evidenceId));
-            if (!ev || window.ViperCaseInserts.isRestrictedEvidence(ev) || ev.released) throw new Error('This evidence item cannot be used in the report.');
+            if (!ev || window.ViperCaseInserts.isRestrictedEvidence(ev) || ev.released) throw new Error('This evidence item cannot be used here.');
             const api = window.electronAPI || {};
             const ext = String(item.fileName || item.filePath).split('.').pop().toLowerCase();
             let lastErr = null;
@@ -5112,8 +5112,17 @@
                         // Render the note body: walk contentHtml and embed any
                         // pasted/inline images via doc.addImage(). Fall back to
                         // legacy plain-text `content`.
+                        // A note with tables, pictures, headings… (the rich
+                        // editor) is laid out by Chromium like the case report.
                         if (typeof n.contentHtml === 'string' && n.contentHtml.trim()) {
-                            await renderNoteContentHtml(n.contentHtml);
+                            const RE = window.ViperRichEditor;
+                            if (RE && RE.isRichReport(n.contentHtml)) {
+                                let h = n.contentHtml;
+                                try { if (_CS && h.indexOf(_CS.IMG_ATTR) !== -1) h = await _noteImagesFromDisk(h); } catch (_) {}
+                                await viperReportPages(h, { label: `Note "${n.title || 'Note ' + (i + 1)}"`, fallback: renderNoteContentHtml });
+                            } else {
+                                await renderNoteContentHtml(n.contentHtml);
+                            }
                         } else if (typeof n.content === 'string' && n.content.trim()) {
                             bodyText(n.content);
                         }
@@ -5466,11 +5475,16 @@
             // stamped on like the Word pages — frameless, at 1:1, the first one
             // under the section title. A plain-text report keeps the native
             // text rendering (renderReportHtml), as before.
+            // Case notes written with the same editor go the same way
+            // (opts.label names the note in a warning, opts.fallback is the
+            // plain renderer — renderNoteContentHtml for notes).
             const _viperReportNotes = [];
-            async function viperReportPages(html) {
+            async function viperReportPages(html, opts) {
                 const RE = window.ViperRichEditor, RP = window.ViperReportPrint, api = window.electronAPI;
-                if (!RE || !RP || !RE.isRichReport(html)) { await renderReportHtml(html); return; }
-                if (!api || !api.reportHtmlPdfPages || !api.reportDocsStampPdf) { await renderReportHtml(html); return; }
+                const plain = (opts && opts.fallback) || renderReportHtml;
+                const label = (opts && opts.label) || 'The case report';
+                if (!RE || !RP || !RE.isRichReport(html)) { await plain(html); return; }
+                if (!api || !api.reportHtmlPdfPages || !api.reportDocsStampPdf) { await plain(html); return; }
                 const box = { top: 16, bottom: 14, left: M, right: M };
                 if (y > PH * 0.6) newPage();
                 const firstTop = Math.max(0, y - 4 - box.top);
@@ -5481,8 +5495,8 @@
                 } catch (e) { r = { success: false, error: (e && e.message) || String(e) }; }
                 if (!r || !r.success || !(r.pages > 0) || !r.id) {
                     const why = (r && r.error) || 'unknown error';
-                    _viperReportNotes.push(`The case report could not be laid out as pages (${why}) — it was printed as plain text, without its table and picture layout.`);
-                    await renderReportHtml(html);
+                    _viperReportNotes.push(`${label} could not be laid out as pages (${why}) — it was printed as plain text, without its table and picture layout.`);
+                    await plain(html);
                     return;
                 }
                 for (let p = 0; p < r.pages; p++) {
@@ -5733,7 +5747,7 @@
                     // Framed placements are Word pages; frameless ones are the
                     // VIPER-editor report laid out with its tables/pictures.
                     const hasWord = _wordPlacements.some((p) => p.frame !== false);
-                    const msg = (hasWord ? 'The Word reports' : 'The case report') + ' could not be placed into the PDF: ' + why;
+                    const msg = (hasWord ? 'The Word reports' : 'The case report / note pages') + ' could not be placed into the PDF: ' + why;
                     if (_returnPdf) return { success: false, error: msg };
                     viperToast(msg + '\n\nNothing was exported. Try again' + (hasWord ? '; if it keeps failing, use "Save a copy…" on the Reports tab.' : '.'), 'error');
                     return;
@@ -5743,7 +5757,7 @@
                 viperToast('Word reports in this export:\n• ' + _wordReportNotes.join('\n• '), 'warning');
             }
             if (typeof _viperReportNotes !== 'undefined' && _viperReportNotes.length) {
-                viperToast('Case report in this export:\n• ' + _viperReportNotes.join('\n• '), 'warning');
+                viperToast('Page layout in this export:\n• ' + _viperReportNotes.join('\n• '), 'warning');
             }
 
             // Supervisor Link path: hand the bytes back instead of writing a
@@ -8026,9 +8040,15 @@
                                 <!-- Rich Editor -->
                                 <div>
                                     <label class="block text-sm font-medium text-gray-300 mb-2">Note Content *</label>
-                                    <div class="glass-card rounded-lg overflow-hidden border border-gray-600 focus-within:border-viper-cyan transition-colors">
-                                        <!-- Toolbar -->
-                                        <div class="bg-viper-card/70 border-b border-gray-700 p-2 flex items-center flex-wrap gap-1">
+                                    <!-- Not overflow-hidden with the rich toolbar: its From case
+                                         menu and table grid drop down over the editor and would be
+                                         clipped on a short note. -->
+                                    <div class="glass-card rounded-lg ${window.ViperRichEditor ? '' : 'overflow-hidden'} border border-gray-600 focus-within:border-viper-cyan transition-colors">
+                                        <!-- Toolbar: ViperRichEditor (modules/reports/rich-editor.js)
+                                             fills #noteRichToolbar — the same tools as the case
+                                             report. The old B/I/U bar is the fallback. -->
+                                        <div class="bg-viper-card/70 border-b border-gray-700 p-2 flex items-center flex-wrap gap-1 rounded-t-lg">
+                                            ${window.ViperRichEditor ? `<div id="noteRichToolbar" class="flex-1 min-w-0"></div>` : `
                                             <button type="button" onclick="formatNoteText('bold')" title="Bold (Ctrl+B)" class="p-2 rounded hover:bg-viper-cyan/20 text-gray-300 hover:text-viper-cyan transition-colors w-9 h-9 flex items-center justify-center">
                                                 <span class="font-bold text-sm">B</span>
                                             </button>
@@ -8050,7 +8070,7 @@
                                                 <option value="24">24</option>
                                             </select>
                                             <div class="flex-1"></div>
-                                            <span class="text-[10px] text-gray-500">Spellcheck ON • Paste images with Ctrl+V</span>
+                                            <span class="text-[10px] text-gray-500">Spellcheck ON • Paste images with Ctrl+V</span>`}
                                         </div>
                                         <!-- Editor Area -->
                                         <div class="p-4 min-h-[220px] bg-viper-card/30" style="font-family: Arial, sans-serif;">
@@ -8338,7 +8358,7 @@
                     </div>
                 </div>
 
-                <div class="note-rendered text-gray-200" style="line-height: 1.6;">${html}</div>
+                <div class="note-rendered vre-doc text-gray-200" style="line-height: 1.6;">${html}</div>
 
                 ${atts}
                 ${_noteAssigneeChips(note, personIndex)}
@@ -8417,6 +8437,7 @@
             _hideImgResize();
             document.getElementById('noteForm').classList.add('hidden');
             const ed = document.getElementById('noteEditor');
+            if (ed && ed._vre) { ed._vre.deselect(); ed._vre.closeFind(); }
             if (ed) ed.innerHTML = '';
             _noteSetTitleInput('');
             const list = document.getElementById('noteAttachmentsList');
@@ -8434,6 +8455,32 @@
                 editor.innerHTML = initialHtml;
             } else {
                 editor.innerHTML = '';
+            }
+            // The form element survives between notes; wire it once.
+            if (editor._noteWired) { if (editor._vre) editor._vre.refresh(); return; }
+            editor._noteWired = true;
+
+            // A bare web address becomes a link on the spot, so the officer
+            // can see it took. Registered first, in the capture phase, so it
+            // runs before the rich editor's own paste handling (which leaves
+            // a paste this one already handled alone).
+            editor.addEventListener('paste', function(e) {
+                if (window.NoteLinks) window.NoteLinks.pasteAsLink(e, document);
+            }, true);
+
+            // Toolbar: headings, sizes, alignment, lists, tables, pictures
+            // (wrap / resize), page breaks, From case, find & replace — the
+            // case report's editor. Files that are not pictures dropped on
+            // the note still become attachments.
+            const richBar = document.getElementById('noteRichToolbar');
+            const rich = !!(window.ViperRichEditor && richBar);
+            if (rich) {
+                ViperRichEditor.attach({
+                    editor, toolbar: richBar, noun: 'note', links: true,
+                    inserts: _reportCaseInserts(),
+                    onDropFiles: (files) => _stageNoteFiles(files),
+                    toast: (m, t) => viperToast(m, t),
+                });
             }
 
             // Keyboard shortcuts — B/I/U
@@ -8453,10 +8500,10 @@
             // day pasting pictures into notes and then could not save them.
             // On commit these are moved out to disk entirely (see
             // _noteImagesToDisk), so what stays in storage is just the markup.
+            // The rich editor handles paste, drop and picture selection itself.
+            if (rich) return;
             editor.addEventListener('paste', function(e) {
-                // A bare web address becomes a link on the spot, so the
-                // officer can see it took. Everything else falls through.
-                if (window.NoteLinks && window.NoteLinks.pasteAsLink(e, document)) return;
+                if (e.defaultPrevented) return;   // NoteLinks took it (above)
                 const items = e.clipboardData && e.clipboardData.items;
                 if (!items) return;
                 for (let i = 0; i < items.length; i++) {
@@ -8614,7 +8661,7 @@
         function formatNoteText(command) {
             document.execCommand(command, false, null);
             const ed = document.getElementById('noteEditor');
-            if (ed) ed.focus();
+            if (ed) { ed.focus(); if (ed._vre) ed._vre.refresh(); }
         }
 
         function changeNoteFontSize(size) {
@@ -8801,6 +8848,9 @@
         // with web addresses made clickable (see modules/case-notes/note-links.js).
         // Display only — the stored note is never rewritten here.
         function _noteRenderHtml(note) {
+            // Headings, lists, tables and page breaks from the rich editor
+            // (the .vre-doc rules) — the same look as while editing.
+            if (window.ViperRichEditor && ViperRichEditor.ensureCss) ViperRichEditor.ensureCss(document);
             const html = _noteResolveHtml(note);
             const safe = html
                 .replace(/<\s*script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
@@ -8895,19 +8945,27 @@
          * bogus entry onto its edit history, which is a discovery artifact
          * we would then have to explain.
          */
+        /** Editor HTML without the rich editor's selection marks, so picking
+         *  a picture neither dirties the note nor gets saved with it. */
+        function _noteEditorHtml(ed) {
+            if (!ed) return '';
+            const RE = typeof ViperRichEditor !== 'undefined' ? ViperRichEditor : null;
+            return String(RE && typeof RE.cleanHtml === 'function' && ed.cloneNode ? RE.cleanHtml(ed) : ed.innerHTML).trim();
+        }
+
         function _noteEditorIsDirty() {
             const ed = document.getElementById('noteEditor');
             if (!ed) return false;
             if (pendingNoteAttachments.length > 0) return true;
             if (_noteReadTitleInput() !== (_noteLastCommittedTitle || '')) return true;
-            return ed.innerHTML.trim() !== (_noteLastCommittedHtml || '');
+            return _noteEditorHtml(ed) !== (_noteLastCommittedHtml || '');
         }
 
         /** Called after initializeNoteEditor so the baseline is the HTML the
          *  browser actually produced, not the string we handed it. */
         function _noteMarkClean() {
             const ed = document.getElementById('noteEditor');
-            _noteLastCommittedHtml = ed ? ed.innerHTML.trim() : '';
+            _noteLastCommittedHtml = _noteEditorHtml(ed);
             _noteLastCommittedTitle = _noteReadTitleInput();
         }
 
@@ -8993,13 +9051,13 @@
 
             // Read the editor and the picker FIRST. Everything after this
             // can be interrupted by a re-render or a page teardown.
-            const contentHtml = editor.innerHTML.trim();
+            const contentHtml = _noteEditorHtml(editor);
             const plainText = (editor.innerText || editor.textContent || '').trim();
             const assignments = _collectNoteAssignments();
             const title = _noteReadTitleInput();
 
             const hasContent = plainText.length > 0
-                || /<img\b/i.test(contentHtml)
+                || /<(?:img|table)\b/i.test(contentHtml)
                 || pendingNoteAttachments.length > 0
                 || savedNoteAttachments.filter(a => !a.legacy).length > 0;
             if (!hasContent) {
@@ -9488,7 +9546,7 @@
                                         </div>
                                     </div>
                                     ${_noteTitleOf(n) ? `<div class="text-sm font-semibold text-white mb-1 break-words">${_escapeHtml(_noteTitleOf(n))}</div>` : ''}
-                                    <div class="note-rendered text-gray-200 text-sm" style="line-height:1.6;">${_noteRenderHtml(n)}</div>
+                                    <div class="note-rendered vre-doc text-gray-200 text-sm" style="line-height:1.6;">${_noteRenderHtml(n)}</div>
                                     ${_noteAttachmentList(n)}
                                 </div>
                             `).join('')}
@@ -9657,7 +9715,10 @@
             renderTabContent(role);
         }
         
-        async function exportNotesToPDF() {
+        // opts.plain: no Chromium page layout (the fallback when stamping the
+        // laid-out pages fails — a notes PDF with blank pages is worse).
+        async function exportNotesToPDF(opts) {
+            const plainOnly = !!(opts && opts.plain === true);
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
             const PW = doc.internal.pageSize.width;
@@ -9796,6 +9857,36 @@
             // at the end of the export via pdf-lib in main process.
             const pdfAttachmentNames = [];
 
+            // A note written with tables, pictures (wrapped / sized),
+            // headings… is printed by Chromium at the size of this page's
+            // text box and its pages stamped onto pages reserved here, like
+            // the case report in Export to DA. Plain notes keep the text walk.
+            const layoutPlacements = [];
+            const layoutNotes = [];
+            const LAYOUT_BOX = { top: 20, bottom: 25, left: M, right: M };
+            const layoutNote = async (html, label) => {
+                const RE = window.ViperRichEditor, RP = window.ViperReportPrint, api = window.electronAPI;
+                if (plainOnly || !RE || !RP || !RE.isRichReport(html) || !api || !api.reportHtmlPdfPages || !api.reportDocsStampPdf) return false;
+                try { if (_CS && html.indexOf(_CS.IMG_ATTR) !== -1) html = await _noteImagesFromDisk(html); } catch (_) {}
+                if (yPos > PH * 0.6) { doc.addPage(); yPos = 20; }
+                const B = LAYOUT_BOX;
+                let r;
+                try {
+                    const printHtml = RP.buildPrintHtml({ bodyHtml: RE.sanitize(html).html, firstPageTopMm: Math.max(0, yPos - 4 - B.top) });
+                    r = await api.reportHtmlPdfPages(printHtml, (PW - B.left - B.right) / 25.4, (PH - B.top - B.bottom) / 25.4);
+                } catch (e) { r = { success: false, error: (e && e.message) || String(e) }; }
+                if (!r || !r.success || !(r.pages > 0) || !r.id) {
+                    layoutNotes.push(`${label} could not be laid out as pages (${(r && r.error) || 'unknown error'}) — it was printed as plain text.`);
+                    return false;
+                }
+                for (let p = 0; p < r.pages; p++) {
+                    if (p > 0) { doc.addPage(); yPos = 20; }
+                    layoutPlacements.push({ page: doc.internal.getNumberOfPages(), id: r.id, index: p, frame: false, box: B });
+                }
+                yPos = PH;   // what follows starts on a fresh page
+                return true;
+            };
+
             // ── Header ──
             doc.setFillColor(10, 14, 20);
             doc.rect(0, 0, 210, 40, 'F');
@@ -9863,7 +9954,9 @@
 
                 // Body — walk contentHtml so pasted/inline images render inline
                 if (typeof note.contentHtml === 'string' && note.contentHtml.trim()) {
-                    await renderNoteContentHtml(note.contentHtml);
+                    const t = _noteTitleOf(note);
+                    const laid = await layoutNote(note.contentHtml, `Note ${sortedNotes.length - index}${t ? ' "' + t + '"' : ''}`);
+                    if (!laid) await renderNoteContentHtml(note.contentHtml);
                 } else if (typeof note.content === 'string' && note.content.trim()) {
                     bodyText(note.content);
                 }
@@ -9927,19 +10020,49 @@
             
             const filename = `Case_${currentCase.caseNumber}_Notes_${new Date().toISOString().split('T')[0]}.pdf`;
 
+            // Laid-out notes: draw their pages onto the pages kept for them.
+            let stampedB64 = null;
+            if (layoutPlacements.length) {
+                let why = '';
+                try {
+                    const st = await window.electronAPI.reportDocsStampPdf(doc.output('datauristring').split(',')[1] || '', layoutPlacements);
+                    if (st && st.success && st.base64) stampedB64 = st.base64;
+                    else why = (st && st.error) || 'unknown error';
+                } catch (e) { why = (e && e.message) || String(e); }
+                if (!stampedB64) {
+                    viperToast('The laid-out notes could not be placed into the PDF (' + why + '). Exporting them as plain text instead.', 'warning');
+                    return exportNotesToPDF({ plain: true });
+                }
+            }
+            if (layoutNotes.length) viperToast('Page layout in this export:\n• ' + layoutNotes.join('\n• '), 'warning');
+            const saveFinal = () => {
+                if (!stampedB64) { doc.save(filename); return; }
+                const bin = atob(stampedB64);
+                const u8 = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+                const url = URL.createObjectURL(new Blob([u8], { type: 'application/pdf' }));
+                const a = document.createElement('a');
+                a.href = url; a.download = filename;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            };
+
             // If any PDF attachments need to be appended, hand the
             // jsPDF output to the main process where pdf-lib copies
             // pages from each attachment and saves via dialog.
             if (pdfAttachmentNames.length && window.electronAPI && window.electronAPI.notesExportMergeAttachments) {
                 try {
-                    const ab = doc.output('arraybuffer');
-                    const bytes = new Uint8Array(ab);
-                    let binary = '';
-                    const CHUNK = 0x8000;
-                    for (let i = 0; i < bytes.length; i += CHUNK) {
-                        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+                    let basePdfBase64 = stampedB64;
+                    if (!basePdfBase64) {
+                        const ab = doc.output('arraybuffer');
+                        const bytes = new Uint8Array(ab);
+                        let binary = '';
+                        const CHUNK = 0x8000;
+                        for (let i = 0; i < bytes.length; i += CHUNK) {
+                            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+                        }
+                        basePdfBase64 = btoa(binary);
                     }
-                    const basePdfBase64 = btoa(binary);
                     const res = await window.electronAPI.notesExportMergeAttachments({
                         caseNumber: currentCase.caseNumber,
                         defaultFilename: filename,
@@ -9958,18 +10081,18 @@
                     } else {
                         console.warn('[exportNotesToPDF] merge IPC failed, falling back to direct save:', res && res.error);
                         viperToast('Could not merge PDF attachments — saving report only.', 'warning');
-                        doc.save(filename);
+                        saveFinal();
                         return;
                     }
                 } catch (mergeErr) {
                     console.error('[exportNotesToPDF] merge path errored, falling back:', mergeErr);
                     viperToast('Could not merge PDF attachments — saving report only.', 'warning');
-                    doc.save(filename);
+                    saveFinal();
                     return;
                 }
             }
 
-            doc.save(filename);
+            saveFinal();
 
             viperToast('Case notes exported successfully!', 'success');
         }

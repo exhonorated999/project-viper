@@ -9500,10 +9500,10 @@ ipcMain.handle('working-doc-remove', async (event, { caseNumber, fileName } = {}
 // same engine as Working Documents — a SECOND manager with its own session
 // folder, so neither ever adopts the other's working copies at recovery.
 //
-// save-da-export never walks Reports/, so the Word report is left out of
-// every Export to DA and Assist Package: VIPER cannot turn a Word document
-// into its report format. The renderer says so on the tab, in the export
-// dialog, and in the PDF; "Save a copy" is how the officer sends it.
+// save-da-export never walks Reports/, so the .docx files themselves are not
+// in the ZIP. Since 5.6.1 their PAGES are: 'report-docs-to-pdf' (below)
+// converts each one and the renderer places the pages in the report PDF.
+// "Save a copy" still hands over the editable .docx.
 const REPORT_WORD_SUBDIR = ['Reports', 'Word'];
 function _reportDocs() {
   if (_reportDocsMgr) return _reportDocsMgr;
@@ -9615,9 +9615,9 @@ ipcMain.handle('report-doc-remove', async (event, { caseNumber, fileName } = {})
   catch (e) { return _wdFail(e); }
 });
 
-// The Word report never rides in an export, so this is how it reaches the
-// DA. A readable copy — decrypted when Field Security is on, since the
-// recipient has no key — written where the officer chooses.
+// The editable .docx itself (the export carries its pages as PDF). A readable
+// copy — decrypted when Field Security is on, since the recipient has no
+// key — written where the officer chooses.
 ipcMain.handle('report-doc-save-copy', async (event, { caseNumber, fileName } = {}) => {
   try {
     const plain = _reportDocs().readPlain(caseNumber, fileName);
@@ -9632,6 +9632,56 @@ ipcMain.handle('report-doc-save-copy', async (event, { caseNumber, fileName } = 
     fs.writeFileSync(result.filePath, plain);
     return { success: true, filePath: result.filePath, bytes: plain.length };
   } catch (e) { restoreFocus(); return _wdFail(e); }
+});
+
+// --- Word reports in Export to DA / Assist Package (5.6.1) ---
+// Each Word report becomes PDF pages (modules/reports/docx-pdf.js: Microsoft
+// Word itself when installed, else a .docx → HTML → PDF fallback). The bytes
+// stay here; the renderer gets page counts and an id, reserves that many
+// pages in its jsPDF report, and hands the finished report back to be
+// stamped. Readable copies only — decrypted when Field Security is on, the
+// plaintext lives in a private temp folder for the length of the conversion.
+let _docxPdfSvc = null;
+function _docxPdf() {
+  if (_docxPdfSvc) return _docxPdfSvc;
+  _docxPdfSvc = require('./modules/reports/docx-pdf').createDocxPdf({
+    fs, path, crypto, spawn,
+    tmpRoot: path.join(os.tmpdir(), 'viper-docx-pdf'),
+    htmlToPdf: async (html) => {
+      const job = () => _doSaveHtmlAsPdf({ html, returnBase64: true, defaultFileName: 'report.pdf', options: { settleMs: 400, pageSize: 'Letter' } });
+      const run = _pdfChain.then(job, job);
+      _pdfChain = run.catch(() => {});
+      const r = await run;
+      if (!r || !r.success || !r.base64) throw new Error((r && r.error) || 'The report could not be printed to PDF.');
+      return Buffer.from(r.base64, 'base64');
+    },
+    log: (m) => console.warn(m),
+  });
+  return _docxPdfSvc;
+}
+
+ipcMain.handle('report-docs-to-pdf', async (event, { caseNumber } = {}) => {
+  try {
+    const listed = _reportDocs().list(caseNumber)
+      .slice()
+      .sort((a, b) => String(a.fileName).localeCompare(String(b.fileName), undefined, { numeric: true, sensitivity: 'base' }));
+    const items = listed.map((d) => {
+      try { return { fileName: d.fileName, plain: _reportDocs().readPlain(caseNumber, d.fileName) }; }
+      catch (e) { return { fileName: d.fileName, plain: null, error: (e && e.message) || String(e) }; }
+    });
+    const results = await _docxPdf().convertMany(items);
+    const docs = results.map((r, i) => Object.assign({}, r, { open: !!(listed[i] && listed[i].open) }));
+    return { success: true, docs };
+  } catch (e) { return _wdFail(e); }
+});
+
+ipcMain.handle('report-docs-stamp-pdf', async (event, { base64, placements } = {}) => {
+  try {
+    if (typeof base64 !== 'string' || !base64) throw new Error('No report PDF was supplied.');
+    if (!Array.isArray(placements) || placements.length > 20000) throw new Error('Bad page placements.');
+    const out = await _docxPdf().stamp(Buffer.from(base64, 'base64'), placements);
+    return { success: true, base64: out.toString('base64'), bytes: out.length };
+  } catch (e) { return _wdFail(e); }
 });
 
 // --- Save warrant file to disk ---

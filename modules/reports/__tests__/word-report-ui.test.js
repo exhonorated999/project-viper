@@ -8,8 +8,8 @@
  *   - switching is never destructive and always confirmed; the VIPER report
  *     is saved BEFORE the switch to Word; a switch that could not be saved
  *     says so and does not repaint;
- *   - the "not included in Export to DA" disclaimer is on the Word tab and
- *     on the switch to Word;
+ *   - the "Included in Export to DA as PDF pages" note (5.6.1 — the export
+ *     converts each Word report) is on the Word tab and on the switch to Word;
  *   - SEVERAL reports per case (5.4.1): every Word file in the folder is a
  *     report card of its own, listed by name (numbers in order); a new one
  *     is added BESIDE the others under a name the officer chooses and never
@@ -171,7 +171,7 @@ const DOC = (fileName, extra) => Object.assign({ fileName, bytes: 1, modifiedAt:
         await UI.act('mode-word', btn());
         ok('the VIPER report is saved BEFORE the question is asked',
             h.log[0] && h.log[0][0] === 'saveViper' && h.log[1] && h.log[1][0] === 'confirm', h.log);
-        ok('the question carries the export disclaimer', h.confirms[0].m.indexOf('not included in Export to DA') !== -1);
+        ok('the question carries the export note', h.confirms[0].m.indexOf('each Word report is converted to PDF') !== -1);
         ok('…and says the VIPER report is kept', /Your VIPER report is kept/.test(h.confirms[0].m));
         ok('cancel changes nothing', h.fmt === 'viper' && !h.log.some((l) => l[0] === 'setFormat' || l[0] === 'rerender'));
 
@@ -210,9 +210,9 @@ const DOC = (fileName, extra) => Object.assign({ fileName, bytes: 1, modifiedAt:
         ok('loading first', /Loading/.test(dom.panel.innerHTML));
         await settle();
         const html = dom.panel.innerHTML;
-        ok('the disclaimer is on the tab', html.indexOf('Not included in Export to DA') !== -1 &&
-            html.indexOf('VIPER cannot convert a Word document into its report format, so they cannot be added to the overall report.') !== -1);
-        ok('…and says how to send them separately', /Save a copy\u2026\u201d on each report/.test(html) && /send it with the export separately/.test(html));
+        ok('the disclaimer is on the tab', html.indexOf('Included in Export to DA as PDF pages') !== -1 &&
+            html.indexOf('its pages are placed in the report exactly as written') !== -1);
+        ok('…and says the last saved version is used, and what Save a copy gives', /last saved version is used/.test(html) && /Save a copy\u2026\u201d gives the editable Word file/.test(html));
         ok('the empty state offers create and import', /Create a new Word report/.test(html) && /Use existing Word documents/.test(html));
         ok('…and says a case can hold several', /as many reports here as the case needs/.test(html));
         ok('there is VIPER text, so the seed option is offered', /id="wrSeed"/.test(html));
@@ -429,7 +429,7 @@ const DOC = (fileName, extra) => Object.assign({ fileName, bytes: 1, modifiedAt:
         // Save a copy
         await UI.act('copy', btn({ 'data-wr-name': 'Case Report.docx' }));
         ok('Save a copy asks main for the named report', api.calls.some((c) => c[0] === 'saveCopy' && c[2] === 'Case Report.docx'));
-        ok('…and says it is not in the DA package', lastToast(h).t === 'success' && /not inside the DA package/.test(lastToast(h).m));
+        ok('…and says it is the editable file (the package carries the PDF pages)', lastToast(h).t === 'success' && /editable Word file/.test(lastToast(h).m) && /pages as PDF/.test(lastToast(h).m));
         const n = h.toasts.length;
         api.saveCopyResult = { success: true, canceled: true };
         await UI.act('copy', btn({ 'data-wr-name': 'Case Report.docx' }));
@@ -485,7 +485,7 @@ const DOC = (fileName, extra) => Object.assign({ fileName, bytes: 1, modifiedAt:
         ok('removing a report says the others and the VIPER report are not affected', /Your other reports and your VIPER report are not affected/.test(h.confirms[0].m) && h.confirms[0].o.danger === true);
         ok('the report is gone from the list', !/data-wr-row="Second\.docx"/.test(dom.panel.innerHTML));
         ok('…and the empty state returns', /No Word reports yet/.test(dom.panel.innerHTML));
-        ok('…with the disclaimer still on screen', /Not included in Export to DA/.test(dom.panel.innerHTML));
+        ok('…with the disclaimer still on screen', /Included in Export to DA as PDF pages/.test(dom.panel.innerHTML));
 
         // Open failure
         api.disk['C-1'] = [DOC('Case Report.docx')];

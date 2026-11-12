@@ -38,6 +38,7 @@
     "exifr": "^7.1.3",
     "koffi": "^2.15.6",
     "mailparser": "^3.9.4",
+    "mammoth": "^1.13.0",
     "mupdf": "^1.27.0",
     "node-html-parser": "^7.1.0",
     "node-stream-zip": "^1.15.0",

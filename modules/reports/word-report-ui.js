@@ -18,10 +18,11 @@
  * Switching is never destructive: the VIPER text stays in viperCaseReports
  * and the Word files stay in the case folder, whichever is showing.
  *
- * Word reports are NOT part of Export to DA / Assist Package — VIPER cannot
- * turn a Word document into its report format. This module says so on the
- * tab and on the switch; the host says so in the export dialog and the PDF.
- * "Save a copy…" is how the officer sends each one separately.
+ * Word reports reach Export to DA / Assist Package as PDF PAGES (5.6.1):
+ * the host asks main ('report-docs-to-pdf', modules/reports/docx-pdf.js) to
+ * convert each one — Microsoft Word itself when installed — and places the
+ * pages in the report. This module says so on the tab and on the switch.
+ * "Save a copy…" still hands over the editable .docx.
  *
  * Host state reaches this module only through configure(): the case page
  * declares currentCase with top-level `let`, which never lands on window.
@@ -38,9 +39,9 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     'use strict';
 
-    var DISCLAIMER = 'Word reports are not included in Export to DA or the Assist Package. ' +
-        'VIPER cannot convert a Word document into its report format, so they cannot be added to the overall report. ' +
-        'Use \u201cSave a copy\u2026\u201d on each report and send it with the export separately.';
+    var DISCLAIMER = 'In Export to DA and the Assist Package, each Word report is converted to PDF and its pages are placed in the report exactly as written ' +
+        '(Microsoft Word does the conversion when it is installed). Save your changes in Word before exporting \u2014 the last saved version is used. ' +
+        '\u201cSave a copy\u2026\u201d gives the editable Word file.';
 
     var host = {};
     var state = {
@@ -246,10 +247,10 @@
 
     function disclaimerBox() {
         return '' +
-            '<div class="bg-amber-500/10 border border-amber-500/40 rounded-lg p-4 flex items-start gap-3" data-wr-disclaimer>' +
-                '<span class="text-amber-400 text-lg leading-none flex-shrink-0">\u26A0\uFE0F</span>' +
+            '<div class="bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg p-4 flex items-start gap-3" data-wr-disclaimer>' +
+                '<span class="text-viper-cyan text-lg leading-none flex-shrink-0">\u2139\uFE0F</span>' +
                 '<div class="text-sm">' +
-                    '<p class="text-amber-300 font-semibold mb-1">Not included in Export to DA</p>' +
+                    '<p class="text-viper-cyan font-semibold mb-1">Included in Export to DA as PDF pages</p>' +
                     '<p class="text-gray-300">' + esc(DISCLAIMER) + '</p>' +
                 '</div>' +
             '</div>';
@@ -420,7 +421,7 @@
             try { if (host.saveViperReport) host.saveViperReport(); } catch (_) {}
             msg = '<b>Write this case\u2019s reports in Microsoft Word?</b><br><br>' +
                 'Your VIPER report is kept \u2014 you can switch back at any time and nothing is deleted.<br><br>' +
-                '<span style="color:#fbbf24">' + esc(DISCLAIMER) + '</span>';
+                '<span style="color:#67e8f9">' + esc(DISCLAIMER) + '</span>';
         } else {
             var anyOpen = state.docs.some(function (d) { return d.open; });
             msg = '<b>Go back to the VIPER editor?</b><br><br>' +
@@ -564,7 +565,7 @@
             if (!r || r.canceled) return null;
             if (!r.success) { fail(r, 'Could not save a copy'); return null; }
             var d = findDoc(name);
-            toast('Copy saved to <b>' + esc(r.filePath) + '</b>. Send it with your export \u2014 it is not inside the DA package.' +
+            toast('Copy saved to <b>' + esc(r.filePath) + '</b>. This is the editable Word file \u2014 the DA package carries the report\u2019s pages as PDF.' +
                 (d && d.open ? '<br>It holds your last save in Word.' : ''), 'success', 9000);
             return r.filePath;
         }, function (e) { fail({ error: e && e.message }, 'Could not save a copy'); return null; });

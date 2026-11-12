@@ -545,6 +545,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reportDocRemove: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-remove', { caseNumber, fileName }),
   reportDocRename: (caseNumber, fileName, newName) => ipcRenderer.invoke('report-doc-rename', { caseNumber, fileName, newName }),
   reportDocSaveCopy: (caseNumber, fileName) => ipcRenderer.invoke('report-doc-save-copy', { caseNumber, fileName }),
+  // Export to DA / Assist Package: every Word report as PDF pages (bytes stay
+  // in main), then those pages drawn onto the pages the report reserved.
+  reportDocsToPdf: (caseNumber) => ipcRenderer.invoke('report-docs-to-pdf', { caseNumber }),
+  reportDocsStampPdf: (base64, placements) => ipcRenderer.invoke('report-docs-stamp-pdf', { base64, placements }),
   onReportDocEvent: (cb) => {
     const handler = (_e, payload) => { try { cb(payload); } catch (_) {} };
     ipcRenderer.on('report-doc-event', handler);

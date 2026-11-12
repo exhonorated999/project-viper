@@ -11,8 +11,9 @@
  *     Word file in the case is a report (5.4.1);
  *   - Word mode replaces the editor; VIPER mode keeps the editor and shows
  *     the switch; nothing is deleted by switching;
- *   - the export dialog and the DA PDF both say the Word reports are not
- *     included, and the PDF does NOT print the set-aside VIPER text.
+ *   - the export dialog says the Word reports go in as PDF pages, and the
+ *     DA PDF's Reports section is those pages (word-report-export.test.js
+ *     runs that part) — never the set-aside VIPER text.
  */
 const fs = require('fs');
 const path = require('path');
@@ -71,7 +72,7 @@ function makeEnv(over) {
         env.currentCase.reportFormat = 'word';
         const w = env.renderReportsTab();
         ok('Word mode replaces the editor with the Word panel', /id="wrPanel"/.test(w) && !/id="reportEditor"/.test(w));
-        ok('…carrying the export disclaimer', w.indexOf('Not included in Export to DA') !== -1);
+        ok('…carrying the export note', w.indexOf('Included in Export to DA as PDF pages') !== -1);
         ok('…and never prints the set-aside VIPER text', w.indexOf('VIPER narrative text.') === -1);
         const glue = slice('        function _reportIsWord() {', '        function initializeReportEditor() {');
         ok('the page no longer hands the module a "chosen report" field', !/getWordName\s*:|setWordName\s*:/.test(glue));
@@ -128,12 +129,12 @@ function makeEnv(over) {
     console.log('\n[export dialog and the DA PDF]');
     {
         const modal = slice('        function openExportCaseModal(', '<div class="bg-viper-card/30 border border-viper-cyan/20 rounded-lg p-4 text-sm text-gray-300">');
-        ok('the reports row is tagged "Word reports not included" in Word mode',
-            /tabId === 'reports' && _reportIsWord\(\) \? '<span[^']*>Word reports not included<\/span>'/.test(modal));
+        ok('the reports row is tagged "Word reports as PDF pages" in Word mode',
+            /tabId === 'reports' && _reportIsWord\(\) \? '<span[^']*>Word reports as PDF pages<\/span>'/.test(modal));
         const info = slice('<li>All exports will be saved as a ZIP file for easy sharing</li>', '</ul>');
-        ok('the export notes say the Word reports are not included, why, and to send each one',
-            /_reportIsWord\(\)/.test(info) && /are written in Microsoft Word and are not included\./.test(info) &&
-            /cannot convert a Word document into its report format/.test(info) && /on each report on the Reports tab/.test(info));
+        ok('the export notes say the Word reports are converted and placed as written',
+            /_reportIsWord\(\)/.test(info) && /reports are written in Microsoft Word\./.test(info) &&
+            /converted to PDF and its pages are placed in the report exactly as written/.test(info));
 
         const pdf = slice('                case \'reports\': {\n                    // A Word report', '                case \'opsplan\': {');
         ok('the DA PDF checks Word mode before reading viperCaseReports',
@@ -144,6 +145,7 @@ function makeEnv(over) {
             currentCase: { reportFormat: 'word', caseNumber: '24-1' }, caseNum: '24-1', y: 30, M: 20, CW: 170, LGRAY: [1, 1, 1],
             need: () => {}, emptyMsg: (m) => printed.push(['empty', m]),
             renderReportHtml: async (h) => printed.push(['html', h]),
+            wordReportPages: async () => printed.push(['word']),
             _lsParse: () => ({ '24-1': { content: '<p>VIPER narrative text.</p>' } }),
             doc: { setFontSize() {}, setFont() {}, setTextColor() {}, splitTextToSize: (t) => [t], text: (t) => printed.push(['text', [].concat(t).join(' ')]) },
         };
@@ -151,8 +153,8 @@ function makeEnv(over) {
         vm.createContext(env);
         const body = '(async () => { switch ("reports") {\n' + pdf + '\n} })()';
         await vm.runInContext(body, env);
-        ok('Word mode: the PDF says the reports were written in Word and are provided separately',
-            printed.some((p) => p[0] === 'text' && /written in Microsoft Word and are provided separately/.test(p[1])), printed);
+        ok('Word mode: the PDF section is the Word reports\' own pages (wordReportPages)',
+            printed.length === 1 && printed[0][0] === 'word', printed);
         ok('…and does not print the VIPER text', !printed.some((p) => p[0] === 'html'));
         printed.length = 0;
         env.currentCase.reportFormat = 'viper';

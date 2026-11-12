@@ -2838,7 +2838,7 @@
                                                     <span class="text-xl">${tab.icon}</span>
                                                     <span class="text-sm font-medium text-white">${tab.label}</span>
                                                     ${tab.type === 'files' ? '<span class="text-xs text-viper-orange bg-viper-orange/20 px-2 py-0.5 rounded">Files</span>' : ''}
-                                                    ${tabId === 'reports' && _reportIsWord() ? '<span class="text-xs text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded" title="Word reports are not included. Send each one separately with Save a copy on the Reports tab.">Word reports not included</span>' : ''}
+                                                    ${tabId === 'reports' && _reportIsWord() ? '<span class="text-xs text-viper-cyan bg-viper-cyan/15 px-2 py-0.5 rounded" title="Each Word report is converted to PDF and its pages are placed in the report, exactly as written.">Word reports as PDF pages</span>' : ''}
                                                 </div>
                                                 ${itemCount > 0 ? `<span class="text-xs text-gray-400">${itemCount} ${itemCount === 1 ? 'item' : 'items'}</span>` : ''}
                                             </div>
@@ -2881,7 +2881,7 @@
                                             <li>Evidence and Warrant files will be bundled with the PDF or separately if no data tabs are selected</li>
                                             <li>All exports will be saved as a ZIP file for easy sharing</li>
                                             ${_reportIsWord() ? `
-                                            <li class="text-amber-300"><strong>This case&rsquo;s reports are written in Microsoft Word and are not included.</strong> VIPER cannot convert a Word document into its report format. Use &ldquo;Save a copy&hellip;&rdquo; on each report on the Reports tab and send them separately.</li>
+                                            <li><strong class="text-white">This case&rsquo;s reports are written in Microsoft Word.</strong> When Reports is ticked, each Word report is converted to PDF and its pages are placed in the report exactly as written (Microsoft Word does the conversion when it is installed). Allow a few seconds for this.</li>
                                             ` : ''}
                                             ${_asx ? `
                                             <li>Everything sits inside one folder named for you and this case, so it cannot scatter into the lead detective's own folders</li>
@@ -4805,14 +4805,11 @@
                     break;
                 }
                 case 'reports': {
-                    // A Word report cannot be converted into this PDF. Say
-                    // so, rather than print the VIPER text the officer set
-                    // aside or a bare "No report content".
+                    // A Word report: its own pages, reproduced as written
+                    // (wordReportPages). Never the VIPER text the officer
+                    // set aside, never a bare "No report content".
                     if (_reportIsWord()) {
-                        need(16);
-                        doc.setFontSize(10); doc.setFont(undefined, 'italic'); doc.setTextColor(...LGRAY);
-                        const wl = doc.splitTextToSize('The case reports for this case were written in Microsoft Word and are provided separately. They are not reproduced in this report.', CW - 4);
-                        doc.text(wl, M + 2, y); y += wl.length * 5 + 2;
+                        await wordReportPages();
                         break;
                     }
                     const rd = _lsParse('viperCaseReports', {});
@@ -5045,6 +5042,75 @@
                 }
             }
 
+            // ========== WORD REPORTS (Reports tab, Word mode) ==========
+            // Each Word report is converted to PDF in the main process
+            // (Microsoft Word itself when installed — modules/reports/
+            // docx-pdf.js). Here we only RESERVE one report page per Word
+            // page and note which goes where; after the whole report is built
+            // (page numbers, TOC, stamps final) the main process draws the
+            // Word pages onto them. _wordReportNotes feeds the officer's toast.
+            const _wordPlacements = [];
+            const _wordReportNotes = [];
+            async function wordReportPages() {
+                const note = (t) => {
+                    need(12);
+                    doc.setFontSize(10); doc.setFont(undefined, 'italic'); doc.setTextColor(...GRAY);
+                    const wl = doc.splitTextToSize(t, CW - 4);
+                    doc.text(wl, M + 2, y); y += wl.length * 5 + 2;
+                    doc.setFont(undefined, 'normal'); doc.setTextColor(...BLACK);
+                };
+                const api = window.electronAPI;
+                if (!api || !api.reportDocsToPdf || !api.reportDocsStampPdf) {
+                    note('The case reports for this case were written in Microsoft Word and are provided separately. They are not reproduced in this report.');
+                    return;
+                }
+                let res;
+                try { viperToast('Converting the Word reports to PDF…', 'info'); } catch (_) {}
+                try { res = await api.reportDocsToPdf(currentCase.caseNumber); }
+                catch (e) { res = { success: false, error: (e && e.message) || String(e) }; }
+                if (!res || !res.success) {
+                    const why = (res && res.error) || 'unknown error';
+                    note(`The case reports for this case were written in Microsoft Word but could not be converted for this report (${why}). They are provided separately.`);
+                    _wordReportNotes.push(`Word reports could not be converted: ${why}`);
+                    return;
+                }
+                const docs = Array.isArray(res.docs) ? res.docs : [];
+                if (!docs.length) { emptyMsg('No Word reports in this case.'); return; }
+                note(`The case reports for this case were written in Microsoft Word. ${docs.length === 1 ? 'It is' : 'Each is'} reproduced on the following pages as written.`);
+                // The list fits on this page, so each report's first page is known.
+                const rowText = (d, i, pg) => d.ok
+                    ? [`${i + 1}. ${d.fileName}`, `${d.pages} page${d.pages === 1 ? '' : 's'}${pg ? `, begins page ${pg}` : ''}${d.method === 'html' ? ' — converted without Microsoft Word; layout may differ from the original' : ''}`]
+                    : [`${i + 1}. ${d.fileName}`, `NOT REPRODUCED — ${d.error || 'could not be converted'}. Provided separately.`];
+                const rowH = ([label, value]) => {
+                    doc.setFontSize(10); doc.setFont(undefined, 'bold');
+                    const lw = doc.getTextWidth(`${label}: `);
+                    doc.setFont(undefined, 'normal');
+                    return doc.splitTextToSize(String(value), CW - lw - 4).length * 5 + 1;
+                };
+                const listH = docs.reduce((h, d, i) => h + rowH(rowText(d, i, 9999)), 2);
+                const numbered = listH < PH - 60;
+                if (numbered) need(listH);
+                let nextPage = doc.getNumberOfPages() + 1;
+                docs.forEach((d, i) => {
+                    fieldBold(...rowText(d, i, numbered && d.ok ? nextPage : 0));
+                    if (d.ok) nextPage += d.pages;
+                });
+                for (const d of docs) {
+                    if (!d.ok) { _wordReportNotes.push(`"${d.fileName}" was NOT included: ${d.error || 'could not be converted'}`); continue; }
+                    if (d.method === 'html') _wordReportNotes.push(`"${d.fileName}" was converted without Microsoft Word${d.wordMissing ? ' (Word is not installed)' : ''} — check its layout.`);
+                    if (d.open) _wordReportNotes.push(`"${d.fileName}" is open in Word — its last SAVED version was used.`);
+                    if (d.revisions > 0 || d.comments > 0) _wordReportNotes.push(`"${d.fileName}" has ${[d.revisions > 0 ? `${d.revisions} tracked change${d.revisions === 1 ? '' : 's'}` : '', d.comments > 0 ? `${d.comments} comment${d.comments === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')} — printed without markup, as if the changes were accepted.`);
+                    for (let p = 0; p < d.pages; p++) {
+                        newPage();
+                        _wordPlacements.push({ page: doc.getNumberOfPages(), id: d.id, index: p });
+                        doc.setFontSize(6.5); doc.setTextColor(...LGRAY);
+                        doc.text(`${d.fileName} — page ${p + 1} of ${d.pages}`, PW / 2, PH - 4, { align: 'center' });
+                        doc.setFontSize(10); doc.setTextColor(...BLACK);
+                    }
+                }
+                y = PH;   // anything after this starts on a fresh page
+            }
+
             // ========== CONTENT — track page numbers ==========
             const tocEntries = [];
 
@@ -5264,7 +5330,34 @@
             });
 
             // ========== SAVE VIA IPC (ZIP with evidence) ==========
-            const pdfBytes = doc.output('arraybuffer');
+            let pdfBytes = doc.output('arraybuffer');
+
+            // Word reports: draw their pages onto the pages reserved for them.
+            // If that fails the export stops — a DA report with blank pages
+            // where the case report should be is worse than no export.
+            let _stampedB64 = null;
+            if (_wordPlacements.length) {
+                let why = '';
+                try {
+                    const st = await window.electronAPI.reportDocsStampPdf(doc.output('datauristring').split(',')[1] || '', _wordPlacements);
+                    if (st && st.success && st.base64) {
+                        _stampedB64 = st.base64;
+                        const bin = atob(_stampedB64);
+                        const u8 = new Uint8Array(bin.length);
+                        for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+                        pdfBytes = u8.buffer;
+                    } else why = (st && st.error) || 'unknown error';
+                } catch (e) { why = (e && e.message) || String(e); }
+                if (!_stampedB64) {
+                    const msg = 'The Word reports could not be placed into the PDF: ' + why;
+                    if (_returnPdf) return { success: false, error: msg };
+                    viperToast(msg + '\n\nNothing was exported. Try again; if it keeps failing, use "Save a copy…" on the Reports tab.', 'error');
+                    return;
+                }
+            }
+            if (_wordReportNotes.length) {
+                viperToast('Word reports in this export:\n• ' + _wordReportNotes.join('\n• '), 'warning');
+            }
 
             // Supervisor Link path: hand the bytes back instead of writing a
             // file. Deliberately placed AFTER the whole document is built so
@@ -5272,11 +5365,13 @@
             // have exported — a supervisor must not be reviewing a different
             // rendering from the one that reaches the DA.
             if (_returnPdf) {
-                let base64 = '';
-                try {
-                    base64 = doc.output('datauristring').split(',')[1] || '';
-                } catch (e) {
-                    return { success: false, error: 'PDF_ENCODE_FAILED: ' + (e && e.message || e) };
+                let base64 = _stampedB64 || '';
+                if (!base64) {
+                    try {
+                        base64 = doc.output('datauristring').split(',')[1] || '';
+                    } catch (e) {
+                        return { success: false, error: 'PDF_ENCODE_FAILED: ' + (e && e.message || e) };
+                    }
                 }
                 if (!base64) return { success: false, error: 'PDF_ENCODE_EMPTY' };
                 return {

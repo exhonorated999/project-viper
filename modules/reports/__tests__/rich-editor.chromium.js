@@ -197,6 +197,155 @@ async function pageTests() {
     ok('destroyed: a retired controller ignores paste on its old editor', lateToasts === 0 && !/late/.test(ed.innerHTML), [lateToasts, ed.innerHTML]);
     c2.destroy();
     ok('destroy: overlays removed', document.querySelectorAll('.vre-frame,.vre-h,.vre-badge').length === 0);
+
+    // ── find & replace ──
+    ({ ed, bar } = mk('<p>The cat sat. the CAT ran.</p><p>Concatenate cat<br>and dog</p><table><tr><td>cat</td><td>a&nbsp;b</td></tr></table>'));
+    toasts = [];
+    let fc = 0;
+    c = RE.attach({ editor: ed, toolbar: bar, onChange: () => fc++, toast: (m) => toasts.push(m) });
+    const fq = bar.querySelector('[data-vre-q]'), fr = bar.querySelector('[data-vre-r]');
+    const fcnt = bar.querySelector('[data-vre-count]'), fcase = bar.querySelector('[data-vre-case]'), fword = bar.querySelector('[data-vre-word]');
+    const setQ = (v) => { fq.value = v; fq.dispatchEvent(new Event('input', { bubbles: true })); };
+    const setChk = (el, v) => { el.checked = v; el.dispatchEvent(new Event('change', { bubbles: true })); };
+    const caretAt = (node, off) => { const rr = document.createRange(); rr.setStart(node, off); rr.collapse(true); const s = window.getSelection(); s.removeAllRanges(); s.addRange(rr); };
+    ok('find: toolbar has a Find button and a hidden find bar', !!bar.querySelector('[data-re="find"]') && bar.querySelector('[data-vre-find]').hidden);
+    ed.focus(); caretAt(ed.firstChild.firstChild, 0);
+    ed.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }));
+    ok('find: Ctrl+F opens the bar and focuses Find', c.findState.open && document.activeElement === fq, c.findState);
+    setQ('cat');
+    ok('find: case-insensitive count (Concatenate counts as text)', c.findState.count === 5 && fcnt.textContent === '1 of 5', [c.findState, fcnt.textContent]);
+    const hl = window.CSS && CSS.highlights;
+    ok('find: matches painted with the highlight API', !!hl && hl.has('vre-find') && hl.has('vre-find-cur') && hl.get('vre-find').size === 4, hl && [...hl.keys()]);
+    setChk(fword, true);
+    ok('find: whole words skips Concatenate', c.findState.count === 4, c.findState);
+    setChk(fcase, true);
+    ok('find: match case + whole words', c.findState.count === 3, c.findState);
+    setChk(fcase, false); setChk(fword, false);
+    c.findPrev();
+    ok('find: previous wraps to the last match', c.findState.index === 4 && fcnt.textContent === '5 of 5', [c.findState, fcnt.textContent]);
+    c.findNext();
+    ok('find: next wraps to the first match', c.findState.index === 0, c.findState);
+    fq.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    ok('find: Enter in Find goes to the next match', c.findState.index === 1, c.findState);
+    fq.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true }));
+    ok('find: Shift+Enter goes back', c.findState.index === 0, c.findState);
+    setQ('a b');
+    ok('find: a space also finds a non-breaking space', c.findState.count === 1, c.findState);
+    setQ('sat. the');
+    ok('find: matches inside a paragraph', c.findState.count === 1, c.findState);
+    setQ('cat and');
+    ok('find: no match across a line break', c.findState.count === 0 && fcnt.textContent === 'No matches' && fq.classList.contains('vre-miss'), [c.findState, fcnt.textContent]);
+    setQ('ran. Concatenate');
+    ok('find: no match across paragraphs', c.findState.count === 0, c.findState);
+    setQ('cat\tran');
+    ok('find: regex characters are literal', c.findState.count === 0, c.findState);
+    setQ('x(');
+    ok('find: an unbalanced bracket does not throw', c.findState.count === 0);
+
+    // replace one
+    setQ('cat'); setChk(fword, true);
+    fr.value = 'dog';
+    fc = 0;
+    ok('replace: one at a time', c.replaceOne() === true && /The dog sat\. the CAT ran\./.test(ed.innerHTML), ed.innerHTML);
+    ok('replace: moves on to the next match and saves', c.findState.count === 3 && c.findState.index === 0 && fc > 0, [c.findState, fc]);
+    ed.focus();
+    ok('replace: undoable like typing', document.execCommand('undo') && /The cat sat\./.test(ed.innerHTML), ed.innerHTML);
+    c.closeFind(); c.openFind(false); setQ('cat');
+    // replace all — a replacement that contains the query is not replaced again
+    fr.value = 'cats cat';
+    toasts = [];
+    let nRep = c.replaceAll();
+    ok('replace all: every whole-word match once', nRep === 4 && (ed.textContent.match(/cats cat/g) || []).length === 4 && /Concatenate/.test(ed.textContent), [nRep, ed.textContent]);
+    ok('replace all: count shown and the officer told', /^Replaced 4$/.test(fcnt.textContent) && toasts.some((m) => /4 matches replaced/.test(m)), [fcnt.textContent, toasts]);
+    ok('replace all: table and <br> structure kept', !!ed.querySelector('td') && !!ed.querySelector('br'), ed.innerHTML);
+    setQ('cats cat'); fr.value = '';
+    nRep = c.replaceAll();
+    ok('replace all: an empty replacement deletes', nRep === 4 && !/cats/.test(ed.textContent), [nRep, ed.textContent]);
+    setQ('zzz');
+    ok('replace all: nothing to replace → 0', c.replaceAll() === 0 && c.replaceOne() === false);
+
+    // Ctrl+H prefill + Esc close selects the match
+    c.closeFind();
+    ok('find close: highlights cleared', !hl.has('vre-find') && !hl.has('vre-find-cur'));
+    ed.innerHTML = '<p>alpha beta gamma beta</p>';
+    ed.focus();
+    { const tn2 = ed.firstChild.firstChild, rr = document.createRange(); rr.setStart(tn2, 6); rr.setEnd(tn2, 10); const s = window.getSelection(); s.removeAllRanges(); s.addRange(rr); }
+    ed.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', ctrlKey: true, bubbles: true, cancelable: true }));
+    ok('Ctrl+H: the selection becomes the query, Replace gets focus', fq.value === 'beta' && document.activeElement === fr && c.findState.count === 2 && c.findState.index === 0, [fq.value, document.activeElement && document.activeElement.outerHTML.slice(0, 60), c.findState]);
+    c.findNext();
+    fq.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    const selNow = window.getSelection();
+    ok('Esc: bar closes, the current match is selected in the editor', !c.findState.open && document.activeElement === ed && selNow.toString() === 'beta' && selNow.getRangeAt(0).startOffset === 17, [c.findState, selNow.toString(), selNow.rangeCount && selNow.getRangeAt(0).startOffset]);
+    // typing while open keeps the count current
+    c.openFind(false); setQ('beta');
+    ed.focus(); caretAt(ed.firstChild.firstChild, 0);
+    document.execCommand('insertText', false, 'beta ');
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    ok('find: edits re-count while the bar is open', c.findState.count === 3, c.findState);
+    ok('no inserts: no From case button', !bar.querySelector('[data-re="caseMenu"]') && !bar.querySelector('[data-vre-menu]'));
+    c.destroy();
+    ok('destroy: find highlights removed', !hl.has('vre-find') && !hl.has('vre-find-cur'));
+
+    // ── From case menu ──
+    ({ ed, bar } = mk('<p>Before after</p>'));
+    toasts = [];
+    let seen = null;
+    c = RE.attach({
+        editor: ed, toolbar: bar, toast: (m, ty) => toasts.push([m, ty]),
+        inserts: [
+            { id: 'a', label: 'Table A', run: () => '<p>[A]</p>' },
+            { id: 'b', label: 'Later <B>', sep: true, run: (ctx) => { seen = ctx.html(); return new Promise((r) => setTimeout(() => r('<p>[B]</p>'), 20)); } },
+            { id: 'c', label: 'Broken', run: () => { throw new Error('No luck'); } },
+            { id: 'd', label: 'Nothing', run: () => '' },
+            { id: 'e', label: 'No run' },
+        ],
+    });
+    const items = [...bar.querySelectorAll('[data-vre-ins]')];
+    ok('menu: From case button and items (escaped, ones without run left out)', !!bar.querySelector('[data-re="caseMenu"]') && items.length === 4 && /Later &lt;B&gt;/.test(items[1].innerHTML) && bar.querySelectorAll('.vre-mi-sep').length === 1, items.map((b) => b.outerHTML));
+    ok('menu: hidden until opened', bar.querySelector('[data-vre-menu]').hidden);
+    bar.querySelector('[data-re="caseMenu"]').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    ok('menu: the button opens it', !bar.querySelector('[data-vre-menu]').hidden);
+    ed.focus(); caretAt(ed.firstChild.firstChild, 6);
+    items[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await tick();
+    { const tx = ed.textContent, ps = [...ed.querySelectorAll('p')].map((p) => p.textContent);
+      ok('menu: an item inserts its HTML at the caret and closes the menu', /^Before\[A\] ?after$/.test(tx) && tx.indexOf('Before') < tx.indexOf('[A]') && tx.indexOf('[A]') < tx.indexOf('after') && bar.querySelector('[data-vre-menu]').hidden, ed.innerHTML); }
+    ed.innerHTML = '<p>One</p><p>Two</p>';
+    ed.focus(); caretAt(ed.lastChild.firstChild, 3);
+    await tick();
+    window.getSelection().removeAllRanges();     // e.g. focus went to a dialog
+    const pB = c.runInsert(1);
+    await pB;
+    ok('menu: a Promise result goes where the caret was', /^One\s*Two\[B\]$/.test(ed.textContent.trim()) && /One/.test(seen || ''), [ed.innerHTML, seen]);
+    const nBefore = ed.innerHTML;
+    ok('menu: an error is toasted, nothing inserted', (await c.runInsert(2)) === false && ed.innerHTML === nBefore && toasts.some((x) => x[0] === 'No luck' && x[1] === 'error'), toasts);
+    ok('menu: an empty result inserts nothing', (await c.runInsert(3)) === false && ed.innerHTML === nBefore);
+    // retired editor: a late answer is dropped
+    const late = RE.attach({ editor: ed, toolbar: bar }) === c;
+    const pLate = c.runInsert(1);
+    c.destroy();
+    ok('menu: a late answer after destroy is dropped', late && (await pLate) === false && !/\[B\][\s\S]*\[B\]/.test(ed.innerHTML), ed.innerHTML);
+
+    // ── case-inserts.js output through the editor (insertHTML keeps it) ──
+    const CI = window.ViperCaseInserts;
+    if (CI) {
+        ({ ed, bar } = mk('<p>Start typing your report here...</p>'));
+        c = RE.attach({ editor: ed, toolbar: bar, toast: () => {}, inserts: [
+            { id: 'p', label: 'People', run: () => CI.people([{ firstName: 'Alex', lastName: 'Example', dob: '1990-02-03', height: '510' }], 'suspects', {}) },
+            { id: 'ph', label: 'Photo', run: () => CI.photoBlock({ src: png, n: 3, caption: 'rear door, pry marks', widthPct: 60 }) },
+        ] });
+        ed.focus();
+        await c.runInsert(0);
+        const tb = ed.querySelector('table.vre-table');
+        ok('case table: inserted with header row and styles kept', !!tb && tb.querySelectorAll('th').length >= 2 && /border/.test(tb.querySelector('th').getAttribute('style') || '') && /Alex Example|Example, Alex/.test(tb.textContent) && /5'10"/.test(tb.textContent) && !/Start typing/.test(ed.textContent), ed.innerHTML.slice(0, 400));
+        const clean = RE.cleanHtml(ed);
+        ok('case table: survives cleanHtml (save)', /<table[^>]*class="vre-table"/.test(clean) && /<th/.test(clean), clean.slice(0, 300));
+        await c.runInsert(1);
+        const im = ed.querySelector('img[data-wrap="center"]');
+        ok('exhibit photo: picture + caption inserted', !!im && /Exhibit 3 \u2014 rear door, pry marks/.test(ed.textContent) && /width:\s*60%/.test(im.getAttribute('style') || ''), ed.innerHTML.slice(-400));
+        ok('exhibit photo: next number counts it', CI.nextExhibitNumber(RE.cleanHtml(ed)) === 4);
+        c.destroy();
+    } else ok('case-inserts.js loaded in the page', false);
     return R;
 }
 
@@ -207,7 +356,8 @@ app.whenReady().then(async () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vre-page-'));
         const page = path.join(dir, 'page.html');
         const lib = pathToFileURL(path.join(__dirname, '..', 'rich-editor.js')).href;
-        fs.writeFileSync(page, '<!DOCTYPE html><html><head><meta charset="utf-8"><script src="' + lib + '"></script></head><body><div id="host"></div></body></html>');
+        const ins = pathToFileURL(path.join(__dirname, '..', 'case-inserts.js')).href;
+        fs.writeFileSync(page, '<!DOCTYPE html><html><head><meta charset="utf-8"><script src="' + lib + '"></script><script src="' + ins + '"></script></head><body><div id="host"></div></body></html>');
         const win = new BrowserWindow({ show: false, width: 900, height: 900, webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false } });
         await win.loadFile(page);
         const results = await win.webContents.executeJavaScript('(' + pageTests.toString() + ')()', true);

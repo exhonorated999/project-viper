@@ -163,6 +163,7 @@
     <script src="modules/reports/rich-editor.js"></script>
     <script src="modules/reports/report-print.js"></script>
     <script src="modules/reports/report-store.js"></script>
+    <script src="modules/reports/case-inserts.js"></script>
     <!-- Optional phone carrier on phone identifiers. Synchronous: the
          identifier renderers call it while painting. -->
     <script src="modules/_shared/phone-carrier.js"></script>
@@ -1487,8 +1488,247 @@
             return true;
         };
 
-        // ---------------------------------------------------------------------
-        // Defensive localStorage parse helper (v3.8.3 hotfix)
+        /*
+         * Report editor "From case" menu (modules/reports/case-inserts.js).
+         * One click puts a table of the case's people, vehicles, evidence or
+         * timeline at the caret; "Photos with exhibit numbers…" opens a picker
+         * that adds pictures with an exhibit number and caption. CyberTip /
+         * CSAM evidence is never offered (ViperCaseInserts.isRestrictedEvidence)
+         * and is checked again before any file is read.
+         */
+        function _reportCaseRead(key, legacy) {
+            try {
+                const p2 = _lsParse(`${key}_${currentCase.id}`, []);
+                if (Array.isArray(p2) && p2.length) return p2;
+            } catch (_) {}
+            return Array.isArray(legacy) && legacy.length ? legacy : [];
+        }
+        function _reportTimelineEvents() {
+            let list = _reportCaseRead('timelineEvents', null);
+            if (!list.length && typeof generateAutoTimelineEvents === 'function') {
+                try { generateAutoTimelineEvents(); list = Array.isArray(timelineEvents) ? timelineEvents : []; } catch (_) {}
+            }
+            return list;
+        }
+        function _reportCaseInserts() {
+            const CI = window.ViperCaseInserts;
+            if (!CI || !currentCase) return [];
+            const fmt = { formatDate, dlDisplay: _dlDisplay };
+            const none = (what) => { viperToast(`This case has no ${what} yet.`, 'info'); return ''; };
+            const people = (role, read, what) => () => {
+                const list = read();
+                return list.length ? CI.people(list, role, fmt) : none(what);
+            };
+            return [
+                { id: 'suspects', label: 'Suspects table', run: people('suspects', () => _reportCaseRead('suspects', caseSuspects), 'suspects') },
+                { id: 'victims', label: 'Victims table', run: people('victims', () => _reportCaseRead('victims', caseVictims), 'victims') },
+                { id: 'witnesses', label: 'Witnesses table', run: people('witnesses', () => _reportCaseRead('witnesses', caseWitnesses), 'witnesses') },
+                { id: 'involvedPersons', label: 'Involved persons table', run: people('involvedPersons', () => _reportCaseRead('involvedPersons', null), 'involved persons') },
+                { id: 'vehicles', label: 'Recovered vehicles table', sep: true, run: () => {
+                    const list = _reportCaseRead('recoveredVehicles', caseVehicles);
+                    return list.length ? CI.vehicles(list, fmt) : none('recovered vehicles');
+                } },
+                { id: 'evidence', label: 'Evidence items table', title: 'Item, type, description, location, date collected — text only, no media', run: () => {
+                    const list = Array.isArray(caseEvidence) ? caseEvidence : [];
+                    const labels = typeof EVIDENCE_TYPE_LABELS !== 'undefined' ? EVIDENCE_TYPE_LABELS : {};
+                    return list.length ? CI.evidence(list, { formatDate, typeLabels: labels }) : none('evidence items');
+                } },
+                { id: 'timeline', label: 'Timeline table', run: () => {
+                    const html = CI.timeline(_reportTimelineEvents());
+                    return html || none('timeline events');
+                } },
+                { id: 'photos', label: 'Photos with exhibit numbers…', sep: true,
+                  title: 'Person, vehicle and evidence photos with an exhibit number and caption. CyberTip media is never listed.',
+                  run: (ctx) => _reportPhotoPicker(ctx) },
+            ];
+        }
+
+        function _reportDataUrlBlob(u) {
+            const m = /^data:([^;,]+);base64,([\s\S]*)$/.exec(String(u || '').replace(/\s/g, ''));
+            if (!m) return null;
+            const bin = atob(m[2]);
+            const a = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+            return new Blob([a], { type: m[1] });
+        }
+        const _REPORT_IMG_MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp' };
+
+        /* One picked photo → a data URL the report keeps (scaled like Picture). */
+        async function _reportPhotoSrc(item) {
+            const RE = window.ViperRichEditor;
+            if (item.src) {
+                const blob = _reportDataUrlBlob(item.src);
+                if (!blob || !RE) return item.src;
+                return (await RE.prepareImage(blob, window, document)).src;
+            }
+            const ev = (caseEvidence || []).find(e => e && String(e.id) === String(item.evidenceId));
+            if (!ev || window.ViperCaseInserts.isRestrictedEvidence(ev) || ev.released) throw new Error('This evidence item cannot be used in the report.');
+            const api = window.electronAPI || {};
+            const ext = String(item.fileName || item.filePath).split('.').pop().toLowerCase();
+            let lastErr = null;
+            if (_REPORT_IMG_MIME[ext] && api.evidenceMediaUrl && RE) {
+                try {
+                    const r = await api.evidenceMediaUrl({ filePath: item.filePath, bytes: true });
+                    if (r && r.success && r.bytes) return (await RE.prepareImage(new Blob([r.bytes], { type: _REPORT_IMG_MIME[ext] }), window, document)).src;
+                    if (r && r.locked) throw new Error('Field Security is locked. Unlock it to use evidence pictures.');
+                    lastErr = new Error((r && r.error) || 'The picture could not be read.');
+                } catch (e) { if (/locked/i.test(e.message || '')) throw e; lastErr = e; }
+            }
+            // HEIC / TIFF or a picture Chromium cannot draw: main's copy (512 px).
+            if (api.evidenceThumb) {
+                const t = await api.evidenceThumb({ filePath: item.filePath, size: 512 });
+                if (t && t.success && t.dataUrl) return t.dataUrl;
+                if (t && t.locked) throw new Error('Field Security is locked. Unlock it to use evidence pictures.');
+            }
+            throw lastErr || new Error('VIPER cannot read this picture.');
+        }
+
+        function _reportPhotoPicker(ctx) {
+            const CI = window.ViperCaseInserts;
+            const sources = CI.photoSources({
+                suspects: _reportCaseRead('suspects', caseSuspects),
+                victims: _reportCaseRead('victims', caseVictims),
+                witnesses: _reportCaseRead('witnesses', caseWitnesses),
+                involvedPersons: _reportCaseRead('involvedPersons', null),
+                vehicles: _reportCaseRead('recoveredVehicles', caseVehicles),
+                evidence: caseEvidence,
+            });
+            if (!sources.length) {
+                viperToast('This case has no photos to add yet. Person, vehicle and evidence pictures show up here (CyberTip media never does).', 'info', 7000);
+                return Promise.resolve('');
+            }
+            const esc = _escapeAttr;
+            const firstNo = CI.nextExhibitNumber(ctx && ctx.html ? ctx.html() : '');
+            const groups = [];
+            sources.forEach(s => { let g = groups.find(x => x.name === s.group); if (!g) groups.push(g = { name: s.group, items: [] }); g.items.push(s); });
+            return new Promise((resolve) => {
+                const picked = [];               // ids, in click order = exhibit order
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4';
+                modal.style.zIndex = '10080';
+                modal.innerHTML = `
+                    <div class="glass-card rounded-xl w-full max-w-4xl flex flex-col" style="max-height:88vh" role="dialog" aria-label="Insert photos from the case">
+                        <div class="px-6 pt-5 pb-3 border-b border-gray-700/60">
+                            <h3 class="text-lg font-bold text-white">Insert photos from the case</h3>
+                            <p class="text-xs text-gray-400 mt-1">Click photos in the order they should be numbered. Captions can be edited. CyberTip / NCMEC and CSAM-flagged evidence is never listed here.</p>
+                        </div>
+                        <div class="px-6 py-4 overflow-y-auto flex-1" data-rp-body>
+                            ${groups.map(g => `
+                                <p class="text-xs font-semibold uppercase tracking-wider text-viper-cyan mb-2 mt-1">${esc(g.name)}</p>
+                                <div class="grid gap-3 mb-4" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">
+                                    ${g.items.map(s => `
+                                        <div class="rounded-lg border border-gray-600 bg-viper-dark/40 p-2 cursor-pointer select-none" data-rp-card="${esc(s.id)}">
+                                            <div class="relative rounded overflow-hidden bg-black/40 flex items-center justify-center" style="height:120px">
+                                                ${s.src ? `<img ${_S}="${esc(s.src)}" alt="" style="max-width:100%;max-height:120px;object-fit:contain">`
+                                                        : `<span class="text-[11px] text-gray-500" data-rp-thumb="${esc(s.id)}">Loading…</span>`}
+                                                <span class="absolute top-1 left-1 hidden px-1.5 py-0.5 rounded text-[11px] font-bold bg-viper-cyan text-black" data-rp-badge></span>
+                                            </div>
+                                            <p class="text-[11px] text-gray-400 mt-1 truncate" title="${esc(s.label)}">${esc(s.label)}</p>
+                                            <input type="text" class="w-full mt-1 bg-viper-dark border border-gray-600 rounded px-2 py-1 text-xs text-white focus:border-viper-cyan focus:outline-none" data-rp-cap value="${esc(s.caption)}" aria-label="Caption" maxlength="200">
+                                        </div>`).join('')}
+                                </div>`).join('')}
+                        </div>
+                        <div class="px-6 py-3 border-t border-gray-700/60 flex flex-wrap items-center gap-3">
+                            <label class="flex items-center gap-2 text-sm text-gray-300"><input type="checkbox" data-rp-num checked> Number as exhibits from</label>
+                            <input type="number" min="1" max="9999" value="${firstNo}" data-rp-start class="w-20 bg-viper-dark border border-gray-600 rounded px-2 py-1 text-sm text-white focus:border-viper-cyan focus:outline-none" aria-label="First exhibit number">
+                            <label class="flex items-center gap-2 text-sm text-gray-300">Size
+                                <select data-rp-size class="bg-viper-dark border border-gray-600 rounded px-2 py-1 text-sm text-white">
+                                    <option value="40">Small</option><option value="60" selected>Medium</option><option value="100">Full width</option>
+                                </select></label>
+                            <span class="text-xs text-gray-400 flex-1 text-right" data-rp-status></span>
+                            <button type="button" data-rp-cancel class="px-4 py-2 border border-gray-600 rounded-lg text-gray-300 hover:text-white transition">Cancel</button>
+                            <button type="button" data-rp-ok class="px-4 py-2 bg-viper-cyan/90 hover:bg-viper-cyan rounded-lg text-black font-semibold transition disabled:opacity-40" disabled>Insert</button>
+                        </div>
+                    </div>`;
+                document.body.appendChild(modal);
+                const $ = (s) => modal.querySelector(s);
+                const okBtn = $('[data-rp-ok]'), status = $('[data-rp-status]');
+                const numOn = $('[data-rp-num]'), startIn = $('[data-rp-start]');
+                let done = false, busy = false;
+                const finish = (html) => {
+                    if (done) return;
+                    done = true;
+                    document.removeEventListener('keydown', onKey, true);
+                    modal.remove();
+                    resolve(html || '');
+                };
+                const startNo = () => Math.max(1, Math.min(9999, parseInt(startIn.value, 10) || firstNo));
+                const paint = () => {
+                    modal.querySelectorAll('[data-rp-card]').forEach(c => {
+                        const i = picked.indexOf(c.getAttribute('data-rp-card'));
+                        const b = c.querySelector('[data-rp-badge]');
+                        c.classList.toggle('border-viper-cyan', i >= 0);
+                        c.classList.toggle('border-gray-600', i < 0);
+                        c.style.boxShadow = i >= 0 ? '0 0 0 2px rgba(0,217,255,.45)' : '';
+                        b.classList.toggle('hidden', i < 0);
+                        b.textContent = i < 0 ? '' : (numOn.checked ? 'Exhibit ' + (startNo() + i) : String(i + 1));
+                    });
+                    okBtn.disabled = !picked.length || busy;
+                    okBtn.textContent = picked.length > 1 ? `Insert ${picked.length} photos` : 'Insert';
+                };
+                const onKey = (e) => { if (e.key === 'Escape' && !busy) { e.preventDefault(); e.stopPropagation(); finish(''); } };
+                document.addEventListener('keydown', onKey, true);
+                modal.addEventListener('mousedown', (e) => { if (e.target === modal && !busy) finish(''); });
+                $('[data-rp-cancel]').addEventListener('click', () => { if (!busy) finish(''); });
+                numOn.addEventListener('change', paint);
+                startIn.addEventListener('input', paint);
+                modal.querySelectorAll('[data-rp-card]').forEach(c => c.addEventListener('click', (e) => {
+                    if (busy || e.target.closest('[data-rp-cap]')) return;
+                    const id = c.getAttribute('data-rp-card');
+                    const i = picked.indexOf(id);
+                    if (i >= 0) picked.splice(i, 1); else picked.push(id);
+                    paint();
+                }));
+
+                // Evidence thumbnails, a few at a time.
+                (async () => {
+                    const api = window.electronAPI || {};
+                    const todo = sources.filter(s => s.filePath);
+                    const one = async (s) => {
+                        const slot = modal.querySelector(`[data-rp-thumb="${CSS.escape(s.id)}"]`);
+                        if (!slot || done) return;
+                        let r = null;
+                        try { r = api.evidenceThumb ? await api.evidenceThumb({ filePath: s.filePath, size: 256 }) : null; } catch (_) {}
+                        if (done || !slot.isConnected) return;
+                        if (r && r.success && r.dataUrl) {
+                            const im = document.createElement('img');
+                            im.alt = ''; im.style.cssText = 'max-width:100%;max-height:120px;object-fit:contain';
+                            im[_S] = r.dataUrl;
+                            slot.replaceWith(im);
+                        } else {
+                            slot.textContent = r && r.locked ? '🔒 Locked' : (r && r.reason === 'too-large' ? 'Too large to preview' : 'No preview');
+                        }
+                    };
+                    for (let i = 0; i < todo.length && !done; i += 3) await Promise.all(todo.slice(i, i + 3).map(one));
+                })();
+
+                okBtn.addEventListener('click', async () => {
+                    if (busy || !picked.length) return;
+                    busy = true; paint();
+                    const width = +$('[data-rp-size]').value || 60;
+                    const first = startNo();
+                    const parts = [], failed = [];
+                    for (let k = 0; k < picked.length; k++) {
+                        if (done) return;
+                        const s = sources.find(x => x.id === picked[k]);
+                        const card = modal.querySelector(`[data-rp-card="${CSS.escape(picked[k])}"]`);
+                        const caption = card ? card.querySelector('[data-rp-cap]').value : s.caption;
+                        status.textContent = `Adding ${k + 1} of ${picked.length}…`;
+                        try {
+                            const src = await _reportPhotoSrc(s);
+                            const html = CI.photoBlock({ src, n: numOn.checked ? first + parts.length : 0, caption, widthPct: width });
+                            if (!html) throw new Error('VIPER cannot use this picture.');
+                            parts.push(html);
+                        } catch (e) {
+                            failed.push((s.label || 'Photo') + ': ' + ((e && e.message) || 'could not be added'));
+                        }
+                    }
+                    if (failed.length) viperToast(`${failed.length} photo${failed.length === 1 ? '' : 's'} could not be added — ${failed.slice(0, 3).join('; ')}`, 'warning', 9000);
+                    finish(parts.length ? parts.join('') + '<p><br></p>' : '');
+                });
+                paint();
+            });
+        }
         // Wraps JSON.parse(localStorage.getItem(...)) so that corrupted/truncated
         // values (e.g. from a Chromium LevelDB partial flush after a crash) cannot
         // throw SyntaxError during DOMContentLoaded and brick the case page.
@@ -9887,7 +10127,7 @@
                         </svg>
                         <div class="text-sm">
                             <p class="text-viper-cyan font-medium mb-1">Report Features</p>
-                            <p class="text-gray-300">• Headings, font sizes, alignment, bulleted and numbered lists • Tables: insert from the toolbar, then click inside one to add or remove rows and columns (Tab moves to the next cell) • Pictures: paste, drop or use Picture; click one to wrap text around it, pick a size, or drag a corner to resize • Page break starts a new page in the PDF and in Export to DA • Click "Pop Out" to write in a separate window • Changes are auto-saved</p>
+                            <p class="text-gray-300">• Headings, font sizes, alignment, bulleted and numbered lists • Tables: insert from the toolbar, then click inside one to add or remove rows and columns (Tab moves to the next cell) • Pictures: paste, drop or use Picture; click one to wrap text around it, pick a size, or drag a corner to resize • Page break starts a new page in the PDF and in Export to DA • From case: one-click tables of suspects, victims, witnesses, vehicles, evidence or the timeline, and photos with exhibit numbers and captions (CyberTip media is never offered) • Find &amp; replace: Ctrl+F / Ctrl+H • Click "Pop Out" to write in a separate window • Changes are auto-saved</p>
                         </div>
                     </div>
                 </div>
@@ -9917,6 +10157,7 @@
             if (rich) {
                 ViperRichEditor.attach({
                     editor, toolbar: richBar,
+                    inserts: _reportCaseInserts(),
                     onChange: () => { clearTimeout(_reportChangeTimer); _reportChangeTimer = setTimeout(() => saveReport(true), 1000); },
                     toast: (m, t) => viperToast(m, t),
                 });

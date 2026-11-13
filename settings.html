@@ -23,6 +23,8 @@
     <script src="modules/warrant-author/boilerplate-library.js"></script>
     <script src="modules/agency-packs/pack-editor-ui.js"></script>
     <script src="modules/agency-packs/agency-packs-settings.js"></script>
+    <!-- Dashboard layouts: reset / export / import (Display & Accessibility). -->
+    <script src="modules/dashboard/dash-layout.js"></script>
     <!-- The one authoritative list of where a case's data lives. Must load
          BEFORE case-snapshot.js and before the backup collector below. -->
     <script src="modules/_shared/case-stores.js"></script>
@@ -584,6 +586,18 @@
                             <p class="text-xs text-gray-500 mb-3">Recolors the dark interface. Layout, spacing and text stay exactly the same — only the palette changes. Light mode is unaffected.</p>
                             <div id="skinPickerRow" class="flex flex-wrap gap-3"></div>
                             <p class="text-xs text-gray-500 mt-3">Open windows pick up the new skin when they next load.</p>
+                        </div>
+
+                        <!-- Main Dashboard layouts -->
+                        <div class="pt-4 border-t border-gray-700/50">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Main Dashboard</label>
+                            <p class="text-xs text-gray-500 mb-3">Use <strong>Customize</strong> on the dashboard to move, resize, add and remove cards and to switch between layouts. Here you can share a layout as a file or start over. Personal Notes text is never put in a layout file.</p>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button onclick="dashSettingsExport()" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:border-viper-cyan hover:text-viper-cyan transition-colors text-sm">Export current layout…</button>
+                                <button onclick="dashSettingsImport()" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:border-viper-cyan hover:text-viper-cyan transition-colors text-sm">Import layout…</button>
+                                <button onclick="dashSettingsReset()" class="px-4 py-2 rounded-lg border border-gray-600 text-gray-300 hover:border-red-400 hover:text-red-400 transition-colors text-sm">Reset dashboard…</button>
+                                <span class="text-xs text-gray-500" id="dashSettingsSummary"></span>
+                            </div>
                         </div>
 
                         <!-- Sidebar Auto-Hide -->
@@ -7034,12 +7048,90 @@
             _dtUpdatePreview();
         }
 
+        /* ---------- Main Dashboard layouts (modules/dashboard/dash-layout.js) ---------- */
+        function _dashNotify(msg, type) {
+            if (typeof showToast === 'function') showToast(msg, type || 'info');
+            else if (typeof window.viperToast === 'function') window.viperToast(msg, type || 'info');
+        }
+        function _dashEsc(s) {
+            return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+        function _dashLoadStore() {
+            const DL = window.ViperDashLayout;
+            let prefs = null;
+            try { prefs = JSON.parse(localStorage.getItem('cardPreferences') || 'null'); } catch (_) {}
+            return DL.ensureStore(localStorage.getItem(DL.STORE_KEY), { cardPreferences: prefs }).store;
+        }
+        function dashSettingsSummary() {
+            const el = document.getElementById('dashSettingsSummary');
+            if (!el || !window.ViperDashLayout) return;
+            const s = _dashLoadStore();
+            const n = Object.keys(s.layouts).length;
+            el.textContent = n + ' layout' + (n === 1 ? '' : 's') + ' · using “' + s.layouts[s.active].name + '”';
+        }
+        function dashSettingsExport() {
+            const DL = window.ViperDashLayout;
+            if (!DL) return;
+            const s = _dashLoadStore();
+            const l = s.layouts[s.active];
+            const blob = new Blob([JSON.stringify(DL.exportLayout(l), null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'VIPER dashboard - ' + (String(l.name).replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_').trim().slice(0, 60) || 'dashboard') + '.json';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+            _dashNotify('Layout exported', 'success');
+        }
+        function dashSettingsImport() {
+            const DL = window.ViperDashLayout;
+            if (!DL) return;
+            const inp = document.createElement('input');
+            inp.type = 'file';
+            inp.accept = '.json,application/json';
+            inp.addEventListener('change', () => {
+                const f = inp.files && inp.files[0];
+                if (!f) return;
+                if (f.size > 512 * 1024) { _dashNotify('That file is too large to be a dashboard layout.', 'error'); return; }
+                const rd = new FileReader();
+                rd.onload = () => {
+                    let l;
+                    try { l = DL.importLayout(String(rd.result || '')); } catch (e) { _dashNotify(_dashEsc(e.message), 'error'); return; }
+                    const s = _dashLoadStore();
+                    if (Object.keys(s.layouts).length >= DL.MAX_LAYOUTS) { _dashNotify('You already have ' + DL.MAX_LAYOUTS + ' layouts. Delete one on the dashboard first.', 'error'); return; }
+                    l.id = DL.newLayoutId(s, l.name);
+                    s.layouts[l.id] = l;
+                    s.active = l.id;
+                    try { localStorage.setItem(DL.STORE_KEY, JSON.stringify(s)); } catch (e) { _dashNotify('Could not save the layout: ' + _dashEsc(e.message), 'error'); return; }
+                    dashSettingsSummary();
+                    _dashNotify('Imported “' + _dashEsc(l.name) + '”. It shows the next time you open the dashboard.', 'success');
+                };
+                rd.readAsText(f);
+            });
+            inp.click();
+        }
+        async function dashSettingsReset() {
+            const DL = window.ViperDashLayout;
+            if (!DL) return;
+            const ok = await viperConfirm('Reset the main dashboard?\n\nEvery saved layout is removed and the dashboard goes back to the Classic layout. Text in Personal Notes cards is deleted too. Your cases, tasks and stat-card metrics are not touched.', { danger: true, okText: 'Reset dashboard' });
+            if (!ok) return;
+            try {
+                localStorage.removeItem(DL.STORE_KEY);
+                localStorage.removeItem(DL.NOTES_KEY);
+            } catch (_) {}
+            dashSettingsSummary();
+            _dashNotify('Dashboard reset to the Classic layout', 'success');
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             initLicenseUI();
             doCheckUpdate();
             applyViperFontSize(localStorage.getItem('viperFontSize') || 'medium');
             initViperDateTimePref();
             renderSkinPicker();
+            try { dashSettingsSummary(); } catch (e) { console.warn('Dashboard summary:', e); }
         });
     </script>
     <script src="/modules/security-ui.js"></script>

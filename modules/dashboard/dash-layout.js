@@ -328,8 +328,8 @@
                 list = [
                     ...stats(0, 5, 'big'),
                     W('investigations', 0, 5, 8, 20), W('agenda', 8, 5, 4, 10), W('warrantAlerts', 8, 15, 4, 10),
-                    W('recentCases', 0, 25, 4, 10), W('notes', 4, 25, 4, 10), W('reportsTools', 8, 25, 4, 10),
-                    W('genlogs', 0, 35, 12, 11),
+                    W('recentCases', 0, 25, 4, 12), W('notes', 4, 25, 4, 12), W('reportsTools', 8, 25, 4, 12),
+                    W('genlogs', 0, 37, 12, 11),
                 ];
                 break;
             case 'classic':

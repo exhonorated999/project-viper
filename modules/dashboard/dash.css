@@ -84,12 +84,14 @@
 .vd-stat {
     height: 100%; padding: 0.9rem 1.15rem; border-radius: 0.75rem;
     display: flex; flex-direction: column; overflow: hidden;
+    container-type: size;
 }
 .vd-stat.stat-card:hover { transform: none; }
-.vd-stat .vd-head { margin-bottom: 0.35rem; }
+.vd-stat .vd-head { margin-bottom: 0.35rem; flex: 0 0 auto; }
 .vd-stat .card-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vd-stat-main { flex: 1 1 auto; min-height: 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 0.5rem; }
-.vd-stat-split { flex: 1 1 auto; display: flex; align-items: flex-end; justify-content: space-between; min-height: 0; }
+/* "safe" keeps an oversized figure from sliding up over the title */
+.vd-stat-main { flex: 1 1 auto; min-height: 0; display: flex; align-items: safe flex-end; justify-content: space-between; gap: 0.5rem; }
+.vd-stat-split { flex: 1 1 auto; display: flex; align-items: safe flex-end; justify-content: space-between; min-height: 0; }
 .vd-num { font-weight: 700; line-height: 1; letter-spacing: -0.01em; white-space: nowrap; }
 .vd-num-xl { font-size: 2.6rem; }
 .vd-num-lg { font-size: 1.9rem; }
@@ -100,6 +102,19 @@
 .vd-delta-down { color: #f87171; }
 .vd-delta-flat { color: #9ca3af; }
 .vd-spark { flex: 1 1 0; min-height: 22px; position: relative; margin-top: 0.4rem; }
+
+/* Short stat cards (slim layouts): shrink the figure instead of clipping it */
+@container (max-height: 96px) {
+    .vd-stat .vd-head { margin-bottom: 0.1rem; }
+    .vd-stat .vd-num-xl, .vd-stat .text-5xl { font-size: 1.9rem; line-height: 1; }
+    .vd-stat .vd-num-lg { font-size: 1.5rem; }
+    .vd-stat .vd-cap { margin-top: 0.15rem; }
+    .vd-stat .vd-spark { margin-top: 0.2rem; min-height: 14px; }
+}
+@container (max-height: 62px) {
+    .vd-stat .vd-num-xl, .vd-stat .vd-num-lg, .vd-stat .text-5xl { font-size: 1.35rem; }
+    .vd-stat .vd-cap, .vd-stat .vd-note-line { display: none; }
+}
 
 /* ── Gauge overlay ──────────────────────────────────────────────────── */
 .vd-gauge-txt {
@@ -171,15 +186,16 @@ body.light-mode .vd-note-ta, body.light-mode .vd-note-ta:focus { background: tra
 .vd-shield {
     display: none; position: absolute; inset: 0; z-index: 20; cursor: move;
     border-radius: 0.75rem; border: 2px dashed rgba(var(--vp-cyan) / 0.55);
-    background: rgba(10, 14, 20, 0.35);
-    align-items: flex-start; justify-content: flex-start; padding: 0.5rem 0.6rem;
+    background: rgba(10, 14, 20, 0.45);
+    align-items: center; justify-content: center; padding: 2.6rem 0.6rem 0.5rem;
 }
 .vd-editing .vd-shield { display: flex; }
-.vd-shield:hover { background: rgba(10, 14, 20, 0.2); border-color: rgb(var(--vp-cyan)); }
+.vd-shield:hover { background: rgba(10, 14, 20, 0.3); border-color: rgb(var(--vp-cyan)); }
 .vd-shield-label {
-    font-size: 0.72rem; font-weight: 600; padding: 0.2rem 0.55rem; border-radius: 9999px;
-    background: rgba(17, 24, 39, 0.92); color: #e5e7eb; border: 1px solid rgba(var(--vp-cyan) / 0.4);
-    max-width: calc(100% - 5rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: 0.78rem; font-weight: 600; padding: 0.3rem 0.75rem; border-radius: 9999px;
+    background: rgba(17, 24, 39, 0.95); color: #e5e7eb; border: 1px solid rgba(var(--vp-cyan) / 0.4);
+    max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
 }
 .vd-shield-size { margin-left: 0.4rem; color: #9ca3af; font-weight: 400; }
 .vd-tools { display: none; position: absolute; top: 0.45rem; right: 0.45rem; z-index: 21; gap: 0.3rem; }
@@ -195,7 +211,7 @@ body.light-mode .vd-note-ta, body.light-mode .vd-note-ta:focus { background: tra
     border: 2px dashed rgba(var(--vp-cyan) / 0.6); background: rgba(var(--vp-cyan) / 0.08); border-radius: 0.75rem;
 }
 .vd-flash .vd-shield { animation: vdFlash 1.2s ease-out 1; }
-@keyframes vdFlash { 0% { background: rgba(var(--vp-cyan) / 0.35); } 100% { background: rgba(10, 14, 20, 0.35); } }
+@keyframes vdFlash { 0% { background: rgba(var(--vp-cyan) / 0.35); } 100% { background: rgba(10, 14, 20, 0.45); } }
 
 /* Edit bar (sticks to the top of the scrolling content area) */
 #dashEditBar {

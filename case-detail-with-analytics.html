@@ -1908,6 +1908,18 @@
             } else {
                 const caseId = parseInt(localStorage.getItem('currentCaseId'));
                 currentCase = cases.find(c => c.id === caseId);
+                // Dashboard "Recent & Pinned Cases" widget: most recent first,
+                // ids only, capped at 15. Pop-outs (?case=) don't count.
+                if (currentCase) {
+                    try {
+                        const rk = 'viperRecentCases';
+                        let rl = JSON.parse(localStorage.getItem(rk) || '[]');
+                        if (!Array.isArray(rl)) rl = [];
+                        rl = rl.filter(x => String(x) !== String(currentCase.id));
+                        rl.unshift(currentCase.id);
+                        localStorage.setItem(rk, JSON.stringify(rl.slice(0, 15)));
+                    } catch (_) { /* best effort */ }
+                }
             }
             
             if (!currentCase) {

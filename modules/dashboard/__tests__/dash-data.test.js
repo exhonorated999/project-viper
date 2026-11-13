@@ -106,7 +106,8 @@ ok('yoy to-date sums', ys.prevToDate === 66 && ys.curToDate === 13 * 11 + 55);
 const tasks = [
     { id: 't1', title: 'Old', date: '2026-11-10', completed: false },
     { id: 't2', title: 'Done', date: '2026-11-14', completed: true },
-    { id: 't3', title: 'Court', kind: 'court', date: '2026-11-14', time: '09:00', caseId: 7 },
+    { id: 't3', title: 'Court', kind: 'court', date: '2026-11-14', time: '09:00', caseId: 'C-7' },
+    { id: 't7', title: 'Orphan', date: '2026-11-15', caseId: 'GONE-1' },
     { id: 't4', title: 'Far', date: '2026-12-30' },
     { id: 't5', title: 'Today', date: '2026-11-13', time: '15:00', priority: 'high' },
     { id: 't6', title: 'Bad date', date: 'soon' },
@@ -126,12 +127,14 @@ ok('agenda drops completed, far, bad dates', !/t2|t4|t6/.test(kinds));
 ok('agenda overdue first', ag[0].id === 't1' && ag[0].overdue && ag[0].days === -3);
 ok('agenda today', ag.some(a => a.id === 't5' && a.days === 0 && !a.overdue));
 ok('agenda court before warrant same day', kinds.indexOf('court:t3') < kinds.indexOf('warrant:w1'));
-ok('agenda court resolves case', ag.find(a => a.id === 't3').caseNumber === 'C-7');
+ok('agenda task resolves case by NUMBER', (a => a.caseNumber === 'C-7' && a.caseId === 7)(ag.find(a => a.id === 't3')));
+ok('agenda unknown case keeps number, no id', (a => a.caseNumber === 'GONE-1' && a.caseId === null)(ag.find(a => a.id === 't7')));
 ok('agenda returned warrant skipped', !/w2/.test(kinds));
 ok('agenda includes PRTT expiry (returned but not closed out)', /prtt:w3/.test(kinds));
 ok('agenda skips closed-out PRTT', !/w4/.test(kinds));
 const ag2 = D.agendaItems({ tasks, warrants, cases: [], days: 7, now: NOW, WarrantStatus: WS, include: { tasks: false, court: true, warrants: false } });
 ok('agenda include filters', ag2.length === 1 && ag2[0].kind === 'court');
+ok('agenda case id null when no case', ag.find(a => a.id === 't1').caseId === null);
 ok('agenda without WarrantStatus skips warrants', D.agendaItems({ tasks: [], warrants, now: NOW }).length === 0);
 ok('dayDiff', D.dayDiff(new Date(2026, 10, 14, 1), new Date(2026, 10, 13, 23)) === 1);
 

@@ -271,13 +271,16 @@
             if (!d) return;
             const dd = dayDiff(d, now);
             if (dd > days) return;
-            const c = t.caseId != null ? byId.get(String(t.caseId)) : null;
+            // Tasks keep the case NUMBER in `caseId` (see renderTasks and
+            // case-detail loadCase); fall back to an id match for safety.
+            const ref = (t.caseId != null && t.caseId !== '') ? String(t.caseId) : null;
+            const c = ref ? (byNumber.get(ref) || byId.get(ref) || null) : null;
             out.push({
                 kind: isCourt ? 'court' : 'task', id: t.id, date: d, days: dd, overdue: dd < 0,
                 time: t.time || '', timeUTC: !!t.timeUTC,
                 title: String(t.title || (isCourt ? 'Court' : 'Task')),
-                priority: t.priority || '', caseId: c ? c.id : (t.caseId != null ? t.caseId : null),
-                caseNumber: c ? c.caseNumber : '',
+                priority: t.priority || '', caseId: c ? c.id : null,
+                caseNumber: c ? c.caseNumber : (ref || ''),
             });
         });
 

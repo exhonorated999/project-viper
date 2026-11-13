@@ -3913,6 +3913,38 @@ ipcMain.handle('show-item-in-folder', async (_evt, filePath) => {
   }
 });
 
+// Opens a case's Evidence folder (or, with `item`, the folder holding one
+// evidence item's files) in Explorer. For an item: the folder of its first
+// file (where it really lives — copied or pointed-to), else its folder
+// name under Evidence/, else Evidence/ itself. Only ever opens
+// directories — never runs a file.
+ipcMain.handle('open-case-folder', async (_evt, opts) => {
+  try {
+    const o = opts || {};
+    const seg = (s) => typeof s === 'string' && s.trim() && s.length < 300
+      && !/[\\/:*?"<>|\x00-\x1f]/.test(s) && s !== '.' && s !== '..';
+    if (!seg(o.caseNumber)) return { ok: false, error: 'invalid case number' };
+    const evidenceDir = path.join(casesDir, o.caseNumber, 'Evidence');
+    const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } };
+    const open = async (dir, opened) => {
+      const err = await shell.openPath(dir);
+      return err ? { ok: false, error: err } : { ok: true, opened };
+    };
+    if (o.item) {
+      if (typeof o.filePath === 'string' && o.filePath && path.isAbsolute(o.filePath)) {
+        const fileDir = path.dirname(path.resolve(o.filePath));
+        if (isDir(fileDir)) return open(fileDir, 'file-folder');
+      }
+      const itemDir = seg(o.folder) ? path.join(evidenceDir, o.folder) : '';
+      if (itemDir && isDir(itemDir)) return open(itemDir, 'item');
+    }
+    fs.mkdirSync(evidenceDir, { recursive: true });
+    return open(evidenceDir, 'evidence');
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // --- Backup & Restore ---
 ipcMain.handle('select-backup-directory', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

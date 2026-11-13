@@ -148,6 +148,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isDiagnosticMode: () => ipcRenderer.invoke('is-diagnostic-mode'),
   generateDiagnosticReport: () => ipcRenderer.invoke('generate-diagnostic-report'),
   showItemInFolder: (p) => ipcRenderer.invoke('show-item-in-folder', p),
+  openCaseFolder: (opts) => ipcRenderer.invoke('open-case-folder', opts),
 
   // RMS PDF Import
   openReportWindow: (caseNumber) => ipcRenderer.invoke('open-report-window', caseNumber),

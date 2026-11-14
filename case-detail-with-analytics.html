@@ -4855,6 +4855,24 @@
                     const items = _readItems('witnesses', caseWitnesses);
                     if (!items.length) { emptyMsg('No witnesses recorded.'); break; }
                     items.forEach((w, i) => {
+                        if (w && w.lawEnforcement) {
+                            subjectBar(`Witness ${i+1} (Law Enforcement): ${_leDisplayName(w)}`);
+                            subTitle('Law Enforcement Witness');
+                            fieldGrid([
+                                { label: 'First Name',   value: _leNameParts(w).first },
+                                { label: 'Last Name',    value: _leNameParts(w).last },
+                                { label: 'Title',        value: w.leTitle },
+                                { label: 'Badge Number', value: w.badgeNumber },
+                                { label: 'Agency',       value: w.agency },
+                                { label: 'Agency Phone', value: w.agencyPhone },
+                                { label: 'Email',        value: w.email }
+                            ]);
+                            gap(2);
+                            if (w.testimony) { subTitle('Testifying To'); bodyText(w.testimony); }
+                            if (w.notes)     { subTitle('Notes');         bodyText(w.notes);     }
+                            gap(5);
+                            return;
+                        }
                         const wname = w.name
                             || [w.firstName, w.lastName].filter(Boolean).join(' ').trim()
                             || 'Unknown';
@@ -6046,11 +6064,26 @@
                             checkPage();
                             doc.setFont(undefined, 'bold');
                             doc.setFontSize(12);
-                            doc.text(`Witness ${index + 1}: ${witness.name || 'Unknown'}`, margin, yPos);
+                            doc.text(`Witness ${index + 1}: ${witness.lawEnforcement ? _leDisplayName(witness) + ' (Law Enforcement)' : (witness.name || 'Unknown')}`, margin, yPos);
                             yPos += 7;
                             
                             doc.setFont(undefined, 'normal');
                             doc.setFontSize(10);
+                            if (witness.lawEnforcement) {
+                                [['Badge #', witness.badgeNumber], ['Agency', witness.agency], ['Agency Phone', witness.agencyPhone], ['Email', witness.email]]
+                                    .filter(p => p[1]).forEach(p => { doc.text(`${p[0]}: ${p[1]}`, margin + 5, yPos); yPos += 5; });
+                                if (witness.testimony) {
+                                    doc.setFont(undefined, 'bold');
+                                    doc.text(`Testifying To:`, margin + 5, yPos);
+                                    yPos += 5;
+                                    doc.setFont(undefined, 'normal');
+                                    const tl = doc.splitTextToSize(witness.testimony, contentWidth - 10);
+                                    doc.text(tl, margin + 5, yPos);
+                                    yPos += (tl.length * 5);
+                                }
+                                yPos += 5;
+                                return;
+                            }
                             if (witness.phone) {
                                 doc.text(`Phone: ${witness.phone}`, margin + 5, yPos);
                                 yPos += 5;
@@ -25380,7 +25413,172 @@
             `;
         }
         
+        // ── Law-enforcement witnesses ─────────────────────────────────────
+        // A witness with `lawEnforcement: true` is an officer / detective /
+        // CSI etc. It lives in the same witnesses_<case> list but uses its
+        // own fields: firstName, lastName, leTitle, badgeNumber, agency,
+        // agencyPhone, email, testimony. `name` is always kept as
+        // "First Last" so search, notes, reports and exports keep working.
+        // Civilian fields on the same record are left alone, so unticking
+        // the box brings them back.
+        const LE_WITNESS_TITLES = ['Officer', 'Deputy', 'Trooper', 'Detective', 'Investigator', 'Corporal', 'Sergeant', 'Lieutenant', 'Captain', 'Agent', 'Special Agent', 'CSI', 'Crime Scene Technician', 'Evidence Technician', 'Forensic Examiner', 'Dispatcher'];
+        const LE_SHIELD_SVG = '<path stroke-linecap="round" stroke-linejoin="round" d="M12 2.5l7.5 3v5.7c0 4.9-3.2 9.1-7.5 10.8-4.3-1.7-7.5-5.9-7.5-10.8V5.5l7.5-3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 8l1.2 2.5 2.7.4-2 1.9.5 2.7L12 14.2l-2.4 1.3.5-2.7-2-1.9 2.7-.4L12 8z"/>';
+        function _isLeWitness(w) { return !!(w && w.lawEnforcement); }
+        // Saving a record as a civilian witness: drop the flag and the split
+        // name (CaseLink prefers firstName/lastName over `name`, so stale
+        // halves would shadow an edited civilian name). Badge/agency/etc.
+        // stay on the record so ticking the box again brings them back.
+        function _leClearFlag(w) {
+            if (!w) return w;
+            delete w.lawEnforcement;
+            delete w.firstName;
+            delete w.lastName;
+            return w;
+        }
+        function _leComposeName(first, last) {
+            return [first, last].map(s => String(s == null ? '' : s).trim()).filter(Boolean).join(' ');
+        }
+        // Best-effort split of a single "name" string ("Jane Doe" or "Doe, Jane").
+        function _leSplitName(full) {
+            const n = String(full == null ? '' : full).trim().replace(/\s+/g, ' ');
+            if (!n) return { first: '', last: '' };
+            if (n.includes(',')) {
+                const i = n.indexOf(',');
+                return { first: n.slice(i + 1).trim(), last: n.slice(0, i).trim() };
+            }
+            const parts = n.split(' ');
+            const last = parts.pop();
+            return { first: parts.join(' '), last };
+        }
+        function _leNameParts(w) {
+            if (w && (w.firstName || w.lastName)) return { first: w.firstName || '', last: w.lastName || '' };
+            return _leSplitName(w && w.name);
+        }
+        function _leDisplayName(w) {
+            const nm = (w && w.name) || _leComposeName(w && w.firstName, w && w.lastName) || 'Unknown Officer';
+            return [w && w.leTitle, nm].map(s => String(s || '').trim()).filter(Boolean).join(' ');
+        }
+        function _leTitleDatalist() {
+            return `<datalist id="leWitnessTitles">${LE_WITNESS_TITLES.map(t => `<option value="${t}"></option>`).join('')}</datalist>`;
+        }
+        function _leChip(text) {
+            return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold tracking-wider bg-blue-500/20 text-blue-200 border border-blue-400/50" data-le-chip><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">${LE_SHIELD_SVG}</svg>${text || 'LAW ENFORCEMENT'}</span>`;
+        }
+
+        function renderLeWitnessCard(witness, index) {
+            const badge = String(witness.badgeNumber || '').trim();
+            const agency = String(witness.agency || '').trim();
+            return `
+                <div class="glass-card rounded-xl p-6 hover:border-blue-400 transition cursor-pointer mx-auto" data-le-witness-card style="max-width: 400px; width: 100%; border-color: rgba(96,165,250,.55); ${_provAccent(witness)}" onclick="viewWitnessDetail(${index})">
+                    <div class="aspect-square rounded-lg overflow-hidden mb-4 flex flex-col items-center justify-center text-center px-4" style="background: linear-gradient(160deg, #13284d 0%, #0b1426 70%); border: 1px solid rgba(96,165,250,.35);">
+                        <svg class="w-24 h-24" fill="none" stroke="#60a5fa" stroke-width="1.4" viewBox="0 0 24 24">${LE_SHIELD_SVG}</svg>
+                        ${badge ? `<div class="mt-3 font-mono text-lg" style="color:#bfdbfe;">#${_esc(badge)}</div>` : ''}
+                        ${agency ? `<div class="mt-1 text-sm" style="color:#93c5fd;">${_esc(agency)}</div>` : ''}
+                    </div>
+                    <div class="mb-2">${_leChip()}</div>
+                    <h3 class="text-xl font-bold text-white mb-1">${_esc(witness.name || _leComposeName(witness.firstName, witness.lastName) || 'Unknown Officer')}</h3>
+                    ${witness.leTitle ? `<p class="text-sm text-blue-300 mb-2">${_esc(witness.leTitle)}</p>` : ''}
+                    ${_provChip(witness)}
+                    <div class="space-y-1 text-sm text-gray-400">
+                        ${badge ? `<p>Badge #: ${_esc(badge)}</p>` : ''}
+                        ${agency ? `<p>Agency: ${_esc(agency)}</p>` : ''}
+                        ${witness.agencyPhone ? `<p class="text-blue-300">Agency Phone: ${_esc(witness.agencyPhone)}</p>` : ''}
+                        ${witness.email ? `<p>Email: ${_esc(witness.email)}</p>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Escaped field for the LE detail view / inline editor.
+        function renderLeFieldWitness(label, fieldName, value, index, opts = {}) {
+            const v = value == null ? '' : String(value);
+            if (isEditingInline) {
+                return `
+                    <div class="${opts.wide ? 'col-span-2' : ''}">
+                        <label class="block text-sm text-gray-400 mb-1">${label}</label>
+                        <input type="${opts.type || 'text'}" id="field-witness-${fieldName}-${index}" value="${_esc(v)}" ${opts.list ? `list="${opts.list}"` : ''} placeholder="${_esc(opts.placeholder || '')}"
+                               class="w-full bg-viper-dark border border-blue-400/50 rounded-lg px-3 py-2 text-white focus:border-blue-400 focus:outline-none">
+                    </div>
+                `;
+            }
+            return `
+                <div class="${opts.wide ? 'col-span-2' : ''}">
+                    <p class="text-sm text-gray-400 mb-1">${label}</p>
+                    <p class="text-base text-white font-medium">${v.trim() ? _esc(v) : 'N/A'}</p>
+                </div>
+            `;
+        }
+
+        // Detail body for a law-enforcement witness. Always rendered while
+        // editing (hidden when the box is unticked) so the toggle can swap
+        // field sets without losing what was typed.
+        function renderLeWitnessDetailBody(witness, index, hidden) {
+            if (hidden && !isEditingInline) return '';
+            const nm = _leNameParts(witness);
+            const sub = [witness.agency, witness.badgeNumber ? 'Badge #' + witness.badgeNumber : ''].map(s => String(s || '').trim()).filter(Boolean).join(' · ');
+            return `
+                <div data-wdet-le class="space-y-6 ${hidden ? 'hidden' : ''}">
+                    <div class="glass-card rounded-xl p-6" style="border-color: rgba(96,165,250,.55);">
+                        <div class="flex items-center gap-4 mb-6">
+                            <div class="w-16 h-16 rounded-lg flex items-center justify-center shrink-0" style="background: linear-gradient(160deg, #13284d 0%, #0b1426 70%); border: 1px solid rgba(96,165,250,.35);">
+                                <svg class="w-10 h-10" fill="none" stroke="#60a5fa" stroke-width="1.4" viewBox="0 0 24 24">${LE_SHIELD_SVG}</svg>
+                            </div>
+                            <div class="min-w-0">
+                                ${_leChip('LAW ENFORCEMENT WITNESS')}
+                                <h3 class="text-2xl font-bold text-white mt-1">${_esc(_leDisplayName(witness))}</h3>
+                                ${sub ? `<p class="text-blue-300">${_esc(sub)}</p>` : ''}
+                                ${_provChip(witness)}
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            ${renderLeFieldWitness('First Name', 'firstName', nm.first, index)}
+                            ${renderLeFieldWitness('Last Name', 'lastName', nm.last, index)}
+                            ${renderLeFieldWitness('Title', 'leTitle', witness.leTitle, index, { list: 'leWitnessTitles', placeholder: 'Officer, Detective, CSI…' })}
+                            ${renderLeFieldWitness('Badge Number', 'badgeNumber', witness.badgeNumber, index)}
+                            ${renderLeFieldWitness('Agency', 'agency', witness.agency, index, { wide: true })}
+                            ${renderLeFieldWitness('Agency Phone', 'agencyPhone', witness.agencyPhone, index, { type: 'tel' })}
+                            ${renderLeFieldWitness('Email', 'leEmail', witness.email, index, { type: 'email' })}
+                        </div>
+                        ${isEditingInline ? _leTitleDatalist() : ''}
+                    </div>
+                    <div class="glass-card rounded-xl p-6">
+                        <h3 class="text-2xl font-bold text-blue-300 mb-6">Testifying To</h3>
+                        ${isEditingInline ? `
+                            <textarea id="field-witness-testimony-${index}"
+                                      class="w-full bg-viper-dark border border-blue-400/50 rounded-lg px-4 py-3 text-white focus:border-blue-400 focus:outline-none min-h-[200px]"
+                                      placeholder="What this witness will testify to…">${_esc(witness.testimony || '')}</textarea>
+                        ` : (String(witness.testimony || '').trim() ? `
+                            <div class="bg-blue-500/10 border border-blue-400/30 rounded-lg p-4">
+                                <p class="text-white text-base whitespace-pre-wrap leading-relaxed">${_esc(witness.testimony)}</p>
+                            </div>
+                        ` : '<p class="text-gray-400 text-base">Nothing recorded yet</p>')}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Inline-edit checkbox: swap field sets, carrying the name / email
+        // across when the other side is still empty.
+        function _leInlineToggle(index, le) {
+            const $ = (f) => document.getElementById(`field-witness-${f}-${index}`);
+            const civName = $('name'), fn = $('firstName'), ln = $('lastName');
+            const civEmail = $('email'), leEmail = $('leEmail');
+            if (le) {
+                if (civName && fn && ln && !fn.value.trim() && !ln.value.trim()) {
+                    const p = _leSplitName(civName.value);
+                    fn.value = p.first; ln.value = p.last;
+                }
+                if (civEmail && leEmail && !leEmail.value.trim()) leEmail.value = civEmail.value;
+            } else {
+                if (civName && fn && ln && !civName.value.trim()) civName.value = _leComposeName(fn.value, ln.value);
+                if (civEmail && leEmail && !civEmail.value.trim()) civEmail.value = leEmail.value;
+            }
+            document.querySelectorAll('[data-wdet-le]').forEach(el => el.classList.toggle('hidden', !le));
+            document.querySelectorAll('[data-wdet-civ]').forEach(el => el.classList.toggle('hidden', le));
+        }
+
         function renderWitnessCard(witness, index) {
+            if (_isLeWitness(witness)) return renderLeWitnessCard(witness, index);
             const photoUrl = witness.photo || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%231a2332%22 width=%22200%22 height=%22200%22/%3E%3Cpath fill=%22%2300ff88%22 d=%22M100 50a30 30 0 110 60 30 30 0 010-60zm0 80c-25 0-50 12.5-50 25v20h100v-20c0-12.5-25-25-50-25z%22 opacity=%220.3%22/%3E%3C/svg%3E';
             
             return `
@@ -25408,6 +25606,7 @@
         
         function renderWitnessDetail(index) {
             const witness = witnesses[index];
+            const le = _isLeWitness(witness);
             
             return `
                 <div>
@@ -25433,6 +25632,11 @@
                                 <button onclick="startInlineEditWitness(${index})" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition">
                                     Edit
                                 </button>
+                                <button onclick="convertWitnessType(${index})" data-le-convert class="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400 rounded-lg text-blue-300 transition flex items-center gap-2" title="${le ? 'Change this record back to a regular (civilian) witness' : 'Change this witness to a law-enforcement witness (badge, agency, testimony)'}">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">${LE_SHIELD_SVG}</svg>
+                                    ${le ? 'Convert to Civilian' : 'Convert to Law Enforcement'}
+                                </button>
+                                ${le ? '' : `
                                 <button onclick="importDmvWitness(${index})" class="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500 rounded-lg text-amber-400 transition flex items-center gap-2">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -25445,6 +25649,7 @@
                                 </button>
                                 <button onclick="removeDmvPrintoutFor('witness', ${index})" class="px-3 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/40 rounded-lg text-red-400 transition text-xs" title="Remove stored DMV printout">×</button>
                                 ` : ''}
+                                `}
                                 <button onclick="deleteWitness(${index})" class="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 border border-red-500 rounded-lg text-red-500 transition">
                                     Delete
                                 </button>
@@ -25465,6 +25670,18 @@
                     </div>
                     
                     <div class="space-y-6">
+                        ${isEditingInline ? `
+                        <label class="flex items-center gap-3 p-3 rounded-lg border border-blue-400/40 bg-blue-500/10 cursor-pointer select-none">
+                            <input type="checkbox" id="wle-toggle-${index}" ${le ? 'checked' : ''} onchange="_leInlineToggle(${index}, this.checked)" class="w-5 h-5 accent-blue-500">
+                            <svg class="w-5 h-5 text-blue-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">${LE_SHIELD_SVG}</svg>
+                            <span class="text-white font-semibold">Law enforcement witness</span>
+                        </label>
+                        ` : ''}
+
+                        ${renderLeWitnessDetailBody(witness, index, !le)}
+
+                        <!-- Civilian witness fields (hidden for law-enforcement witnesses) -->
+                        <div data-wdet-civ class="space-y-6 ${le ? 'hidden' : ''}">
                         <!-- Personal Information -->
                         <div class="glass-card rounded-xl p-6">
                             <h3 class="text-2xl font-bold text-viper-green mb-6">Personal Information</h3>
@@ -25551,6 +25768,7 @@
 
                         <!-- Identifiers -->
                         ${renderPeopleIdentifiersSection(witness, 'witness', index)}
+                        </div>
 
                         <!-- Case Notes filed against this person -->
                         ${renderPersonNotesCard('witnesses', index)}
@@ -25571,6 +25789,13 @@
         function editWitness(index) {
             showWitnessModal(index);
         }
+
+        // Existing witness → law enforcement (or back). Opens the edit form
+        // with the checkbox flipped so badge / agency / testimony can be filled.
+        function convertWitnessType(index) {
+            if (!witnesses[index]) return;
+            showWitnessModal(index, { convert: true });
+        }
         
         function startInlineEditWitness(index) {
             isEditingInline = true;
@@ -25584,6 +25809,31 @@
         
         function saveInlineEditWitness(index) {
             const witness = witnesses[index];
+            const leToggle = document.getElementById(`wle-toggle-${index}`);
+            const asLe = leToggle ? leToggle.checked : _isLeWitness(witness);
+            if (asLe) {
+                const v = (f) => String(document.getElementById(`field-witness-${f}-${index}`)?.value || '').trim();
+                if (!v('firstName') && !v('lastName')) {
+                    try { viperToast && viperToast('Enter the officer\'s first or last name', 'error'); } catch (_) {}
+                    document.getElementById(`field-witness-lastName-${index}`)?.focus();
+                    return;
+                }
+                witness.lawEnforcement = true;
+                witness.firstName = v('firstName');
+                witness.lastName = v('lastName');
+                witness.name = _leComposeName(witness.firstName, witness.lastName);
+                witness.leTitle = v('leTitle');
+                witness.badgeNumber = v('badgeNumber');
+                witness.agency = v('agency');
+                witness.agencyPhone = v('agencyPhone');
+                witness.email = v('leEmail');
+                witness.testimony = document.getElementById(`field-witness-testimony-${index}`)?.value || '';
+                saveWitnesses();
+                isEditingInline = false;
+                renderTabContent('witnesses');
+                return;
+            }
+            _leClearFlag(witness);
             
             // Update all fields
             witness.name = document.getElementById(`field-witness-name-${index}`)?.value || '';
@@ -25669,9 +25919,11 @@
             }
         }
         
-        function showWitnessModal(editIndex = null) {
+        function showWitnessModal(editIndex = null, opts = {}) {
             const witness = editIndex !== null ? witnesses[editIndex] : {};
             const isEdit = editIndex !== null;
+            const isLe = _isLeWitness(witness);
+            const leName = _leNameParts(witness);
             
             const modal = document.createElement('div');
             modal.className = 'fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4';
@@ -25682,7 +25934,7 @@
             modal.innerHTML = `
                 <div class="glass-card rounded-xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
                     <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl font-bold text-white">${isEdit ? 'Edit' : 'Add'} Witness</h2>
+                        <h2 class="text-2xl font-bold text-white" data-witness-title>${isEdit ? 'Edit' : 'Add'} ${isLe ? 'Law Enforcement ' : ''}Witness</h2>
                         <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-white">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -25691,6 +25943,58 @@
                     </div>
                     
                     <form id="witnessForm" class="space-y-6">
+                        <!-- Law-enforcement toggle -->
+                        <label class="flex items-center gap-3 p-3 rounded-lg border border-blue-400/40 bg-blue-500/10 cursor-pointer select-none">
+                            <input type="checkbox" id="witnessLeToggle" ${isLe ? 'checked' : ''} class="w-5 h-5 accent-blue-500">
+                            <svg class="w-5 h-5 text-blue-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">${LE_SHIELD_SVG}</svg>
+                            <span>
+                                <span class="block text-white font-semibold">Law enforcement witness</span>
+                                <span class="block text-xs text-gray-400">Officer, detective, CSI, etc. — shows badge, agency and testimony fields instead</span>
+                            </span>
+                        </label>
+
+                        <!-- Law-enforcement fields -->
+                        <div data-witness-le class="${isLe ? '' : 'hidden'}">
+                            <h3 class="text-lg font-bold text-blue-300 mb-3">Law Enforcement Witness</h3>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">First Name</label>
+                                    <input type="text" name="firstName" value="${_esc(leName.first)}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Last Name <span class="text-red-400">*</span></label>
+                                    <input type="text" name="lastName" value="${_esc(leName.last)}" required class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Title</label>
+                                    <input type="text" name="leTitle" list="leWitnessTitles" placeholder="Officer, Detective, CSI…" value="${_esc(witness.leTitle || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                    ${_leTitleDatalist()}
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Badge Number</label>
+                                    <input type="text" name="badgeNumber" value="${_esc(witness.badgeNumber || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-sm text-gray-400 mb-1">Agency</label>
+                                    <input type="text" name="agency" placeholder="Agency name" value="${_esc(witness.agency || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Agency Phone</label>
+                                    <input type="tel" name="agencyPhone" value="${_esc(witness.agencyPhone || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Email</label>
+                                    <input type="email" name="email" value="${_esc(witness.email || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-sm text-gray-400 mb-1">What they will testify to</label>
+                                    <textarea name="testimony" rows="6" placeholder="e.g. First officer on scene; collected and booked item 3; conducted the interview…" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">${_esc(witness.testimony || '')}</textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Civilian witness fields -->
+                        <div data-witness-civ class="space-y-6 ${isLe ? 'hidden' : ''}">
                         <!-- Personal Information -->
                         <div>
                             <h3 class="text-lg font-bold text-viper-green mb-3">Personal Information</h3>
@@ -25751,13 +26055,14 @@
                             <h3 class="text-lg font-bold text-viper-green mb-3">Witness Statement / Notes</h3>
                             <textarea name="statement" placeholder="Enter witness statement or notes..." rows="6" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-viper-green focus:outline-none">${witness.statement || ''}</textarea>
                         </div>
+                        </div>
                         
                         <div class="flex justify-end gap-3 pt-4 border-t border-gray-700">
                             <button type="button" onclick="this.closest('.fixed').remove()" class="px-6 py-2 border border-gray-600 rounded-lg text-gray-400 hover:text-white hover:border-white transition">
                                 Cancel
                             </button>
-                            <button type="submit" class="px-6 py-2 bg-viper-green hover:bg-viper-green/80 rounded-lg text-black font-semibold transition">
-                                ${isEdit ? 'Save Changes' : 'Add Witness'}
+                            <button type="submit" data-witness-submit class="px-6 py-2 bg-viper-green hover:bg-viper-green/80 rounded-lg text-black font-semibold transition">
+                                ${isEdit ? 'Save Changes' : (isLe ? 'Add LE Witness' : 'Add Witness')}
                             </button>
                         </div>
                     </form>
@@ -25777,9 +26082,74 @@
                 }
             } catch (_) {}
 
+            // Law-enforcement toggle: show one field set, disable the other
+            // (disabled inputs skip `required` and stay out of FormData).
+            const wForm = document.getElementById('witnessForm');
+            const leToggle = document.getElementById('witnessLeToggle');
+            const applyLeMode = (le, carry) => {
+                const leBox = wForm.querySelector('[data-witness-le]');
+                const civBox = wForm.querySelector('[data-witness-civ]');
+                if (carry) {
+                    const civName = wForm.querySelector('[data-witness-civ] input[name="name"]');
+                    const fn = wForm.querySelector('[data-witness-le] input[name="firstName"]');
+                    const ln = wForm.querySelector('[data-witness-le] input[name="lastName"]');
+                    const civEmail = wForm.querySelector('[data-witness-civ] input[name="email"]');
+                    const leEmail = wForm.querySelector('[data-witness-le] input[name="email"]');
+                    if (le) {
+                        if (civName && fn && ln && !fn.value.trim() && !ln.value.trim()) {
+                            const p = _leSplitName(civName.value);
+                            fn.value = p.first; ln.value = p.last;
+                        }
+                        if (civEmail && leEmail && !leEmail.value.trim()) leEmail.value = civEmail.value;
+                    } else {
+                        if (civName && fn && ln && !civName.value.trim()) civName.value = _leComposeName(fn.value, ln.value);
+                        if (civEmail && leEmail && !civEmail.value.trim()) civEmail.value = leEmail.value;
+                    }
+                }
+                leBox.classList.toggle('hidden', !le);
+                civBox.classList.toggle('hidden', le);
+                leBox.querySelectorAll('input, textarea, select').forEach(el => { el.disabled = !le; });
+                civBox.querySelectorAll('input, textarea, select').forEach(el => { el.disabled = le; });
+                wForm.querySelectorAll('[data-case-link-hint]').forEach(el => { el.style.display = le ? 'none' : ''; });
+                const t = modal.querySelector('[data-witness-title]');
+                if (t) t.textContent = `${isEdit ? 'Edit' : 'Add'} ${le ? 'Law Enforcement ' : ''}Witness`;
+                const sb = modal.querySelector('[data-witness-submit]');
+                if (sb && !isEdit) sb.textContent = le ? 'Add LE Witness' : 'Add Witness';
+            };
+            applyLeMode(isLe, false);
+            // "Convert to law enforcement / civilian" button: open with the box
+            // already flipped (name + email carried across). Nothing is saved
+            // until the user clicks Save.
+            if (opts && opts.convert && isEdit) {
+                leToggle.checked = !isLe;
+                applyLeMode(!isLe, true);
+            }
+            leToggle.addEventListener('change', () => applyLeMode(leToggle.checked, true));
+
             document.getElementById('witnessForm').onsubmit = (e) => {
                 e.preventDefault();
                 const formData = new FormData(e.target);
+                if (leToggle.checked) {
+                    const g = (k) => String(formData.get(k) || '').trim();
+                    const leData = {
+                        lawEnforcement: true,
+                        firstName: g('firstName'),
+                        lastName: g('lastName'),
+                        name: _leComposeName(g('firstName'), g('lastName')),
+                        leTitle: g('leTitle'),
+                        badgeNumber: g('badgeNumber'),
+                        agency: g('agency'),
+                        agencyPhone: g('agencyPhone'),
+                        email: g('email'),
+                        testimony: String(formData.get('testimony') || '')
+                    };
+                    if (isEdit) witnesses[editIndex] = Object.assign({}, witnesses[editIndex], leData);
+                    else witnesses.push(leData);
+                    saveWitnesses();
+                    modal.remove();
+                    renderTabContent('witnesses');
+                    return;
+                }
                 const witnessData = {
                     photo: formData.get('photo'),
                     name: formData.get('name'),
@@ -25809,6 +26179,7 @@
                     // MERGE, don't replace (same as the victim form): fields
                     // this form doesn't show (race, DMV printout…) must survive.
                     witnesses[editIndex] = Object.assign({}, witnesses[editIndex], witnessData);
+                    _leClearFlag(witnesses[editIndex]);
                 } else {
                     witnesses.push(witnessData);
                 }
@@ -25844,7 +26215,7 @@
                         ${witnesses.map((w, i) => `
                             <label class="flex items-center gap-3 p-2 bg-viper-dark/50 rounded cursor-pointer">
                                 <input type="checkbox" name="witness_${i}" value="${i}" class="witness-checkbox text-viper-green">
-                                <span class="text-white text-sm">${w.name || 'Unknown Witness'}</span>
+                                <span class="text-white text-sm">${_isLeWitness(w) ? _esc(_leDisplayName(w)) + ' <span class="text-blue-300">— Law Enforcement</span>' : (w.name || 'Unknown Witness')}</span>
                             </label>
                         `).join('')}
                     </div>
@@ -25895,6 +26266,36 @@
             generateWitnessPDFHTML([witnesses[index]]);
         }
         
+        // Printable card for a law-enforcement witness (generateWitnessPDFHTML).
+        function _leWitnessPrintCard(w, index, total) {
+            const nm = _leNameParts(w);
+            const f = (label, v) => `<div class="field"><label>${label}:</label><div>${String(v || '').trim() ? _esc(v) : 'N/A'}</div></div>`;
+            return `
+                <div class="witness-card le">
+                    <div class="witness-header">
+                        <div class="le-tag">LAW ENFORCEMENT WITNESS</div>
+                        <h2>Witness ${total > 1 ? index + 1 : ''}: ${_esc(_leDisplayName(w))}</h2>
+                    </div>
+                    <div class="section">
+                        <h3>Officer Information</h3>
+                        <div class="field-grid">
+                            ${f('First Name', nm.first)}
+                            ${f('Last Name', nm.last)}
+                            ${f('Title', w.leTitle)}
+                            ${f('Badge Number', w.badgeNumber)}
+                            ${f('Agency', w.agency)}
+                            ${f('Agency Phone', w.agencyPhone)}
+                            ${f('Email', w.email)}
+                        </div>
+                    </div>
+                    <div class="section">
+                        <h3>Testifying To</h3>
+                        <div class="statement-box">${String(w.testimony || '').trim() ? _esc(w.testimony) : 'Nothing recorded.'}</div>
+                    </div>
+                </div>
+            `;
+        }
+
         function generateWitnessPDFHTML(witnessesToExport) {
             const pdfWindow = window.open('', '_blank');
             const currentUser = _lsParse('viperCurrentUser', null) || { username: 'Unknown Detective' };
@@ -26017,6 +26418,11 @@
                         .no-print:hover {
                             background: #00dd77;
                         }
+                        .witness-card.le { border-color: #3b82f6; }
+                        .witness-card.le .witness-header { background: #1e3a8a; color: #fff; }
+                        .witness-card.le .section h3 { color: #1d4ed8; border-bottom-color: #1d4ed8; }
+                        .witness-card.le .statement-box { border-left-color: #1d4ed8; }
+                        .le-tag { display: inline-block; font-size: 11px; font-weight: bold; letter-spacing: .08em; padding: 2px 8px; border-radius: 4px; background: #dbeafe; color: #1e3a8a; margin-bottom: 6px; }
                     </style>
                 </head>
                 <body>
@@ -26049,7 +26455,7 @@
                         <p>${currentCase.synopsis || 'No synopsis provided.'}</p>
                     </div>
                     
-                    ${witnessesToExport.map((witness, index) => `
+                    ${witnessesToExport.map((witness, index) => witness && witness.lawEnforcement ? _leWitnessPrintCard(witness, index, witnessesToExport.length) : `
                         <div class="witness-card">
                             <div class="witness-header">
                                 <h2>Witness ${witnessesToExport.length > 1 ? index + 1 : ''}: ${witness.name || 'Unknown'}</h2>

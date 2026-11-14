@@ -289,7 +289,12 @@
         const addEntry = (role, raw, caseId, caseNumber) => {
             const person = extractPerson(raw);
             if (!person) return;
-            entries.push({ role, person, caseId, caseNumber });
+            // Law-enforcement witnesses (officers, CSIs…) appear across many
+            // cases and share agency phones/emails. They stay searchable
+            // (findPersons) but never drive related-case or duplicate links.
+            const entry = { role, person, caseId, caseNumber };
+            if (raw && raw.lawEnforcement) entry.le = true;
+            entries.push(entry);
         };
 
         // Pattern 1 — keyed by caseNumber
@@ -375,6 +380,7 @@
         const score = (entry, confidence, reason) => {
             // Skip self
             if (excludeCaseId && entry.caseId === excludeCaseId) return;
+            if (entry.le) return; // law-enforcement witness — never a duplicate hint
             if (roleFilter && entry.role !== roleFilter) return;
             const dedupKey = `${entry.caseId}|${entry.role}|${canonicalKey(entry.person)}`;
             if (seen.has(dedupKey)) {
@@ -451,7 +457,7 @@
     function getRelatedCases(caseId) {
         if (!caseId) return [];
         const idx = buildIndex();
-        const myEntries = idx.entries.filter(e => e.caseId === caseId);
+        const myEntries = idx.entries.filter(e => e.caseId === caseId && !e.le);
         if (!myEntries.length) return [];
 
         const related = new Map(); // caseId -> { caseId, caseNumber, sharedPersons[] }
@@ -495,6 +501,7 @@
             });
 
             candidates.forEach(({ o, confidence, via }) => {
+                if (o.le) return; // law-enforcement witness on the other side
                 const r = related.get(o.caseId) || {
                     caseId: o.caseId,
                     caseNumber: o.caseNumber,

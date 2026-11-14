@@ -112,6 +112,13 @@
             { label: 'Name', always: true, get: (p) => personName(p) || 'Unknown' },
         ];
         if (role === 'involvedPersons') cols.push({ label: 'Role', get: (p) => join([p.role || p.rmsRole, p.relationship], '\n') });
+        // Law-enforcement witnesses (lawEnforcement: true) — title / agency /
+        // badge / agency phone. The column drops out when no row has any.
+        if (role === 'witnesses') {
+            cols.push({ label: 'Law enforcement', get: (p) => (p.lawEnforcement
+                ? join([p.leTitle || 'Law enforcement', p.agency, str(p.badgeNumber) ? 'Badge #' + str(p.badgeNumber) : '', p.agencyPhone], '\n')
+                : '') });
+        }
         cols.push(
             { label: 'DOB', get: (p) => (p.dob ? date(p.dob) : '') },
             { label: 'Sex / Race', get: (p) => join([p.sex, p.race], ' / ') },
@@ -124,6 +131,9 @@
         );
         if (role === 'suspects') {
             cols.push({ label: 'Arrested', get: (p) => (p.arrested ? join(['Yes', p.arrestDate ? date(p.arrestDate) : ''], ' ' + DASH + ' ') : '') });
+        }
+        if (role === 'witnesses') {
+            cols.push({ label: 'Testifying to', get: (p) => (p.lawEnforcement ? p.testimony : '') });
         }
         return table(cols, list);
     }

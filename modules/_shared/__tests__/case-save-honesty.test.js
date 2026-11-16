@@ -99,8 +99,13 @@ function hits(hay, needle) {
         !/localStorage\.setItem/.test(vehBody));
 
     const notesStart = PAGE.indexOf('function _persistCaseNotes');
-    const notesBody = PAGE.slice(notesStart, notesStart + 400);
+    const notesBody = PAGE.slice(notesStart, notesStart + 900);
     check('_persistCaseNotes goes through the guard', /_lsSetSafe\(/.test(notesBody));
+    // Notes in memory carry their pictures; storage must only get references.
+    check('  and writes the lean copy, never the in-memory notes with their pictures',
+        /const lean = _noteLeanList\(caseNotes\);/.test(notesBody)
+        && /allNotes\[currentCase\.caseNumber\] = lean;/.test(notesBody)
+        && /_CS\.blankHydrated\(n\.contentHtml\)/.test(PAGE.slice(PAGE.indexOf('function _noteLeanList'), notesStart)));
 
     // The rollback contract: the list on screen must never be ahead of the
     // list in storage. Each handler restores its previous array on failure.

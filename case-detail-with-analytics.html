@@ -8998,6 +8998,33 @@
             return String(RE && typeof RE.cleanHtml === 'function' && ed.cloneNode ? RE.cleanHtml(ed) : ed.innerHTML).trim();
         }
 
+        /** After a commit moved pictures to disk: give the matching pictures
+         *  still open in the editor their case-folder reference, matched by
+         *  their bytes. Returns how many were tagged. */
+        function _noteTagEditorImages(ed, liveHtml) {
+            if (!ed || !ed.querySelectorAll || !_CS || !_CS.diskImages) return 0;
+            const refs = new Map();
+            const have = new Set(Array.from(ed.querySelectorAll('img')).map((img) => img.getAttribute(_CS.IMG_ATTR)).filter(Boolean));
+            _CS.diskImages(liveHtml).forEach((r) => {
+                const src = _CS.readAttr(r.tag, 'src');
+                if (!src || src === _CS.BLANK_PIXEL || have.has(r.fileName)) return;
+                if (!refs.has(src)) refs.set(src, []);
+                refs.get(src).push(r);
+            });
+            if (!refs.size) return 0;
+            let n = 0;
+            ed.querySelectorAll('img').forEach((img) => {
+                if (img.getAttribute(_CS.IMG_ATTR)) return;
+                const q = refs.get(img.getAttribute('src'));
+                const r = q && q.shift();
+                if (!r) return;
+                img.setAttribute(_CS.IMG_ATTR, r.fileName);
+                img.setAttribute(_CS.IMG_KIND_ATTR, r.kind || 'notes');
+                n++;
+            });
+            return n;
+        }
+
         function _noteEditorIsDirty() {
             const ed = document.getElementById('noteEditor');
             if (!ed) return false;
@@ -9137,6 +9164,26 @@
                 // those bytes again before writing — no await needed.
                 try { storedHtml = _CS.blankHydrated(contentHtml); } catch (_) {}
             }
+            // What the officer keeps SEEING. The note in memory holds the
+            // pictures AND their case-folder references; _persistCaseNotes
+            // strips the bytes on the way to storage. Putting storedHtml in
+            // memory is what blanked every picture in the list (and in the
+            // editor on reopen) after a Save or an auto-save.
+            let liveHtml = storedHtml;
+            let contentHtmlAfterTag = null;
+            try { if (_CS && _CS.carrySrc) liveHtml = _CS.carrySrc(storedHtml, contentHtml); } catch (_) {}
+            // The pictures this pass moved to disk are still plain data URLs
+            // in the open editor. Tag them with their references so the next
+            // auto-save does not write the same picture out a second time.
+            if (!sync && liveHtml !== contentHtml) {
+                try {
+                    const before = _noteEditorHtml(editor);
+                    if (_noteTagEditorImages(editor, liveHtml) && before === contentHtml) {
+                        // Only the tags changed; the officer has not typed.
+                        contentHtmlAfterTag = _noteEditorHtml(editor);
+                    }
+                } catch (_) {}
+            }
 
             // 1. Upload any pending attachments to disk before mutating note JSON
             let finalAttachments = savedNoteAttachments.filter(a => !a.legacy);
@@ -9183,7 +9230,7 @@
             if (editingNoteId) {
                 const note = caseNotes.find(n => n.id === editingNoteId);
                 if (note) {
-                    note.contentHtml = storedHtml;
+                    note.contentHtml = liveHtml;
                     delete note.content;
                     _noteApplyTitle(note, title);
                     note.attachments = finalAttachments;
@@ -9199,7 +9246,7 @@
                 noteId = Date.now();
                 const fresh = {
                     id: noteId,
-                    contentHtml: storedHtml,
+                    contentHtml: liveHtml,
                     createdAt,
                     editHistory: [],
                     attachments: finalAttachments,
@@ -9233,7 +9280,7 @@
 
             // The editor now matches what is on disk, so the next autosave
             // tick has nothing to do until the officer types again.
-            _noteLastCommittedHtml = contentHtml;
+            _noteLastCommittedHtml = contentHtmlAfterTag || contentHtml;
             _noteLastCommittedTitle = title;
 
             return { saved: true, noteId, createdAt: savedNoteCreatedAt };
@@ -9379,10 +9426,29 @@
             }
         }
 
+        /* The copy of the notes that goes to storage. In memory a note holds
+           its pictures (read back from cases/<case>/Notes/ for display);
+           storage holds only the references. Without this, saving ANY note
+           wrote every other note's pictures straight back into the quota. */
+        function _noteLeanList(list) {
+            if (!_CS || !Array.isArray(list)) return list;
+            return list.map((n) => (n && typeof n.contentHtml === 'string' && n.contentHtml.indexOf(_CS.IMG_ATTR) !== -1)
+                ? Object.assign({}, n, { contentHtml: _CS.blankHydrated(n.contentHtml) })
+                : n);
+        }
+
         function _persistCaseNotes() {
-            _provStampEdits('viperCaseNotes', caseNotes);
+            const lean = _noteLeanList(caseNotes);
+            _provStampEdits('viperCaseNotes', lean);
+            // A fresh "edited here" stamp belongs on the live note too.
+            if (lean !== caseNotes) {
+                lean.forEach((rec, i) => {
+                    const live = caseNotes[i];
+                    if (rec && live && rec !== live && rec._prov && rec._prov !== live._prov) live._prov = rec._prov;
+                });
+            }
             const allNotes = _lsParse('viperCaseNotes', {});
-            allNotes[currentCase.caseNumber] = caseNotes;
+            allNotes[currentCase.caseNumber] = lean;
             return _lsSetSafe('viperCaseNotes', JSON.stringify(allNotes), 'this note');
         }
 
@@ -9692,6 +9758,9 @@
                 try { storedHtml = (await _noteImagesToDisk(contentHtml)).html; }
                 catch (e) { console.error('[savePersonNote] image offload failed:', e); }
             }
+            // Memory keeps the pictures; _persistCaseNotes stores the lean copy.
+            let liveHtml = storedHtml;
+            try { if (_CS && _CS.carrySrc) liveHtml = _CS.carrySrc(storedHtml, contentHtml); } catch (_) {}
 
             // Stamping the uid here is what actually creates the link, so it
             // must happen before the note is written.
@@ -9707,7 +9776,7 @@
             if (ctx.noteId) {
                 const note = caseNotes.find(n => n.id === ctx.noteId);
                 if (note) {
-                    note.contentHtml = storedHtml;
+                    note.contentHtml = liveHtml;
                     delete note.content;
                     _noteApplyTitle(note, title);
                     note.editHistory = note.editHistory || [];
@@ -9719,7 +9788,7 @@
             } else {
                 const fresh = {
                     id: Date.now(),
-                    contentHtml: storedHtml,
+                    contentHtml: liveHtml,
                     createdAt: new Date().toISOString(),
                     editHistory: [],
                     attachments: [],

@@ -450,6 +450,34 @@
         return inlineImages(html).length > 0;
     }
 
+    /*
+     * The lean copy for STORAGE, the live copy for the SCREEN.
+     *
+     * `leanHtml` is what dehydrateHtml / blankHydrated made of `liveHtml`:
+     * the same <img> tags in the same order, each moved picture now a
+     * reference with a blank placeholder. This puts the picture bytes from
+     * `liveHtml` back onto those references, giving HTML that both shows
+     * the pictures AND remembers where they live on disk — what the
+     * in-memory note has to hold. No disk access, so it is synchronous.
+     *
+     * Holding the lean copy in memory instead is what made a note's
+     * pictures turn blank the moment it was saved or auto-saved.
+     */
+    function carrySrc(leanHtml, liveHtml) {
+        if (typeof leanHtml !== 'string' || typeof liveHtml !== 'string'
+            || leanHtml.indexOf(IMG_ATTR) === -1) return leanHtml;
+        var live = [];
+        forEachImgTag(liveHtml, function (tag) { live.push(tag); return tag; });
+        var i = 0, count = 0;
+        forEachImgTag(leanHtml, function (tag) { count++; return tag; });
+        if (count !== live.length) return leanHtml;
+        return forEachImgTag(leanHtml, function (tag) {
+            var src = readAttr(live[i++], 'src');
+            if (!readAttr(tag, IMG_ATTR) || !src || src === BLANK_PIXEL || !isImageDataUrl(src)) return tag;
+            return writeAttr(tag, 'src', src);
+        });
+    }
+
     return {
         IMG_ATTR: IMG_ATTR,
         IMG_KIND_ATTR: IMG_KIND_ATTR,
@@ -476,6 +504,7 @@
         diskImages: diskImages,
         hasInlineImages: hasInlineImages,
         blankHydrated: blankHydrated,
+        carrySrc: carrySrc,
         dehydrateHtml: dehydrateHtml,
         hydrateHtml: hydrateHtml
     };

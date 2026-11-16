@@ -99,6 +99,9 @@
     };
     const BAD_VALUE = /url\s*\(|expression|javascript:|vbscript:|[<>\\@{}]|behavior|-moz-binding/i;
     const WRAPS = ['inline', 'left', 'right', 'center'];
+    // Wrapping a picture wider than this shrinks it to WRAP_FIT_PCT first,
+    // so there is room beside it for the text (see setWrap).
+    const WRAP_MAX_PCT = 66, WRAP_FIT_PCT = 50;
     const live = new Set();
     const IMG_SRC = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,[a-z0-9+/=\s]+$/i;
     const REF_NAME = /^[\w][\w .()-]{0,150}\.(?:png|jpe?g|gif|webp|bmp)$/i;
@@ -769,9 +772,44 @@
             return Math.min(100, Math.round(img.getBoundingClientRect().width / columnWidth(img) * 1000) / 10);
         }
         function setWrap(img, mode) {
+            let pct = widthPct(img);
+            // Text can only flow beside a picture if there is room for it.
+            // A pasted screenshot usually comes in at the full column width,
+            // and "Wrap left" on that looked like it did nothing at all.
+            if ((mode === 'left' || mode === 'right') && pct > WRAP_MAX_PCT) pct = WRAP_FIT_PCT;
             img.setAttribute('data-wrap', mode);
-            img.setAttribute('style', imgStyle(mode, widthPct(img)));
+            img.setAttribute('style', imgStyle(mode, pct));
+            if (mode === 'left' || mode === 'right') anchorFloat(img);
             changed(); refresh();
+        }
+        // Text only flows around a float that comes BEFORE it. A picture
+        // pasted under the last paragraph has nothing after it to wrap, so
+        // wrapping it changed nothing on screen. Anchor it to the start of
+        // the paragraph above instead, the way Word wraps a picture into
+        // the paragraph it belongs to. A picture with text after it is
+        // left where the officer put it.
+        function anchorFloat(img) {
+            const meaningful = (n) => n && (n.nodeType === 3 ? !!n.data.trim()
+                : n.nodeType === 1 && n.tagName !== 'BR' && !!(n.textContent.trim() || n.querySelector('img,table')));
+            for (let n = img; n && n !== editor; n = n.parentNode) {
+                for (let s = n.nextSibling; s; s = s.nextSibling) if (meaningful(s)) return;
+            }
+            const BLOCK = /^(P|DIV|H[1-6]|BLOCKQUOTE)$/;
+            let holder = img.parentNode === editor ? img : img.parentNode;
+            if (holder !== img && (holder.parentNode !== editor || !BLOCK.test(holder.tagName))) return;
+            if (holder !== img && holder.textContent.trim()) {
+                // Last thing in a paragraph that has text: wrap that paragraph.
+                holder.insertBefore(img, holder.firstChild);
+                return;
+            }
+            let prev = holder.previousSibling;
+            while (prev && !meaningful(prev)) prev = prev.previousSibling;
+            if (!prev || prev.nodeType !== 1 || !BLOCK.test(prev.tagName) || !prev.textContent.trim()) return;
+            prev.insertBefore(img, prev.firstChild);
+            // Keep a line to type on below, where the picture used to be.
+            if (holder !== img) { if (!holder.firstChild) holder.appendChild(doc.createElement('br')); return; }
+            const last = editor.lastElementChild;
+            if (!last || last === prev || meaningful(last)) editor.appendChild(doc.createElement('p')).appendChild(doc.createElement('br'));
         }
         function setSize(img, pct) {
             img.setAttribute('style', imgStyle(wrapOf(img), pct));

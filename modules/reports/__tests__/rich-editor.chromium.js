@@ -138,10 +138,19 @@ async function pageTests() {
     ok('picture: selection frame + 4 corner handles', !document.querySelector('.vre-frame').hidden && document.querySelectorAll('.vre-h:not([hidden])').length === 4);
     c.setWrap(img, 'left');
     ok('picture: wrap left', img.getAttribute('data-wrap') === 'left' && img.style.cssFloat === 'left' && /width:50%/.test(img.getAttribute('style')));
+    // A float only wraps text that comes AFTER it, so a picture inserted at
+    // the end of the text must be anchored to the start of that paragraph.
+    ok('picture: wrapping a picture after the text anchors it to the start of the paragraph',
+        ed.firstElementChild && ed.firstElementChild.firstChild === img && /Text that wraps/.test(ed.firstElementChild.textContent), ed.innerHTML.slice(0, 160));
     c.setWrap(img, 'right');
     ok('picture: wrap right', img.style.cssFloat === 'right');
     c.setWrap(img, 'inline');
     ok('picture: in line', img.style.cssFloat === 'none' && img.style.display === 'inline-block');
+    // A full-width screenshot leaves no room beside it: wrapping shrinks it.
+    c.setSize(img, 100);
+    c.setWrap(img, 'right');
+    ok('picture: wrapping a full-width picture shrinks it to 50 % so text fits beside it', /width:50%/.test(img.getAttribute('style')) && img.style.cssFloat === 'right', img.getAttribute('style'));
+    c.setWrap(img, 'inline');
     c.setSize(img, 25);
     ok('picture: size 25 % keeps the wrap', /width:25%/.test(img.getAttribute('style')) && img.style.display === 'inline-block');
     // drag the SE handle: 600px column → +150px ≈ +25 %
@@ -155,6 +164,19 @@ async function pageTests() {
     ok('picture: saved HTML has no selection marks', !/vre-img-selected|viper-img-selected|data-vre-new/.test(RE.cleanHtml(ed)));
     ed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
     ok('picture: Delete removes the selected picture', !ed.querySelector('img') && document.querySelector('.vre-frame').hidden);
+
+    // A picture with text after it already wraps — it must not be moved.
+    ed.innerHTML = '<p>before</p><p><img src="' + cv.toDataURL('image/png') + '" data-wrap="center" style="width:40%"></p><p>after it</p>';
+    img = ed.querySelector('img');
+    const holder = img.parentNode;
+    c.setWrap(img, 'left');
+    ok('picture: a picture with text after it stays where it is', img.parentNode === holder && ed.children.length === 3, ed.innerHTML.slice(0, 120));
+    // A picture on its own line under the text joins the paragraph above.
+    ed.innerHTML = '<p>the paragraph above</p><p><img src="' + cv.toDataURL('image/png') + '" data-wrap="center" style="width:40%"></p>';
+    img = ed.querySelector('img');
+    c.setWrap(img, 'right');
+    ok('picture: a picture on its own last line anchors to the paragraph above', ed.firstElementChild.firstChild === img && /paragraph above/.test(ed.firstElementChild.textContent), ed.innerHTML.slice(0, 120));
+    ed.innerHTML = '';
 
     // font size
     ed.innerHTML = '<p>one two three</p>';

@@ -127,6 +127,22 @@ function build(o) {
         get() { return String(this.innerHTML).replace(/<[^>]*>/g, '').trim(); }
     });
     const form = makeEl();
+    // Just enough DOM for _noteTagEditorImages: querySelectorAll('img')
+    // returns live views onto the <img> tags in innerHTML, so tagging a
+    // picture rewrites the editor's HTML the way the browser would.
+    const CSmod = require('../../_shared/case-storage.js');
+    editor.querySelectorAll = (sel) => {
+        if (sel !== 'img') return [];
+        const tags = () => String(editor.innerHTML).match(/<img\b[^>]*>/gi) || [];
+        return tags().map((_, i) => ({
+            getAttribute: (n) => CSmod.readAttr(tags()[i], n),
+            setAttribute: (n, v) => {
+                let k = -1;
+                editor.innerHTML = String(editor.innerHTML).replace(/<img\b[^>]*>/gi,
+                    (t) => (++k === i ? CSmod.writeAttr(t, n, v) : t));
+            }
+        }));
+    };
     if (!o.formOpen) form.classList.add('hidden');
     const stamp = makeEl();
     stamp.classList.add('hidden');
@@ -185,8 +201,14 @@ function build(o) {
         _touchCaseActivity: () => { sandbox.__touches = (sandbox.__touches || 0) + 1; },
         _persistCaseNotes() {
             // Mirrors the page: a real quota-guarded write that reports back.
-            return sandbox._CS.setItemSafe('viperCaseNotes', JSON.stringify({
-                [sandbox.currentCase.caseNumber]: sandbox.caseNotes
+            // Like the page's _noteLeanList, storage gets the lean copy
+            // (picture refs only) while memory keeps the live pictures.
+            const CS = sandbox._CS;
+            const lean = sandbox.caseNotes.map((n) => (n && typeof n.contentHtml === 'string'
+                && n.contentHtml.indexOf(CS.IMG_ATTR) !== -1)
+                ? Object.assign({}, n, { contentHtml: CS.blankHydrated(n.contentHtml) }) : n);
+            return CS.setItemSafe('viperCaseNotes', JSON.stringify({
+                [sandbox.currentCase.caseNumber]: lean
             }), { store: localStorage, label: 'this note' }).ok;
         },
         _collectNoteAssignments: () => (o.assignments === undefined ? [] : o.assignments),
@@ -367,7 +389,8 @@ section('THE DUPLICATE TRAP — repeated silent commits update, never insert');
     const t20 = build({ formOpen: true, editorHtml: '<p>at the door</p><img src="' + FATPNG + '"><p>end</p>' });
     const r20 = await t20.sandbox._noteCommit({ silent: true });
     check('the note saves', r20.saved === true, r20.reason);
-    const stored20 = t20.sandbox.caseNotes[0].contentHtml;
+    const storedNote = (t) => JSON.parse(t.localStorage.getItem('viperCaseNotes'))['25-55555'][0].contentHtml;
+    const stored20 = storedNote(t20);
     check('  one file was written to the case folder',
         Object.keys(t20.fakeDisk).length === 1, JSON.stringify(Object.keys(t20.fakeDisk)));
     check('  the bytes are NOT in the stored note',
@@ -381,6 +404,20 @@ section('THE DUPLICATE TRAP — repeated silent commits update, never insert');
         t20.fakeDisk[t20.sandbox._CS.diskImages(stored20)[0].fileName] === 'A'.repeat(120000));
     const back20 = await t20.sandbox._noteImagesFromDisk(stored20);
     check('  reading it back gives the picture again', back20.indexOf(FATPNG) !== -1);
+
+    // The reported bug: "they arent saving on screen when i navigate away
+    // even if i click save". The lean copy used to replace the in-memory
+    // note too, so the list and the reopened editor showed a blank pixel
+    // until the next full page load. Memory must keep the picture.
+    const live20 = t20.sandbox.caseNotes[0].contentHtml;
+    check('  the in-memory note still shows the picture', live20.indexOf(FATPNG) !== -1);
+    check('  and it carries the disk reference (so re-saves reuse the file)',
+        t20.sandbox._CS.diskImages(live20).length === 1);
+    await t20.sandbox._noteCommit({ silent: true });
+    check('  saving again does not write a second file',
+        Object.keys(t20.fakeDisk).length === 1, JSON.stringify(Object.keys(t20.fakeDisk)));
+    check('  and storage is still lean after the second save', storedNote(t20).length < 500,
+        'len=' + storedNote(t20).length);
 
     // A write that fails must keep the picture in the note rather than
     // silently drop it. A lost screenshot is evidence lost.
@@ -397,14 +434,16 @@ section('THE DUPLICATE TRAP — repeated silent commits update, never insert');
     // the case just freed.
     const t22 = build({ formOpen: true, editorHtml: '<img src="' + FATPNG + '">' });
     await t22.sandbox._noteCommit({ silent: true });
-    const lean22 = t22.sandbox.caseNotes[0].contentHtml;
+    const lean22 = storedNote(t22);
     const wet22 = await t22.sandbox._noteImagesFromDisk(lean22);
     t22.sandbox.document.getElementById('noteEditor').innerHTML = wet22;
     t22.sandbox._noteCommit({ silent: true, sync: true });
     check('the close flush does not write the picture back into storage',
-        t22.sandbox.caseNotes[0].contentHtml.indexOf('A'.repeat(1000)) === -1);
+        storedNote(t22).indexOf('A'.repeat(1000)) === -1);
     check('  and it keeps the reference',
-        t22.sandbox._CS.diskImages(t22.sandbox.caseNotes[0].contentHtml).length === 1);
+        t22.sandbox._CS.diskImages(storedNote(t22)).length === 1);
+    check('  while the in-memory note keeps the picture',
+        t22.sandbox.caseNotes[0].contentHtml.indexOf(FATPNG) !== -1);
 
     // A note with no pictures must not pay for any of this.
     const t23 = build({ formOpen: true, editorHtml: '<p>text only</p>' });

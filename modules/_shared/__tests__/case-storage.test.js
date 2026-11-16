@@ -410,6 +410,35 @@ section('dehydrate: images leave localStorage for disk');
         CS.blankHydrated('<p>hello</p>') === '<p>hello</p>');
     ok('tolerates a non-string', CS.blankHydrated(null) === null);
 
+    // ---------------------------------------------------------------------------
+    section('carrySrc — memory keeps the picture, storage keeps the reference');
+    // "they arent saving on screen when i navigate away even if i click
+    // save": the lean (blank-pixel) copy used to become the in-memory note.
+    // carrySrc puts the live bytes back onto the referenced tags so the note
+    // on screen keeps its pictures AND its disk reference.
+    const live1 = '<p>a</p><img src="' + PNG_URL + '"><p>b</p>';
+    const csDry = await CS.dehydrateHtml(live1, () => 'x.png', { kind: 'notes', stem: 'note-image' });
+    const carried = CS.carrySrc(csDry.html, live1);
+    ok('the picture is back in the note', carried.indexOf(PNG_URL) !== -1);
+    ok('  with its disk reference', CS.diskImages(carried).length === 1);
+    ok('  and blanking it again gives the lean copy back', CS.blankHydrated(carried) === csDry.html);
+    ok('it is synchronous', typeof carried === 'string');
+
+    // A fresh paste that could not be written stays inline in both copies.
+    const live2 = live1 + '<img src="' + PNG_URL + '">';
+    let calls = 0;
+    const csHalf = await CS.dehydrateHtml(live2, () => (++calls === 1 ? 'one.png' : null),
+        { kind: 'notes', stem: 'note-image' });
+    const carried2 = CS.carrySrc(csHalf.html, live2);
+    ok('an unreferenced picture is left exactly as it was', CS.inlineImages(carried2).length === 2
+        && CS.diskImages(carried2).length === 1, carried2.length);
+
+    ok('a picture-count mismatch returns the lean copy unchanged',
+        CS.carrySrc(csDry.html, '<p>nothing</p>') === csDry.html);
+    ok('HTML with no references is returned untouched',
+        CS.carrySrc('<p>x</p>', live1) === '<p>x</p>');
+    ok('tolerates non-strings', CS.carrySrc(null, live1) === null && CS.carrySrc(csDry.html, null) === csDry.html);
+
     console.log('\n' + (failed ? 'FAILED' : 'OK') + ' \u2014 ' + passed + ' passed, ' + failed + ' failed');
     process.exit(failed ? 1 : 0);
 })();

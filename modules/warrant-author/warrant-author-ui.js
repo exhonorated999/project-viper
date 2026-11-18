@@ -1023,6 +1023,10 @@ function _renderDraftsList(caseId) {
     `;
   }
 
+  // Every working copy keeps its Word + PDF in the case folder — drafts that
+  // predate that (or changed while VIPER was closed) get a refresh now.
+  _autoEnsure(caseId, drafts.map(d => d && d.id));
+
   const rows = drafts.map(d => {
     const isResidential = d.type === 'residential';
     const adCount = Array.isArray(d.addendums) ? d.addendums.length : 0;
@@ -1296,7 +1300,7 @@ function _renderResidentialEditor(caseId, draft) {
             </svg>
             Generate PDF + DOCX
           </button>
-          <span class="text-slate-500">saves to case folder</span>
+          ${_diskStatusHtml(caseId, draft.id)}
         </div>
       </div>
 
@@ -1667,7 +1671,7 @@ function _renderEditor(caseId, draftId) {
             </svg>
             Generate PDF + DOCX
           </button>
-          <span class="text-slate-500">saves to case folder</span>
+          ${_diskStatusHtml(caseId, draft.id)}
         </div>
       </div>
 
@@ -4017,13 +4021,21 @@ function _showGenerateResultModal(caseId, draft, blockStream, issues, pdfResult,
   } else if (saveResult && saveResult.success) {
     const pdfKB  = saveResult.sizes && saveResult.sizes.pdf  ? ` (${Math.round(saveResult.sizes.pdf / 1024)} KB)` : '';
     const docxKB = saveResult.sizes && saveResult.sizes.docx ? ` (${Math.round(saveResult.sizes.docx / 1024)} KB)` : '';
+    const folderLine = saveResult.folder
+      ? `<div class="mb-1 text-emerald-100/80">Warrants/Drafts/<span class="font-mono text-emerald-100">${esc(saveResult.folder)}</span></div>` : '';
+    const keptLine = (Array.isArray(saveResult.keptEdits) && saveResult.keptEdits.length)
+      ? `<div class="mt-1 text-amber-200">Your edited copy was kept beside it: ${saveResult.keptEdits.map(n => `<span class="font-mono">${esc(n)}</span>`).join(', ')}</div>` : '';
+    const busyLine = (Array.isArray(saveResult.busy) && saveResult.busy.length)
+      ? `<div class="mt-1 text-amber-200">${saveResult.busy.map(n => `<span class="font-mono">${esc(n)}</span>`).join(', ')} is open in another program — not replaced. Close it and generate again.</div>` : '';
     saveStatusHtml = `
       <div class="mb-3 p-2 bg-emerald-500/10 border border-emerald-500/30 rounded text-xs text-emerald-200">
         <div class="font-semibold mb-0.5">✓ Saved to case folder</div>
+        ${folderLine}
         <ul class="ml-1 space-y-0.5">
           ${saveResult.pdfPath  ? `<li>📄 <span class="font-mono text-emerald-100">warrant.pdf</span>${pdfKB}</li>`  : ''}
           ${saveResult.docxPath ? `<li>📝 <span class="font-mono text-emerald-100">warrant.docx</span>${docxKB}</li>` : ''}
         </ul>
+        ${keptLine}${busyLine}
       </div>`;
   } else if (saveResult) {
     saveStatusHtml = `
@@ -4544,6 +4556,419 @@ function _safeLS(key) {
   } catch (_) { return /Overrides$/.test(key) ? {} : []; }
 }
 
+// ─── Compose helpers (manual Generate + automatic working copy) ─────────
+
+function _liveCaseNumber() {
+  const c = (typeof window !== 'undefined') ? window.currentCase : null;
+  return String((c && (c.caseNumber || c.number)) || '').trim();
+}
+
+/** Case number of case `caseId` — the open case when it is that one, else the roster. */
+function _caseNumberFor(caseId) {
+  try {
+    const live = (typeof window !== 'undefined') ? window.currentCase : null;
+    if (live && typeof live === 'object' && live.id != null && String(live.id) === String(caseId)) {
+      return String(live.caseNumber || live.number || '').trim();
+    }
+    const rows = JSON.parse(localStorage.getItem('viperCases') || '[]');
+    const rec = Array.isArray(rows) ? rows.find(c => c && String(c.id) === String(caseId)) : null;
+    if (rec) return String(rec.caseNumber || rec.number || '').trim();
+    // Host page without an id on the live record: it is the open case.
+    if (live && typeof live === 'object' && live.id == null) return _liveCaseNumber();
+    return '';
+  } catch (_e) { return ''; }
+}
+
+function _mergedProviders() {
+  const pdir = _pdir();
+  return pdir ? pdir.mergeProviders({
+    providerOverrides: _safeLS('viperWarrantAuthorProviderOverrides'),
+    customProviders:   _safeLS('viperWarrantAuthorCustomProviders'),
+    providerDeletions: _safeLS('viperWarrantAuthorProviderDeletions')
+  }) : [];
+}
+
+/**
+ * Copy of `draft` for the disk IPCs, carrying `folderProviders` (provider
+ * display names in addendum order; [] for residential). Main names the
+ * draft's folder from it: "Google ESP - SW 24-001". The stored draft never
+ * gets the field.
+ */
+function _withFolderHints(draft) {
+  if (!draft || typeof draft !== 'object') return draft;
+  let names = [];
+  if (draft.type !== 'residential') {
+    let providers = [];
+    try { providers = _mergedProviders(); } catch (_e) { providers = []; }
+    names = (Array.isArray(draft.addendums) ? draft.addendums : []).map((a) => {
+      if (!a) return '';
+      const p = providers.find(x => x && x.key === a.providerKey);
+      return String((p && p.name) || a.businessName || a.providerKey || '').trim();
+    }).filter(Boolean);
+  }
+  return Object.assign({}, draft, { folderProviders: names });
+}
+
+/**
+ * ESP steps 1–3: compose every addendum, build the unified block stream,
+ * render the PDF. Never prompts: returns { error } instead.
+ */
+function _composeEspOutputs(caseId, draft) {
+  const engine = _engine();
+  if (!engine) return { error: 'Template engine not loaded.' };
+  const tpl = engine.getTemplate(draft.template);
+  if (!tpl) return { error: "Template '" + draft.template + "' not registered." };
+  const items = _items();
+  const providersMerged = _mergedProviders();
+
+  const ads = Array.isArray(draft.addendums) ? draft.addendums : [];
+  if (!ads.length) return { error: 'Add at least one addendum before generating.', noAddendums: true };
+
+  // 1. Compose each addendum
+  const addendumComposes = [];
+  const issues = [];
+  // AR: every compose gets the FULL provider list so the single
+  // affidavit/warrant page set names all of them (see _buildArEsp).
+  const addendumList = _resolveAddendumListForDraft(draft, providersMerged);
+  for (const ad of ads) {
+    const provider = providersMerged.find(p => p.key === ad.providerKey) || { key: ad.providerKey, name: ad.providerKey || '(no provider)' };
+    const adForEngine = Object.assign({}, ad, {
+      targets: Array.isArray(ad.targetAccounts)
+        ? ad.targetAccounts.filter(t => t && String(t.value || '').trim() !== '')
+        : [],
+      dateRange: {
+        start: ad.dateRangeFrom || '',
+        end:   ad.dateRangeTo   || '',
+        allAvailable: !!ad.allDatesAvailable,
+      },
+      itemsToProduce: Array.isArray(ad.itemsToProduce) ? ad.itemsToProduce.slice() : [],
+      // Inject case-level Probable Cause + date-range basis so the CO
+      // template's {{addendum.probableCause}} / {{addendum.dateRangeBasis}}
+      // slots resolve in the EXPORTED document (not just preview).
+      probableCause: _resolvePcForDraft(caseId, draft),
+      dateRangeBasis: _resolveDateRangeBasis(ad),
+    });
+    const _coAgency = _mergeAgencyForDraft(draft);
+    const ctx = {
+      addendum: adForEngine,
+      provider,
+      items,
+      affiant: _coAgency,
+      agency:  _coAgency,
+      draft,
+      // CO template needs court + case ctx; harmless on other templates
+      // because non-CO resolvers ignore them. AR reads {county, division}
+      // off the same ctx.court key.
+      court: _resolveCourtCtxForDraft(draft),
+      case: _resolveCaseCtxForDraft(draft),
+      addendums: addendumList,
+    };
+    let composed;
+    try {
+      composed = engine.compose(tpl, ctx);
+    } catch (e) {
+      composed = { blocks: [{ kind: 'paragraph', text: '(compose error: ' + e.message + ')' }], danglingSlots: ['engine.error'], missingItems: true };
+    }
+    const danglingArr = Array.isArray(composed.danglingSlots) ? composed.danglingSlots : [];
+    if (danglingArr.length) {
+      issues.push('Page ' + (ad.pageLabel || '?') + ' (' + (provider.name || ad.providerKey) + '): ' + danglingArr.join(', '));
+    }
+    addendumComposes.push({
+      addendumId:   ad.id,
+      providerKey:  provider.key,
+      providerName: provider.name || provider.key,
+      businessName: ad.businessName || '',
+      pageLabel:    ad.pageLabel || '',
+      compose:      composed,
+    });
+  }
+
+  // 2. Build unified block stream
+  const builder = window.WarrantAuthorBlockBuilder;
+  if (!builder) return { error: 'Block builder not loaded.' };
+  const agencyProfile = _safeLS('viperAgencyProfile') || {};
+  // Mirror affiant snapshot into agency for fallbacks
+  const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
+  const pcStore = window.WarrantAuthorCasePcStore;
+  const pcNarrative = (pcStore && pcStore.getBody) ? pcStore.getBody(caseId) : (draft.probableCauseNarrative || '');
+  const caseInfo = {
+    caseNumber: _liveCaseNumber() || draft.caseRef || '',
+    caseName:   (window.currentCase && window.currentCase.name) || '',
+  };
+  let blockStream;
+  try {
+    blockStream = builder.build({
+      draft, addendumComposes, agency: agencyMerged, caseInfo, pcNarrative, pcHtml: _casePcHtml(caseId), includeDisclaimer: true,
+    });
+  } catch (e) {
+    return { error: 'Block builder failed: ' + e.message };
+  }
+
+  // Append CR-Exhibit section (photos/screenshots) so both the renderer
+  // PDF and the main-process DOCX render them from the same blockStream.
+  try { _appendExhibitBlocks(blockStream, draft); } catch (_) {}
+
+  // 3. Render PDF locally
+  const pdfComp = window.WarrantAuthorPdfComposer;
+  if (!pdfComp) return { error: 'PDF composer not loaded.' };
+  let pdfResult;
+  try {
+    pdfResult = pdfComp.composePdf({ blockStream, draft, agency: agencyMerged });
+  } catch (e) {
+    return { error: 'PDF render failed: ' + e.message };
+  }
+  return { blockStream, issues, pdfResult, agencyMerged, caseInfo };
+}
+
+/** Residential: block stream + PDF. Never prompts: returns { error } instead. */
+function _composeResidentialOutputs(caseId, draft) {
+  const builder = window.WarrantAuthorBlockBuilder;
+  if (!builder) return { error: 'Block builder not loaded.' };
+  const agencyProfile = _loadAgencyProfile();
+  const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
+  const pcStore = window.WarrantAuthorCasePcStore;
+  const pcNarrative = (pcStore && pcStore.getBody) ? pcStore.getBody(caseId) : (draft.probableCauseNarrative || '');
+  const caseInfo = {
+    caseNumber: _liveCaseNumber() || draft.caseRef || '',
+    caseName:   (window.currentCase && window.currentCase.name) || '',
+  };
+  let blockStream;
+  try {
+    blockStream = builder.build({
+      draft, addendumComposes: [], agency: agencyMerged, caseInfo, pcNarrative, pcHtml: _casePcHtml(caseId), includeDisclaimer: true,
+    });
+  } catch (e) {
+    return { error: 'Block builder failed: ' + e.message };
+  }
+  const pdfComp = window.WarrantAuthorPdfComposer;
+  if (!pdfComp) return { error: 'PDF composer not loaded.' };
+  let pdfResult;
+  try {
+    pdfResult = pdfComp.composePdf({ blockStream, draft, agency: agencyMerged });
+  } catch (e) {
+    return { error: 'PDF render failed: ' + e.message };
+  }
+  return { blockStream, pdfResult, agencyMerged, caseInfo };
+}
+
+/**
+ * Pennsylvania (AOPC 410A): main fills the official forms, so the renderer
+ * only prepares the draft copy it sends — ESP addendum text for the
+ * Application Continuation, the Items cross-reference and exhibit photos.
+ */
+function _paGenInputs(caseId, draft) {
+  const agencyProfile = _loadAgencyProfile();
+  const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
+  const caseInfo = {
+    caseNumber: _liveCaseNumber() || draft.caseRef || '',
+    caseName:   (window.currentCase && window.currentCase.name) || '',
+    county:     agencyMerged.county || '',
+  };
+  // Build the ESP addendum info (Google/etc. provider records to produce)
+  // as plain text and render it onto the OFFICIAL PA Application
+  // Continuation form (not a generic appended page, and without
+  // re-posting the Probable Cause narrative). The overlay flows this
+  // into the continuation page's ContinuationField under box 18.
+  let draftForGen = draft;
+  try {
+    const paOverrides = {};
+    const espBlocks = _buildPaEspBlocks(caseId, draft, agencyMerged);
+    if (espBlocks && espBlocks.length) paOverrides.espBlocks = espBlocks;
+    // Items cross-reference: when the officer leaves the Items box blank (or
+    // used the legacy "See Addendum X" phrasing) and ESP addendums exist,
+    // point the reader to the official continuation pages we now emit.
+    const _hasAds = Array.isArray(draft.addendums) && draft.addendums.length > 0;
+    const _itemsRaw = String((draft.pa && draft.pa.itemsToSearchSeize) || '').trim();
+    if (_hasAds && (!_itemsRaw || /^see\s+addendum\b/i.test(_itemsRaw))) {
+      paOverrides.itemsToSearchSeize = 'See continuation pages';
+    }
+    // Exhibit photos → PA overlay photo-exhibit pages (2 per page, appended
+    // after the affidavit). Overlay reads draft.pa.photos = [{dataUrl, caption}].
+    const exhibits = _draftExhibits(draft);
+    if (exhibits.length) {
+      paOverrides.photos = exhibits.map(ex => ({
+        dataUrl: ex.dataUrl,
+        caption: ex.caption || '',
+      }));
+    }
+    if (Object.keys(paOverrides).length) {
+      draftForGen = Object.assign({}, draft, {
+        pa: Object.assign(
+          {},
+          (draft.pa && typeof draft.pa === 'object') ? draft.pa : {},
+          paOverrides
+        ),
+      });
+    }
+  } catch (_) { draftForGen = draft; }
+  return { agencyMerged, caseInfo, draftForGen };
+}
+
+// ─── Working copy in the case folder (automatic) ────────────────────────
+//
+// Every draft keeps its own readable folder in the case —
+//   cases/<n>/Warrants/Drafts/Google ESP - SW 24-001/warrant.docx + .pdf
+// — and the Word + PDF are rebuilt a few seconds after the draft (or the
+// shared case Probable Cause) stops changing. Silent: no validator modal and
+// no result modal; the draft toolbar shows the state. Main never overwrites
+// a file the officer edited (it is kept beside the fresh copy) and skips a
+// file Word has open.
+
+const _AUTO_DELAY_MS = 4000;
+const _auto = {
+  timers: new Map(),   // key → timeout
+  chain:  new Map(),   // key → promise of the run in flight
+  status: {},          // draftId → last result
+  seen:   new Set(),   // drafts given a first refresh this page load
+  installed: false,
+};
+
+function _autoKey(caseId, draftId) { return String(caseId) + '|' + String(draftId); }
+
+function _autoAvailable() {
+  const api = (typeof window !== 'undefined') ? window.electronAPI : null;
+  return !!(api && typeof api.warrantAuthorGenerate === 'function' && typeof api.warrantAuthorSaveDraft === 'function');
+}
+
+function _autoSchedule(caseId, draftId, delay) {
+  if (!caseId || !draftId || !_autoAvailable()) return;
+  const k = _autoKey(caseId, draftId);
+  clearTimeout(_auto.timers.get(k));
+  _auto.timers.set(k, setTimeout(() => {
+    _auto.timers.delete(k);
+    _autoRun(caseId, draftId);
+  }, delay == null ? _AUTO_DELAY_MS : delay));
+  _auto.seen.add(String(draftId));
+  _setDiskStatus(caseId, draftId, Object.assign({}, _auto.status[draftId] || {}, { pending: true }));
+}
+
+function _autoRun(caseId, draftId) {
+  const k = _autoKey(caseId, draftId);
+  const prev = _auto.chain.get(k) || Promise.resolve();
+  const next = prev.then(() => _refreshDraftFiles(caseId, draftId))
+    .catch((e) => { try { console.warn('[WarrantAuthor] working-copy refresh failed:', e); } catch (_e) {} });
+  _auto.chain.set(k, next);
+  next.then(() => { if (_auto.chain.get(k) === next) _auto.chain.delete(k); });
+  return next;
+}
+
+/**
+ * Drop a pending refresh and wait for one already writing — a manual
+ * Generate writes the same files and must not race it.
+ */
+function _autoCancel(caseId, draftId) {
+  const k = _autoKey(caseId, draftId);
+  clearTimeout(_auto.timers.get(k));
+  _auto.timers.delete(k);
+  return _auto.chain.get(k) || Promise.resolve();
+}
+
+/** Give drafts that have never had a refresh this page load their first one. */
+function _autoEnsure(caseId, draftIds) {
+  if (!_autoAvailable()) return;
+  let stagger = 600;
+  for (const id of draftIds) {
+    if (!id || _auto.seen.has(String(id))) continue;
+    _auto.seen.add(String(id));
+    _autoSchedule(caseId, id, stagger);
+    stagger += 400;
+  }
+}
+
+async function _refreshDraftFiles(caseId, draftId) {
+  if (!_autoAvailable()) return;
+  const ds = _store();
+  const draft = ds ? ds.getDraft(caseId, draftId) : null;
+  if (!draft) { delete _auto.status[draftId]; return; }
+  const caseNumber = _caseNumberFor(caseId);
+  if (!caseNumber) { _setDiskStatus(caseId, draftId, { error: 'No case number — the working copy is not saved to a case folder.' }); return; }
+  const casePath = `cases/${caseNumber}`;
+  const api = window.electronAPI;
+
+  let sv;
+  try { sv = await api.warrantAuthorSaveDraft(casePath, draft.id, _withFolderHints(draft)); }
+  catch (e) { sv = { success: false, error: e.message }; }
+  if (!sv || !sv.success) {
+    _setDiskStatus(caseId, draftId, { error: (sv && sv.error) || 'Saving the draft folder failed.', locked: !!(sv && sv.locked) });
+    return;
+  }
+  const st = { folder: sv.folder || '', at: Date.now() };
+
+  let payload = null;
+  try {
+    const jx = String(draft.jurisdiction || '').toUpperCase();
+    if (jx === 'PA' || draft.template === 'pa-multi-business-esp') {
+      const pa = _paGenInputs(caseId, draft);
+      payload = { draft: _withFolderHints(pa.draftForGen), formats: ['pdf'], agency: pa.agencyMerged, caseInfo: pa.caseInfo };
+    } else {
+      const c = draft.type === 'residential' ? _composeResidentialOutputs(caseId, draft) : _composeEspOutputs(caseId, draft);
+      if (c.error) st.skipped = c.noAddendums ? 'Word + PDF appear once the draft has an addendum.' : c.error;
+      else payload = {
+        draft: _withFolderHints(draft), blockStream: c.blockStream, formats: ['pdf', 'docx'],
+        pdfBytes: c.pdfResult.arrayBuffer, agency: c.agencyMerged, caseInfo: c.caseInfo,
+      };
+    }
+  } catch (e) { st.skipped = e.message; }
+  if (!payload) { _setDiskStatus(caseId, draftId, st); return; }
+
+  let r;
+  try { r = await api.warrantAuthorGenerate(Object.assign({ casePath, warrantId: draft.id }, payload)); }
+  catch (e) { r = { success: false, error: e.message }; }
+  if (!r || !r.success) st.error = (r && r.error) || 'Writing the Word/PDF copy failed.';
+  else {
+    st.written = true;
+    st.formats = payload.formats.slice();
+    if (r.folder) st.folder = r.folder;
+    if (r.diskLocked) { st.written = false; st.error = 'Field Security is locked — unlock to save the working copy.'; }
+    if (Array.isArray(r.busy) && r.busy.length) st.busy = r.busy.slice();
+    if (Array.isArray(r.keptEdits) && r.keptEdits.length) {
+      st.keptEdits = r.keptEdits.slice();
+      _notify('Your edited copy was kept in the draft folder as "' + r.keptEdits.join('", "') + '". The fresh Word/PDF is beside it.', 'info');
+    }
+  }
+  _setDiskStatus(caseId, draftId, st);
+}
+
+function _setDiskStatus(caseId, draftId, st) {
+  _auto.status[draftId] = st;
+  if (typeof document === 'undefined') return;
+  const el = document.getElementById('waDiskStatus-' + draftId);
+  if (el) el.innerHTML = _diskStatusInner(caseId, draftId);
+}
+
+function _diskStatusInner(caseId, draftId) {
+  if (!_autoAvailable()) return 'saves to case folder';
+  const st = _auto.status[draftId] || null;
+  const open = (label) => `<button type="button" class="wa-disk-open" title="Open this draft's folder in the case"
+      onclick="WarrantAuthorUI.bus.onOpenGeneratedFolder('${attr(caseId)}','${attr(draftId)}')">${esc(label)}</button>`;
+  if (!st) return 'Word + PDF kept in the case folder';
+  if (st.pending) return '<span class="wa-disk-pending">Updating Word + PDF…</span>';
+  if (st.error) return `<span class="wa-disk-error" title="${attr(st.error)}">Working copy not updated</span>`;
+  const where = st.folder ? open('Drafts/' + st.folder) : '';
+  if (st.skipped) return `${where ? where + ' · ' : ''}<span title="${attr(st.skipped)}">${esc(st.skipped.length > 60 ? 'Word + PDF not built yet' : st.skipped)}</span>`;
+  const when = st.at ? new Date(st.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  const what = (st.formats && st.formats.indexOf('docx') === -1) ? 'PDF' : 'Word + PDF';
+  let msg = `${what} updated ${esc(when)}`;
+  if (st.busy && st.busy.length) msg = `<span class="wa-disk-busy" title="Close it in Word and the next change refreshes it">${esc(st.busy.join(', '))} is open — not refreshed</span>`;
+  return `${msg}${where ? ' · ' + where : ''}`;
+}
+
+/** Status chip for the draft toolbar; also gives the draft its first refresh. */
+function _diskStatusHtml(caseId, draftId) {
+  _autoEnsure(caseId, [draftId]);
+  return `<span id="waDiskStatus-${attr(draftId)}" class="wa-disk-status">${_diskStatusInner(caseId, draftId)}</span>`;
+}
+
+function _autoInstall() {
+  if (_auto.installed || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+  _auto.installed = true;
+  window.addEventListener('warrant-author-draft-saved', (ev) => {
+    const d = (ev && ev.detail) || {};
+    _autoSchedule(d.caseId, d.draftId);
+  });
+}
+_autoInstall();
+
 // ─── event bus (called from inline onclick handlers) ────────────────────
 
 function _rerender() {
@@ -4572,6 +4997,8 @@ function _afterCasePcWrite(caseId, pcStore) {
           d.probableCauseNarrative = body;
           ds.saveDraft(caseId, d, { silent: true });
         }
+        // Formatting-only edits change no draft — the files still need it.
+        if (d && d.id) _autoSchedule(caseId, d.id);
       }
     } catch (_e) {}
   }
@@ -5085,51 +5512,26 @@ const bus = {
       }
     }
 
-    // ── Build block stream ───────────────────────────────────────────
-    const builder = window.WarrantAuthorBlockBuilder;
-    if (!builder) { alert('Block builder not loaded.'); return; }
-    const agencyProfile = _loadAgencyProfile();
-    const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
-    const pcStore = window.WarrantAuthorCasePcStore;
-    const pcNarrative = (pcStore && pcStore.getBody) ? pcStore.getBody(caseId) : (draft.probableCauseNarrative || '');
-    const caseInfo = {
-      caseNumber: (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || draft.caseRef || '',
-      caseName:   (window.currentCase && window.currentCase.name) || '',
-    };
-    let blockStream;
-    try {
-      blockStream = builder.build({
-        draft, addendumComposes: [], agency: agencyMerged, caseInfo, pcNarrative, pcHtml: _casePcHtml(caseId), includeDisclaimer: true,
-      });
-    } catch (e) {
-      alert('Block builder failed: ' + e.message);
-      return;
-    }
-
-    // ── Render PDF locally ───────────────────────────────────────────
-    const pdfComp = window.WarrantAuthorPdfComposer;
-    if (!pdfComp) { alert('PDF composer not loaded.'); return; }
-    let pdfResult;
-    try {
-      pdfResult = pdfComp.composePdf({ blockStream, draft, agency: agencyMerged });
-    } catch (e) {
-      alert('PDF render failed: ' + e.message);
-      return;
-    }
+    // ── Build block stream + render PDF locally (shared with the
+    //    automatic working-copy refresh) ─────────────────────────────
+    const comp = _composeResidentialOutputs(caseId, draft);
+    if (comp.error) { alert(comp.error); return; }
+    const { blockStream, pdfResult, agencyMerged } = comp;
 
     // ── Persist to disk via IPC (PDF bytes + DOCX built in main) ─────
     let saveResult = null;
     if (window.electronAPI && typeof window.electronAPI.warrantAuthorGenerate === 'function') {
-      const caseNumber = caseInfo.caseNumber;
+      const caseNumber = comp.caseInfo.caseNumber;
       const casePath   = caseNumber ? `cases/${caseNumber}` : null;
+      await _autoCancel(caseId, draft.id);
       if (casePath) {
-        try { await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, draft); } catch (_) {}
+        try { await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, _withFolderHints(draft)); } catch (_) {}
       }
       try {
         saveResult = await window.electronAPI.warrantAuthorGenerate({
           casePath,
           warrantId: draft.id,
-          draft,
+          draft: _withFolderHints(draft),
           blockStream,
           formats: ['pdf', 'docx'],
           pdfBytes: pdfResult.arrayBuffer,
@@ -5613,13 +6015,7 @@ const bus = {
       if (!proceed) return;
     }
 
-    const agencyProfile = _loadAgencyProfile();
-    const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
-    const caseInfo = {
-      caseNumber: runningCaseNumber || draft.caseRef || '',
-      caseName:   (window.currentCase && window.currentCase.name) || '',
-      county:     agencyMerged.county || '',
-    };
+    const { agencyMerged, caseInfo, draftForGen } = _paGenInputs(caseId, draft);
 
     if (!window.electronAPI || typeof window.electronAPI.warrantAuthorGenerate !== 'function') {
       alert('Pennsylvania warrant generation requires the VIPER desktop app.');
@@ -5627,54 +6023,17 @@ const bus = {
     }
 
     const casePath = caseInfo.caseNumber ? `cases/${caseInfo.caseNumber}` : null;
+    await _autoCancel(caseId, draft.id);
     if (casePath) {
-      try { await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, draft); } catch (_) {}
+      try { await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, _withFolderHints(draft)); } catch (_) {}
     }
-
-    // Build the ESP addendum info (Google/etc. provider records to produce)
-    // as plain text and render it onto the OFFICIAL PA Application
-    // Continuation form (not a generic appended page, and without
-    // re-posting the Probable Cause narrative). The overlay flows this
-    // into the continuation page's ContinuationField under box 18.
-    let draftForGen = draft;
-    try {
-      const paOverrides = {};
-      const espBlocks = _buildPaEspBlocks(caseId, draft, agencyMerged);
-      if (espBlocks && espBlocks.length) paOverrides.espBlocks = espBlocks;
-      // Items cross-reference: when the officer leaves the Items box blank (or
-      // used the legacy "See Addendum X" phrasing) and ESP addendums exist,
-      // point the reader to the official continuation pages we now emit.
-      const _hasAds = Array.isArray(draft.addendums) && draft.addendums.length > 0;
-      const _itemsRaw = String((draft.pa && draft.pa.itemsToSearchSeize) || '').trim();
-      if (_hasAds && (!_itemsRaw || /^see\s+addendum\b/i.test(_itemsRaw))) {
-        paOverrides.itemsToSearchSeize = 'See continuation pages';
-      }
-      // Exhibit photos → PA overlay photo-exhibit pages (2 per page, appended
-      // after the affidavit). Overlay reads draft.pa.photos = [{dataUrl, caption}].
-      const exhibits = _draftExhibits(draft);
-      if (exhibits.length) {
-        paOverrides.photos = exhibits.map(ex => ({
-          dataUrl: ex.dataUrl,
-          caption: ex.caption || '',
-        }));
-      }
-      if (Object.keys(paOverrides).length) {
-        draftForGen = Object.assign({}, draft, {
-          pa: Object.assign(
-            {},
-            (draft.pa && typeof draft.pa === 'object') ? draft.pa : {},
-            paOverrides
-          ),
-        });
-      }
-    } catch (_) { draftForGen = draft; }
 
     let saveResult;
     try {
       saveResult = await window.electronAPI.warrantAuthorGenerate({
         casePath,
         warrantId: draft.id,
-        draft: draftForGen,
+        draft: _withFolderHints(draftForGen),
         formats: ['pdf'],           // PA deliverable is the official PDF forms
         agency: agencyMerged,
         caseInfo,
@@ -5788,112 +6147,11 @@ const bus = {
     }
     // ─────────────────────────────────────────────────────────────────
 
-    const pdir = _pdir();
-    const items = _items();
-    const providersMerged = pdir ? pdir.mergeProviders({
-      providerOverrides: _safeLS('viperWarrantAuthorProviderOverrides'),
-      customProviders:   _safeLS('viperWarrantAuthorCustomProviders'),
-      providerDeletions: _safeLS('viperWarrantAuthorProviderDeletions')
-    }) : [];
-
-    const ads = Array.isArray(draft.addendums) ? draft.addendums : [];
-    if (!ads.length) { alert('Add at least one addendum before generating.'); return; }
-
-    // 1. Compose each addendum
-    const addendumComposes = [];
-    const issues = [];
-    // AR: every compose gets the FULL provider list so the single
-    // affidavit/warrant page set names all of them (see _buildArEsp).
-    const addendumList = _resolveAddendumListForDraft(draft, providersMerged);
-    for (const ad of ads) {
-      const provider = providersMerged.find(p => p.key === ad.providerKey) || { key: ad.providerKey, name: ad.providerKey || '(no provider)' };
-      const adForEngine = Object.assign({}, ad, {
-        targets: Array.isArray(ad.targetAccounts)
-          ? ad.targetAccounts.filter(t => t && String(t.value || '').trim() !== '')
-          : [],
-        dateRange: {
-          start: ad.dateRangeFrom || '',
-          end:   ad.dateRangeTo   || '',
-          allAvailable: !!ad.allDatesAvailable,
-        },
-        itemsToProduce: Array.isArray(ad.itemsToProduce) ? ad.itemsToProduce.slice() : [],
-        // Inject case-level Probable Cause + date-range basis so the CO
-        // template's {{addendum.probableCause}} / {{addendum.dateRangeBasis}}
-        // slots resolve in the EXPORTED document (not just preview).
-        probableCause: _resolvePcForDraft(caseId, draft),
-        dateRangeBasis: _resolveDateRangeBasis(ad),
-      });
-      const _coAgency = _mergeAgencyForDraft(draft);
-      const ctx = {
-        addendum: adForEngine,
-        provider,
-        items,
-        affiant: _coAgency,
-        agency:  _coAgency,
-        draft,
-        // CO template needs court + case ctx; harmless on other templates
-        // because non-CO resolvers ignore them. AR reads {county, division}
-        // off the same ctx.court key.
-        court: _resolveCourtCtxForDraft(draft),
-        case: _resolveCaseCtxForDraft(draft),
-        addendums: addendumList,
-      };
-      let composed;
-      try {
-        composed = engine.compose(tpl, ctx);
-      } catch (e) {
-        composed = { blocks: [{ kind: 'paragraph', text: '(compose error: ' + e.message + ')' }], danglingSlots: ['engine.error'], missingItems: true };
-      }
-      const danglingArr = Array.isArray(composed.danglingSlots) ? composed.danglingSlots : [];
-      if (danglingArr.length) {
-        issues.push('Page ' + (ad.pageLabel || '?') + ' (' + (provider.name || ad.providerKey) + '): ' + danglingArr.join(', '));
-      }
-      addendumComposes.push({
-        addendumId:   ad.id,
-        providerKey:  provider.key,
-        providerName: provider.name || provider.key,
-        businessName: ad.businessName || '',
-        pageLabel:    ad.pageLabel || '',
-        compose:      composed,
-      });
-    }
-
-    // 2. Build unified block stream
-    const builder = window.WarrantAuthorBlockBuilder;
-    if (!builder) { alert('Block builder not loaded.'); return; }
-    const agencyProfile = _safeLS('viperAgencyProfile') || {};
-    // Mirror affiant snapshot into agency for fallbacks
-    const agencyMerged = Object.assign({}, agencyProfile, draft.affiantSnapshot || {});
-    const pcStore = window.WarrantAuthorCasePcStore;
-    const pcNarrative = (pcStore && pcStore.getBody) ? pcStore.getBody(caseId) : (draft.probableCauseNarrative || '');
-    const caseInfo = {
-      caseNumber: (window.currentCase && (window.currentCase.caseNumber || window.currentCase.number)) || draft.caseRef || '',
-      caseName:   (window.currentCase && window.currentCase.name) || '',
-    };
-    let blockStream;
-    try {
-      blockStream = builder.build({
-        draft, addendumComposes, agency: agencyMerged, caseInfo, pcNarrative, pcHtml: _casePcHtml(caseId), includeDisclaimer: true,
-      });
-    } catch (e) {
-      alert('Block builder failed: ' + e.message);
-      return;
-    }
-
-    // Append CR-Exhibit section (photos/screenshots) so both the renderer
-    // PDF and the main-process DOCX render them from the same blockStream.
-    try { _appendExhibitBlocks(blockStream, draft); } catch (_) {}
-
-    // 3. Render PDF locally
-    const pdfComp = window.WarrantAuthorPdfComposer;
-    if (!pdfComp) { alert('PDF composer not loaded.'); return; }
-    let pdfResult;
-    try {
-      pdfResult = pdfComp.composePdf({ blockStream, draft, agency: agencyMerged });
-    } catch (e) {
-      alert('PDF render failed: ' + e.message);
-      return;
-    }
+    // 1–3. Compose addendums → block stream → PDF (shared with the
+    //      automatic working-copy refresh).
+    const comp = _composeEspOutputs(caseId, draft);
+    if (comp.error) { alert(comp.error); return; }
+    const { blockStream, issues, pdfResult, agencyMerged, caseInfo } = comp;
 
     // 4. Persist to disk via IPC (PDF bytes + DOCX built in main).
     //    We ALWAYS call the IPC if available — even without a casePath —
@@ -5904,18 +6162,19 @@ const bus = {
     if (window.electronAPI && typeof window.electronAPI.warrantAuthorGenerate === 'function') {
       const caseNumber = caseInfo.caseNumber;
       const casePath   = caseNumber ? `cases/${caseNumber}` : null;
+      await _autoCancel(caseId, draft.id);
       if (casePath) {
         // Ensure draft is persisted to manifest first (idempotent — the
         // generate handler patches generatedAt/pdfPath/docxPath onto it).
         try {
-          await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, draft);
+          await window.electronAPI.warrantAuthorSaveDraft(casePath, draft.id, _withFolderHints(draft));
         } catch (_) {}
       }
       try {
         saveResult = await window.electronAPI.warrantAuthorGenerate({
           casePath,                              // may be null — main will skip disk
           warrantId: draft.id,
-          draft,
+          draft: _withFolderHints(draft),
           blockStream,
           formats: ['pdf', 'docx'],
           pdfBytes: pdfResult.arrayBuffer,
@@ -6156,6 +6415,16 @@ const api = Object.freeze({
   // internal state surface for the host page
   _state,
   bus,
+  // working-copy internals (tests)
+  _workingCopy: Object.freeze({
+    refresh: _refreshDraftFiles,
+    schedule: _autoSchedule,
+    cancel: _autoCancel,
+    withFolderHints: _withFolderHints,
+    statusHtml: _diskStatusInner,
+    status: _auto.status,
+    timers: _auto.timers,
+  }),
 });
 
 if (typeof window !== 'undefined') {

@@ -3,7 +3,10 @@
 //
 // One affidavit + N per-provider addendums (Multi-Business pattern).
 // Drafts are persisted per-case on disk under:
-//   cases/{caseNumber}/Warrants/Drafts/{warrantId}/{manifest.json, warrant.pdf, warrant.docx}
+//   cases/{caseNumber}/Warrants/Drafts/{readable label}/{manifest.json, warrant.pdf, warrant.docx, .viper-draft.json}
+// e.g. "Google ESP - SW 24-001". The sidecar maps the folder back to its
+// warrant id (see draft-folders.js); older builds used the bare id as the
+// folder name and those folders are still found.
 //
 // localStorage `warrantAuthor_${caseId}` holds the INDEX ONLY
 // (warrant list + lifecycle metadata) — large blobs live on disk and
@@ -21,6 +24,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { app, dialog, shell } = require('electron');
+const _folders = require('./draft-folders');
 
 // ─── State ────────────────────────────────────────────────────────────
 let _security   = null;
@@ -72,8 +76,21 @@ function _resolveCasePath(casePath) {
     return canonical;
 }
 
+function _draftsRoot(casePath) {
+    return path.join(_resolveCasePath(casePath), 'Warrants', 'Drafts');
+}
+/**
+ * Folder of a draft. Drafts live in readable folders ("Google ESP - SW 24-001")
+ * found through their sidecar (see draft-folders.js); a draft with no folder
+ * yet — or one written by an older build — maps to Drafts/<warrantId>.
+ */
 function _draftsDirFor(casePath, warrantId) {
-    return path.join(_resolveCasePath(casePath), 'Warrants', 'Drafts', warrantId);
+    const root = _draftsRoot(casePath);
+    return _folders.findDir(root, warrantId) || path.join(root, String(warrantId || ''));
+}
+/** Vault is on but locked: nothing may be written in plaintext. */
+function _isSecLocked() {
+    return !!(_security && _security.isEnabled() && !_security.isUnlocked());
 }
 function _manifestPath(casePath, warrantId) {
     return path.join(_draftsDirFor(casePath, warrantId), 'manifest.json');
@@ -246,20 +263,19 @@ function registerIpc(ipcMain) {
     // ── list-drafts: enumerate manifest.json files under case Warrants/Drafts/ ─
     ipcMain.handle('warrant-author-list-drafts', async (_event, { casePath } = {}) => {
         if (!casePath) return { success: false, error: 'casePath required' };
-        const draftsRoot = path.join(_resolveCasePath(casePath), 'Warrants', 'Drafts');
+        const draftsRoot = _draftsRoot(casePath);
         if (!fs.existsSync(draftsRoot)) return { success: true, drafts: [] };
         try {
-            const entries = fs.readdirSync(draftsRoot, { withFileTypes: true })
-                .filter(d => d.isDirectory())
-                .map(d => d.name);
             const drafts = [];
-            for (const id of entries) {
-                const mp = _manifestPath(casePath, id);
+            for (const ent of _folders.listEntries(draftsRoot)) {
+                const id = ent.id;
+                const mp = path.join(ent.dir, 'manifest.json');
                 if (!fs.existsSync(mp)) continue;
                 const r = _secureReadJson(mp);
                 if (r.ok) {
                     drafts.push({
                         id,
+                        folder: ent.name,
                         status: r.data.status || 'draft',
                         swNumber: r.data.swNumber || '',
                         template: r.data.template || '',
@@ -304,10 +320,16 @@ function registerIpc(ipcMain) {
             createdAt: draft.createdAt || now,
             updatedAt: now,
         };
+        if (_isSecLocked()) {
+            return { success: false, locked: true, error: 'Field Security is locked — unlock to save this warrant draft.' };
+        }
         try {
-            _secureWriteJson(_manifestPath(casePath, id), toWrite);
+            // Readable per-draft folder (created, or renamed when the label —
+            // provider / SW number — changed).
+            const placed = _folders.ensureDir(_draftsRoot(casePath), id, _folders.labelFor(toWrite), toWrite);
+            _secureWriteJson(path.join(placed.dir, 'manifest.json'), toWrite);
             _broadcast('warrant-author-change', { type: 'save', warrantId: id });
-            return { success: true, warrantId: id, updatedAt: now };
+            return { success: true, warrantId: id, updatedAt: now, folder: path.basename(placed.dir), renamed: placed.renamed };
         } catch (e) {
             console.error('[WarrantAuthor] save-draft error:', e);
             return { success: false, error: e.message };
@@ -317,8 +339,8 @@ function registerIpc(ipcMain) {
     // ── delete-draft: rm draft folder ───────────────────────────────────
     ipcMain.handle('warrant-author-delete-draft', async (_event, { casePath, warrantId } = {}) => {
         if (!casePath || !warrantId) return { success: false, error: 'casePath + warrantId required' };
-        const dir = _draftsDirFor(casePath, warrantId);
-        if (!fs.existsSync(dir)) return { success: true };
+        const dir = _folders.findDir(_draftsRoot(casePath), warrantId);
+        if (!dir || !fs.existsSync(dir)) return { success: true };
         try {
             fs.rmSync(dir, { recursive: true, force: true });
             _broadcast('warrant-author-change', { type: 'delete', warrantId });
@@ -349,15 +371,23 @@ function registerIpc(ipcMain) {
         if (!draft || typeof draft !== 'object') return { success: false, error: 'draft object required' };
         const fmts = Array.isArray(formats) && formats.length ? formats : ['pdf', 'docx'];
 
-        const writeToDisk = !!casePath;
+        const locked = !!casePath && _isSecLocked();
+        const writeToDisk = !!casePath && !locked;
         let dir = null;
         if (writeToDisk) {
-            dir = _draftsDirFor(casePath, warrantId);
-            try { fs.mkdirSync(dir, { recursive: true }); }
+            try { dir = _folders.ensureDir(_draftsRoot(casePath), warrantId, _folders.labelFor(draft), draft).dir; }
             catch (e) { return { success: false, error: `mkdir failed: ${e.message}` }; }
         }
 
         const result = { success: true, warrantId, sizes: {}, diskWritten: writeToDisk };
+        if (locked) result.diskLocked = true;
+        if (dir) result.folder = path.basename(dir);
+        // An officer's edit to the previous file is moved aside, never
+        // overwritten; a file open in Word is skipped (next refresh retries).
+        const _note = (fname, w) => {
+            if (w.keptAs) (result.keptEdits = result.keptEdits || []).push(w.keptAs);
+            if (w.busy) (result.busy = result.busy || []).push(fname);
+        };
 
         // ── PDF ─────────────────────────────────────────────────────────
         if (fmts.includes('pdf')) {
@@ -431,11 +461,12 @@ function registerIpc(ipcMain) {
                 );
 
                 if (writeToDisk) {
-                    const pdfPath = path.join(dir, 'warrant.pdf');
                     let writeBuf = buf;
                     if (_isSecActive()) writeBuf = _security.encryptBuffer(buf);
-                    fs.writeFileSync(pdfPath, writeBuf);
-                    result.pdfPath = pdfPath;
+                    const w = _folders.writeGuarded(dir, 'warrant.pdf', writeBuf, { id: warrantId });
+                    _note('warrant.pdf', w);
+                    if (w.error) throw new Error(w.error);
+                    if (w.written) result.pdfPath = w.path;
                     result.sizes.pdf = writeBuf.length;
                 } else {
                     result.sizes.pdf = buf.length;
@@ -468,10 +499,11 @@ function registerIpc(ipcMain) {
                 );
                 if (writeToDisk) {
                     let buf = plainBuf;
-                    const docxPath = path.join(dir, 'warrant.docx');
                     if (_isSecActive()) buf = _security.encryptBuffer(buf);
-                    fs.writeFileSync(docxPath, buf);
-                    result.docxPath = docxPath;
+                    const w = _folders.writeGuarded(dir, 'warrant.docx', buf, { id: warrantId });
+                    _note('warrant.docx', w);
+                    if (w.error) throw new Error(w.error);
+                    if (w.written) result.docxPath = w.path;
                     result.sizes.docx = buf.length;
                 } else {
                     result.sizes.docx = plainBuf.length;
@@ -485,7 +517,7 @@ function registerIpc(ipcMain) {
         // Persist generation metadata onto manifest if present (disk mode only)
         if (writeToDisk) {
             try {
-                const mp = _manifestPath(casePath, warrantId);
+                const mp = path.join(dir, 'manifest.json');
                 if (fs.existsSync(mp)) {
                     const r = _secureReadJson(mp);
                     if (r.ok) {

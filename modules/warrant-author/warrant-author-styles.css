@@ -148,6 +148,13 @@
     border-color: rgba(34, 211, 238, 0.55); /* viper-cyan */
     box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35);
 }
+/* Working-copy status chip in the draft toolbar (Word + PDF in the case folder). */
+.wa-disk-status { color: #64748b; max-width: 26rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wa-disk-open { color: #94a3b8; text-decoration: underline; text-underline-offset: 2px; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
+.wa-disk-open:hover { color: #e2e8f0; }
+.wa-disk-pending { color: #94a3b8; }
+.wa-disk-error { color: #fda4af; }
+.wa-disk-busy { color: #fcd34d; }
 /* Rich-text PC editor (contenteditable, ViperRichEditor textOnly). */
 .wa-pc-rich {
     border: 1px solid #334155;

@@ -290,7 +290,7 @@ function createDraft(caseId, opts) {
   const draft = newDraft(opts);
   const data = _loadRaw(caseId);
   data.drafts.unshift(draft);
-  _save(caseId, data);
+  if (_save(caseId, data)) _emitDraftSaved(caseId, draft.id);
   return draft;
 }
 
@@ -303,7 +303,20 @@ function saveDraft(caseId, draft, opts) {
   recomputeStatus(draft);
   if (idx === -1) data.drafts.unshift(draft);
   else data.drafts[idx] = draft;
-  return _save(caseId, data, opts);
+  const ok = _save(caseId, data, opts);
+  if (ok) _emitDraftSaved(caseId, draft.id);
+  return ok;
+}
+
+// Fired for EVERY successful draft write (silent ones included) so the UI
+// can refresh the draft's Word/PDF working copy in the case folder. Not the
+// `warrant-author-change` event: that one re-renders the tab.
+function _emitDraftSaved(caseId, draftId) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('warrant-author-draft-saved', { detail: { caseId, draftId } }));
+    }
+  } catch (_) {}
 }
 
 function deleteDraft(caseId, draftId) {

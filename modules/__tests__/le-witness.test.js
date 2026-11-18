@@ -40,8 +40,12 @@ console.log('-- page helpers --');
     _esc: (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]),
   };
   vm.createContext(sb);
-  vm.runInContext(HTML.slice(start, end) + '\n;this._h = { _isLeWitness, _leClearFlag, _leComposeName, _leSplitName, _leNameParts, _leDisplayName, _leTitleDatalist, _leChip, LE_WITNESS_TITLES };', sb);
+  vm.runInContext(HTML.slice(start, end) + '\n;this._h = { _isLeWitness, _leClearFlag, _leComposeName, _leSplitName, _leNameParts, _leDisplayName, _leTitleDatalist, _leChip, LE_WITNESS_TITLES, _leAgencyAddress, _leStateDatalist };', sb);
   const h = sb._h;
+  eq(h._leAgencyAddress({ agencyAddress: '100 Example Ave', agencyCity: 'Sampletown', agencyState: 'TX', agencyZip: '75000' }), '100 Example Ave, Sampletown, TX 75000', 'agency address joins all parts');
+  eq(h._leAgencyAddress({ agencyCity: 'Sampletown', agencyState: 'TX' }), 'Sampletown, TX', 'agency address skips blanks');
+  eq(h._leAgencyAddress({}), '', 'no agency address → empty');
+  ok(h._leStateDatalist().includes('id="leWitnessStates"') && h._leStateDatalist().includes('value="NV"'), 'state datalist');
   eq(h._isLeWitness({ lawEnforcement: true }), true, 'flagged record is LE');
   eq(h._isLeWitness({ name: 'Pat Q' }), false, 'plain record is not LE');
   eq(h._isLeWitness(null), false, 'null is not LE');
@@ -128,8 +132,10 @@ console.log('\n-- case-inserts --');
   const mixed = civ.concat([{
     lawEnforcement: true, name: 'Robin Testcase', firstName: 'Robin', lastName: 'Testcase',
     leTitle: 'CSI', badgeNumber: '77', agency: 'Example PD', agencyPhone: '555-0199', testimony: 'Photographed the scene <b>',
+    agencyAddress: '100 Example Ave', agencyCity: 'Sampletown', agencyState: 'TX', agencyZip: '75000', address: '9 Home Rd',
   }]);
   const html = CI.people(mixed, 'witnesses');
+  ok(html.includes('100 Example Ave<br>Sampletown, TX 75000') && !html.includes('9 Home Rd'), 'LE address column = agency address, never a home address');
   ok(html.includes('>Law enforcement<'), 'mixed table has LE column');
   ok(html.includes('CSI<br>Example PD<br>Badge #77<br>555-0199'), 'LE cell = title / agency / badge / phone');
   ok(html.includes('Photographed the scene &lt;b&gt;'), 'testimony escaped');
@@ -147,8 +153,10 @@ console.log('\n-- page wiring --');
   };
   const modal = fnBody('showWitnessModal');
   ok(modal.includes('id="witnessLeToggle"'), 'form has the LE checkbox');
-  ['firstName', 'lastName', 'leTitle', 'badgeNumber', 'agency', 'agencyPhone', 'testimony'].forEach((f) =>
+  ['firstName', 'lastName', 'leTitle', 'badgeNumber', 'agency', 'agencyAddress', 'agencyCity', 'agencyState', 'agencyZip', 'agencyPhone', 'testimony'].forEach((f) =>
     ok(modal.includes(`name="${f}"`), `form has ${f}`));
+  ['agencyAddress', 'agencyCity', 'agencyState', 'agencyZip'].forEach((f) =>
+    ok(modal.includes(`${f}: g('${f}')`), `submit stores ${f}`));
   ok(/data-witness-le[\s\S]*name="email"/.test(modal), 'LE section has email');
   ok(modal.includes('lawEnforcement: true'), 'submit stores the flag');
   ok(modal.includes('_leClearFlag(witnesses[editIndex])'), 'civilian save clears the flag');
@@ -158,6 +166,13 @@ console.log('\n-- page wiring --');
   ok(/\$\{le \? '' : `[\s\S]*importDmvWitness/.test(detail), 'DMV buttons hidden for LE');
   const save = fnBody('saveInlineEditWitness');
   ok(save.includes('wle-toggle-') && save.includes("v('leEmail')") && save.includes('_leClearFlag(witness)'), 'inline save reads LE fields / clears flag');
+  ['agencyAddress', 'agencyCity', 'agencyState', 'agencyZip'].forEach((f) =>
+    ok(save.includes(`witness.${f} = v('${f}')`), `inline save reads ${f}`));
+  const body = fnBody('renderLeWitnessDetailBody');
+  ['agencyAddress', 'agencyCity', 'agencyState', 'agencyZip'].forEach((f) =>
+    ok(body.includes(`'${f}', witness.${f}`), `detail view shows ${f}`));
+  ok(fnBody('_leWitnessPrintCard').includes('_leAgencyAddress(w)'), 'printable card has the agency address');
+  ok(fnBody('renderLeWitnessCard').includes('_leAgencyAddress(witness)'), 'list card has the agency address');
   ok(HTML.includes('function _leWitnessPrintCard('), 'printable LE card exists');
   ok(detail.includes('convertWitnessType(${index})') && detail.includes('Convert to Law Enforcement'), 'detail view has the convert button');
   ok(fnBody('convertWitnessType').includes('{ convert: true }'), 'convert opens the form flipped');

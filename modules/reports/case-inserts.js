@@ -124,7 +124,10 @@
             { label: 'Sex / Race', get: (p) => join([p.sex, p.race], ' / ') },
             { label: 'Height / Weight', get: (p) => join([heightText(p.height), weightText(p.weight)], ' / ') },
             { label: 'Hair / Eyes', get: (p) => join([p.hairColor || p.hair, p.eyeColor || p.eyes], ' / ') },
-            { label: 'Address', get: (p) => join([p.address, p.addressCityStateZip], '\n') },
+            // An officer's address is the agency's, never a home address.
+            { label: 'Address', get: (p) => (p.lawEnforcement
+                ? join([p.agencyAddress, join([p.agencyCity, join([p.agencyState, p.agencyZip], ' ')], ', ')], '\n')
+                : join([p.address, p.addressCityStateZip], '\n')) },
             { label: 'Phone', get: (p) => join([p.phone || p.phone1, p.phone2], '\n') },
             { label: 'Email', get: (p) => join([p.email, p.email2], '\n') },
             { label: "Driver's License", get: (p) => dl(p) }

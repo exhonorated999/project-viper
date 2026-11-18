@@ -4864,6 +4864,7 @@
                                 { label: 'Title',        value: w.leTitle },
                                 { label: 'Badge Number', value: w.badgeNumber },
                                 { label: 'Agency',       value: w.agency },
+                                { label: 'Agency Address', value: _leAgencyAddress(w) },
                                 { label: 'Agency Phone', value: w.agencyPhone },
                                 { label: 'Email',        value: w.email }
                             ]);
@@ -6070,7 +6071,7 @@
                             doc.setFont(undefined, 'normal');
                             doc.setFontSize(10);
                             if (witness.lawEnforcement) {
-                                [['Badge #', witness.badgeNumber], ['Agency', witness.agency], ['Agency Phone', witness.agencyPhone], ['Email', witness.email]]
+                                [['Badge #', witness.badgeNumber], ['Agency', witness.agency], ['Agency Address', _leAgencyAddress(witness)], ['Agency Phone', witness.agencyPhone], ['Email', witness.email]]
                                     .filter(p => p[1]).forEach(p => { doc.text(`${p[0]}: ${p[1]}`, margin + 5, yPos); yPos += 5; });
                                 if (witness.testimony) {
                                     doc.setFont(undefined, 'bold');
@@ -25486,7 +25487,8 @@
         // A witness with `lawEnforcement: true` is an officer / detective /
         // CSI etc. It lives in the same witnesses_<case> list but uses its
         // own fields: firstName, lastName, leTitle, badgeNumber, agency,
-        // agencyPhone, email, testimony. `name` is always kept as
+        // agencyAddress, agencyCity, agencyState, agencyZip, agencyPhone,
+        // email, testimony. `name` is always kept as
         // "First Last" so search, notes, reports and exports keep working.
         // Civilian fields on the same record are left alone, so unticking
         // the box brings them back.
@@ -25530,6 +25532,19 @@
         function _leTitleDatalist() {
             return `<datalist id="leWitnessTitles">${LE_WITNESS_TITLES.map(t => `<option value="${t}"></option>`).join('')}</datalist>`;
         }
+        // Agency mailing address, for out-of-area agencies the case has to
+        // reach (subpoenas, discovery). All four parts are optional.
+        const LE_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','PR','GU','VI'];
+        function _leStateDatalist() {
+            return `<datalist id="leWitnessStates">${LE_STATES.map(s => `<option value="${s}"></option>`).join('')}</datalist>`;
+        }
+        // "100 Main St, Springfield, IL 62701" — blank parts are skipped.
+        function _leAgencyAddress(w) {
+            const t = (v) => String(v == null ? '' : v).trim();
+            if (!w) return '';
+            const stZip = [t(w.agencyState), t(w.agencyZip)].filter(Boolean).join(' ');
+            return [t(w.agencyAddress), t(w.agencyCity), stZip].filter(Boolean).join(', ');
+        }
         function _leChip(text) {
             return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold tracking-wider bg-blue-500/20 text-blue-200 border border-blue-400/50" data-le-chip><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">${LE_SHIELD_SVG}</svg>${text || 'LAW ENFORCEMENT'}</span>`;
         }
@@ -25551,6 +25566,7 @@
                     <div class="space-y-1 text-sm text-gray-400">
                         ${badge ? `<p>Badge #: ${_esc(badge)}</p>` : ''}
                         ${agency ? `<p>Agency: ${_esc(agency)}</p>` : ''}
+                        ${_leAgencyAddress(witness) ? `<p data-le-address>Address: ${_esc(_leAgencyAddress(witness))}</p>` : ''}
                         ${witness.agencyPhone ? `<p class="text-blue-300">Agency Phone: ${_esc(witness.agencyPhone)}</p>` : ''}
                         ${witness.email ? `<p>Email: ${_esc(witness.email)}</p>` : ''}
                     </div>
@@ -25605,10 +25621,16 @@
                             ${renderLeFieldWitness('Title', 'leTitle', witness.leTitle, index, { list: 'leWitnessTitles', placeholder: 'Officer, Detective, CSI…' })}
                             ${renderLeFieldWitness('Badge Number', 'badgeNumber', witness.badgeNumber, index)}
                             ${renderLeFieldWitness('Agency', 'agency', witness.agency, index, { wide: true })}
+                            ${renderLeFieldWitness('Agency Address', 'agencyAddress', witness.agencyAddress, index, { wide: true, placeholder: 'Street address' })}
+                            ${renderLeFieldWitness('City', 'agencyCity', witness.agencyCity, index)}
+                            <div class="grid grid-cols-2 gap-4">
+                                ${renderLeFieldWitness('State', 'agencyState', witness.agencyState, index, { list: 'leWitnessStates', placeholder: 'e.g. TX' })}
+                                ${renderLeFieldWitness('ZIP', 'agencyZip', witness.agencyZip, index)}
+                            </div>
                             ${renderLeFieldWitness('Agency Phone', 'agencyPhone', witness.agencyPhone, index, { type: 'tel' })}
                             ${renderLeFieldWitness('Email', 'leEmail', witness.email, index, { type: 'email' })}
                         </div>
-                        ${isEditingInline ? _leTitleDatalist() : ''}
+                        ${isEditingInline ? _leTitleDatalist() + _leStateDatalist() : ''}
                     </div>
                     <div class="glass-card rounded-xl p-6">
                         <h3 class="text-2xl font-bold text-blue-300 mb-6">Testifying To</h3>
@@ -25894,6 +25916,10 @@
                 witness.leTitle = v('leTitle');
                 witness.badgeNumber = v('badgeNumber');
                 witness.agency = v('agency');
+                witness.agencyAddress = v('agencyAddress');
+                witness.agencyCity = v('agencyCity');
+                witness.agencyState = v('agencyState').toUpperCase();
+                witness.agencyZip = v('agencyZip');
                 witness.agencyPhone = v('agencyPhone');
                 witness.email = v('leEmail');
                 witness.testimony = document.getElementById(`field-witness-testimony-${index}`)?.value || '';
@@ -26046,6 +26072,25 @@
                                 <div class="col-span-2">
                                     <label class="block text-sm text-gray-400 mb-1">Agency</label>
                                     <input type="text" name="agency" placeholder="Agency name" value="${_esc(witness.agency || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-sm text-gray-400 mb-1">Agency Address</label>
+                                    <input type="text" name="agencyAddress" placeholder="Street address" value="${_esc(witness.agencyAddress || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">City</label>
+                                    <input type="text" name="agencyCity" value="${_esc(witness.agencyCity || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-1">State</label>
+                                        <input type="text" name="agencyState" list="leWitnessStates" maxlength="20" placeholder="e.g. TX" value="${_esc(witness.agencyState || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                        ${_leStateDatalist()}
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm text-gray-400 mb-1">ZIP</label>
+                                        <input type="text" name="agencyZip" maxlength="10" value="${_esc(witness.agencyZip || '')}" class="w-full bg-viper-dark border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-400 focus:outline-none">
+                                    </div>
                                 </div>
                                 <div>
                                     <label class="block text-sm text-gray-400 mb-1">Agency Phone</label>
@@ -26208,6 +26253,10 @@
                         leTitle: g('leTitle'),
                         badgeNumber: g('badgeNumber'),
                         agency: g('agency'),
+                        agencyAddress: g('agencyAddress'),
+                        agencyCity: g('agencyCity'),
+                        agencyState: g('agencyState').toUpperCase(),
+                        agencyZip: g('agencyZip'),
                         agencyPhone: g('agencyPhone'),
                         email: g('email'),
                         testimony: String(formData.get('testimony') || '')
@@ -26353,6 +26402,7 @@
                             ${f('Title', w.leTitle)}
                             ${f('Badge Number', w.badgeNumber)}
                             ${f('Agency', w.agency)}
+                            ${f('Agency Address', _leAgencyAddress(w))}
                             ${f('Agency Phone', w.agencyPhone)}
                             ${f('Email', w.email)}
                         </div>

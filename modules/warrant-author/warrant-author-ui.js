@@ -194,6 +194,14 @@ function _formatOffenseDateForWarrant(raw) {
   return `${m[2]}/${m[3]}/${m[1]}`;
 }
 
+// All case offenses (primary + additional) as one warrant-ready string.
+function _caseOffensesText(rec) {
+  if (!rec) return '';
+  const CO = (typeof window !== 'undefined') ? window.WarrantAuthorCaseOffenses : null;
+  if (CO) return CO.describe(rec, CO.pageLibrary());
+  return String(rec.primaryOffense || '').trim();
+}
+
 function _resolveCaseCtxForDraft(draft) {
   if (!draft) return {};
   // PRECEDENCE (highest first):
@@ -221,9 +229,9 @@ function _resolveCaseCtxForDraft(draft) {
   let caseNum  = '';
   const rec = _resolveCaseRecord();
   if (rec) {
-    // primaryOffense is stored verbatim as the examiner picked it from the
-    // Offense Reference (statute citation included). Never reword it.
-    caseDesc = String(rec.primaryOffense || '').trim();
+    // Every offense on the Overview (primary + additional), each kept
+    // verbatim; a bare statute number gains its library description.
+    caseDesc = _caseOffensesText(rec);
     caseDate = String(rec.offenseDate || '').trim();
     caseNum  = String(rec.caseNumber || '').trim();
   }
@@ -4243,7 +4251,7 @@ function renderCasePc(caseId) {
   try {
     const rec = _resolveCaseRecord();
     if (rec) {
-      inheritedDesc = String(rec.primaryOffense || '').trim();
+      inheritedDesc = _caseOffensesText(rec);
       inheritedDate = _formatOffenseDateForWarrant(rec.offenseDate || '');
     }
   } catch (_e) { /* non-fatal */ }

@@ -89,6 +89,31 @@ console.log('\n[toolbar markup]');
     ok('no inline event handlers', !/\son[a-z]+=/i.test(t));
     ok('the picture input takes pictures only', /<input type="file" data-vre-file accept="image\/png,image\/jpeg,image\/gif,image\/webp,image\/bmp" multiple hidden>/.test(t));
     ok('buttons are type=button (never submit a form)', (t.match(/<button /g) || []).length === (t.match(/<button type="button"/g) || []).length);
+    const to = RE.toolbarHtml({ textOnly: true });
+    // Text inside the hidden wrappers (span depth-counted: the table picker nests spans).
+    const OPEN = '<span class="vre-hidden" hidden style="display:none">';
+    let hiddenSpans = '', visible = '', i = 0;
+    while (i < to.length) {
+        const at = to.indexOf(OPEN, i);
+        if (at < 0) { visible += to.slice(i); break; }
+        visible += to.slice(i, at);
+        let j = at + OPEN.length, depth = 1;
+        while (depth && j < to.length) {
+            const o = to.indexOf('<span', j), c = to.indexOf('</span>', j);
+            if (c < 0) { j = to.length; break; }
+            if (o >= 0 && o < c) { depth++; j = o + 5; } else { depth--; j = c + 7; }
+        }
+        hiddenSpans += to.slice(at, j);
+        i = j;
+    }
+    ok('textOnly: picture / table / page break / style / size / strike controls stay in the DOM but hidden',
+        ['image', 'tablePicker', 'pageBreak', 'strikeThrough'].every((c) => hiddenSpans.indexOf('data-re="' + c + '"') >= 0 && visible.indexOf('data-re="' + c + '"') < 0)
+        && /data-re-select="block"/.test(hiddenSpans) && /data-re-select="size"/.test(hiddenSpans) && !/data-re-select=/.test(visible));
+    ok('textOnly: text formatting stays visible',
+        ['bold', 'italic', 'underline', 'justifyLeft', 'justifyCenter', 'justifyRight', 'justifyFull', 'insertUnorderedList', 'insertOrderedList', 'outdent', 'indent', 'undo', 'removeFormat', 'find']
+            .every((c) => visible.indexOf('data-re="' + c + '"') >= 0));
+    ok('textOnly markup has no inline event handlers', !/\son[a-z]+=/i.test(to));
+    ok('default toolbar has no hidden wrappers', t.indexOf('vre-hidden') < 0);
 }
 
 ok('sanitize without a DOM says so', (() => { try { RE.sanitize('<p>x</p>'); return false; } catch (e) { return /needs a DOM/.test(e.message); } })());

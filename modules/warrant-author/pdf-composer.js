@@ -257,6 +257,44 @@
     }
 
     /**
+     * Rich probable-cause paragraph (b.runs from pc-rich.js): per-run
+     * bold / italic / underline, list marker hanging left of the column,
+     * left indent (b.leftPt), alignment and justification. Same
+     * widow/orphan policy as drawFlowed().
+     */
+    function drawRich(b) {
+      const prevFace = _txFace;
+      _txFace = FONT_BODY.face;
+      try {
+        const size = FONT_BODY.size;
+        const lh = FONT_BODY.lh;
+        const left = Math.max(0, +b.leftPt || 0);
+        const x = MARGIN + left;
+        const w = CONTENT_W - left;
+        const laid = _richLay(doc, b, size, w);
+        if (!laid.length) return;
+        const remaining = contentBottom - y;
+        if (laid.length * lh > remaining) {
+          if (laid.length <= 3) newPage();
+          else {
+            const fit = Math.floor(remaining / lh);
+            if (fit < 2 || (laid.length - fit) < 2) newPage();
+          }
+        }
+        laid.forEach((L, i) => {
+          ensureRoom(lh);
+          const base = y + size;
+          if (L) _txDrawLine(doc, L, x, base, w, size, { justify: !!b.justify, align: b.align });
+          if (i === 0 && b.marker) _richMarker(doc, b.marker, x, base, size);
+          y += lh;
+        });
+      } finally {
+        _txFace = prevFace;
+        _setFont(doc, FONT_BODY);
+      }
+    }
+
+    /**
      * Three-column ")" caption (Arkansas). Column 1 carries the
      * STATE/COUNTY literals, the separator glyph sits at a real tab stop
      * and column 3 carries the document title / provider list. The tab
@@ -529,7 +567,9 @@
           break;
         case 'paragraph': {
           const pFont = b.bold ? FONT_BODY_BOLD : FONT_BODY;
-          if (b.justify || b.firstIndent) {
+          if (Array.isArray(b.runs)) {
+            drawRich(b);
+          } else if (b.justify || b.firstIndent) {
             // Word-placed flow — first-line indent and/or justification.
             drawFlowed(pFont, b.text, {
               firstIndent: b.firstIndent | 0,
@@ -670,9 +710,83 @@
   let _txFace = 'times';
   const TX_DEFAULT_MARGIN = MARGIN;
 
-  function _txFont(doc, size, bold) {
-    doc.setFont(_txFace, bold ? 'bold' : 'normal');
+  function _txFont(doc, size, bold, italics) {
+    doc.setFont(_txFace, bold && italics ? 'bolditalic' : bold ? 'bold' : italics ? 'italic' : 'normal');
     doc.setFontSize(size);
+  }
+
+  // Rich runs ([{text, bold, italics, underline}], text may hold '\n') →
+  // one run list per hard line, text made jsPDF-safe.
+  function _richSegments(runs, bold) {
+    const segs = [[]];
+    for (const r of (Array.isArray(runs) ? runs : [])) {
+      const parts = _safeText(r && r.text).split('\n');
+      parts.forEach((t, i) => {
+        if (i) segs.push([]);
+        if (t) segs[segs.length - 1].push({ text: t, bold: !!bold || !!r.bold, italics: !!r.italics, underline: !!r.underline });
+      });
+    }
+    return segs;
+  }
+
+  // Draw one laid-out token line at (x, baseline). opts: {justify, align}.
+  // Bold / italic per token; underlined tokens (and the space between two
+  // underlined words) get a rule under them.
+  function _txDrawLine(doc, L, x, base, width, size, opts) {
+    const gaps = L.toks.reduce((a, t, i) => a + (i && !t.glue ? 1 : 0), 0);
+    const avail = width - L.indent;
+    const slack = avail - L.width;
+    _txFont(doc, size, false);
+    const spaceW = doc.getTextWidth(' ');
+    let gapW = spaceW;
+    if (opts && opts.justify && !L.last && gaps > 0 && slack > 0 && slack < avail * 0.35) gapW = spaceW + slack / gaps;
+    let cx = x + L.indent;
+    if (opts && opts.align === 'center') cx = x + (width - L.width) / 2;
+    else if (opts && opts.align === 'right') cx = x + width - L.width;
+    let prev = null;
+    L.toks.forEach((t, i) => {
+      const gx = cx;
+      if (i && !t.glue) cx += gapW;
+      if (t.underline) {
+        const from = (prev && prev.underline) ? gx : cx;
+        doc.setLineWidth(Math.max(0.4, size / 20));
+        doc.line(from, base + size * 0.12, cx + t.w, base + size * 0.12);
+      }
+      _txFont(doc, size, t.bold, t.italics);
+      doc.text(t.t, cx, base);
+      cx += t.w;
+      prev = t;
+    });
+  }
+
+  // Lay out a rich paragraph block (b.runs) into token lines for a column
+  // `w` wide. A '\n' inside the runs is a hard line break (no first-line
+  // indent after it); an empty line between two breaks comes back as null.
+  function _richLay(doc, b, size, w) {
+    const out = [];
+    _richSegments(b.runs, b.bold).forEach((seg, si) => {
+      const toks = _txTokens(seg);
+      if (!toks.length) { out.push(null); return; }
+      const fi = (si === 0 && !b.marker) ? Math.max(0, b.firstIndent | 0) : 0;
+      const { lines } = _txLayout(doc, toks, size, w, fi);
+      lines.forEach(L => out.push(L));
+    });
+    while (out.length && out[out.length - 1] === null) out.pop();
+    return out;
+  }
+
+  // List marker hanging to the left of a rich paragraph's first line.
+  function _richMarker(doc, marker, x, base, size) {
+    if (!marker) return;
+    const hang = Math.max(14, size * 1.5);
+    if (marker === '\u2022') {
+      const r = Math.max(1.4, size * 0.14);
+      doc.setFillColor(0, 0, 0);
+      doc.circle(x - hang + r + 2, base - size * 0.3, r, 'F');
+    } else {
+      _txFont(doc, size, false);
+      doc.text(_safeText(marker), x - hang, base);
+    }
   }
 
   // "**bold** plain" → [{text, bold}]. Unbalanced markers fall back to plain.
@@ -694,7 +808,7 @@
       let m;
       while ((m = re.exec(r.text))) {
         if (m[1]) { spaceBefore = true; continue; }
-        toks.push({ t: m[2], bold: r.bold, glue: !spaceBefore && toks.length > 0 });
+        toks.push({ t: m[2], bold: r.bold, italics: !!r.italics, underline: !!r.underline, glue: !spaceBefore && toks.length > 0 });
         spaceBefore = false;
       }
     }
@@ -708,7 +822,7 @@
     const spaceW = doc.getTextWidth(' ');
     let cur = [], curW = 0, ind = firstIndent || 0;
     for (const tk of toks) {
-      _txFont(doc, size, tk.bold);
+      _txFont(doc, size, tk.bold, tk.italics);
       tk.w = doc.getTextWidth(tk.t);
       if (!cur.length) { cur = [tk]; curW = tk.w; continue; }
       const add = (tk.glue ? 0 : spaceW) + tk.w;
@@ -770,25 +884,36 @@
 
     // Draw one laid-out line of tokens at (x, baseline).
     function drawLine(L, x, base, width, size, opts) {
-      const gaps = L.toks.reduce((a, t, i) => a + (i && !t.glue ? 1 : 0), 0);
-      const avail = width - L.indent;
-      const slack = avail - L.width;
-      _txFont(doc, size, false);
-      const spaceW = doc.getTextWidth(' ');
-      let gapW = spaceW;
-      if (opts.justify && !L.last && gaps > 0 && slack > 0 && slack < avail * 0.35) gapW = spaceW + slack / gaps;
-      let cx = x + L.indent;
-      if (opts.align === 'center') cx = x + (width - L.width) / 2;
-      else if (opts.align === 'right') cx = x + width - L.width;
-      L.toks.forEach((t, i) => {
-        if (i && !t.glue) cx += gapW;
-        _txFont(doc, size, t.bold);
-        doc.text(t.t, cx, base);
-        cx += t.w;
+      _txDrawLine(doc, L, x, base, width, size, opts || {});
+    }
+
+    // Rich probable cause paragraph: per-run bold / italic / underline,
+    // left indent (leftPt), list marker, alignment / justification.
+    function drawRichParagraph(b) {
+      const size = b.size || 10;
+      const lh = size * TX.LH;
+      let col = inner();
+      const left = Math.max(0, +b.leftPt || 0);
+      if (left) col = { x: col.x + left, w: col.w - left };
+      const laid = _richLay(doc, b, size, col.w);
+      const total = laid.length * lh;
+      const limit = BOTTOM - (box ? TX.BOX_PAD : 0);
+      if (dirty && y + total > limit) {
+        const fit = Math.floor((limit - y) / lh);
+        if (laid.length <= 3 || fit < 2 || laid.length - fit < 2) newPage();
+      }
+      laid.forEach((L, i) => {
+        room(lh);
+        const base = y + size * 0.85;
+        if (L) drawLine(L, col.x, base, col.w, size, b);
+        if (i === 0 && b.marker) _richMarker(doc, b.marker, col.x, base, size);
+        y += lh;
+        dirty = true;
       });
     }
 
     function drawParagraph(b) {
+      if (Array.isArray(b.runs)) { drawRichParagraph(b); return; }
       const size = b.size || 10;
       const lh = size * TX.LH;
       const segs = _safeText(b.text).split(/\r?\n/);

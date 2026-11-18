@@ -18,8 +18,12 @@
  *                            `links`: pasted web links stay links (case notes).
  *                            `onDropFiles(files)`: dropped files that are not
  *                            pictures go here (case notes attach them) instead
- *                            of being refused. `noun`: 'report' | 'note' for
- *                            messages. A paste another capture listener has
+ *                            of being refused. `noun`: what to call the text in
+ *                            messages ('report', 'note', …). `textOnly`: words
+ *                            and formatting only (no pictures, tables, headings,
+ *                            sizes, page breaks). `pasteFilter(html)`: reduces
+ *                            pasted HTML further after sanitize().
+ *                            A paste another capture listener has
  *                            already handled (defaultPrevented) is left alone.
  *   sanitize(html, doc, { pasted, links })
  *                            allow-list cleaner for pasted HTML and for printing.
@@ -317,6 +321,8 @@
     function toolbarHtml(opts) {
         const sizes = FONT_SIZES.map((s) => '<option value="' + s + '">' + s + '</option>').join('');
         const inserts = opts && Array.isArray(opts.inserts) ? opts.inserts : [];
+        // textOnly: the controls stay in the DOM (attach() looks them up) but are hidden.
+        const hid = (s) => (opts && opts.textOnly ? '<span class="vre-hidden" hidden style="display:none">' + s + '</span>' : s);
         const caseMenu = !inserts.length ? '' : '<span class="vre-pop-wrap">'
             + btn('caseMenu', 'Insert from the case: people, vehicles, evidence, timeline, photos', svg('caseFile') + '<span class="vre-lbl">From case</span>', ' data-re-wide="1"')
             + '<div class="vre-pop vre-menu" data-vre-menu hidden>'
@@ -326,15 +332,15 @@
             + '</div></span>';
         return '<div class="vre-bar" data-vre-bar>'
             + btn('undo', 'Undo (Ctrl+Z)', svg('undo')) + btn('redo', 'Redo (Ctrl+Y)', svg('redo')) + sep
-            + '<select class="vre-sel" data-re-select="block" title="Paragraph style">'
+            + hid('<select class="vre-sel" data-re-select="block" title="Paragraph style">'
             + '<option value="p">Normal text</option><option value="h1">Heading 1</option>'
             + '<option value="h2">Heading 2</option><option value="h3">Heading 3</option></select>'
             + '<select class="vre-sel vre-size" data-re-select="size" title="Font size of the selected text">'
-            + '<option value="">Size</option>' + sizes + '</select>' + sep
+            + '<option value="">Size</option>' + sizes + '</select>' + sep)
             + btn('bold', 'Bold (Ctrl+B)', '<b>B</b>', ' data-re-state="bold"')
             + btn('italic', 'Italic (Ctrl+I)', '<i style="font-family:Georgia,serif">I</i>', ' data-re-state="italic"')
             + btn('underline', 'Underline (Ctrl+U)', '<u>U</u>', ' data-re-state="underline"')
-            + btn('strikeThrough', 'Strikethrough', '<s>S</s>', ' data-re-state="strikeThrough"') + sep
+            + hid(btn('strikeThrough', 'Strikethrough', '<s>S</s>', ' data-re-state="strikeThrough"')) + sep
             + btn('justifyLeft', 'Align left', svg('alignLeft'), ' data-re-state="justifyLeft"')
             + btn('justifyCenter', 'Center', svg('alignCenter'), ' data-re-state="justifyCenter"')
             + btn('justifyRight', 'Align right', svg('alignRight'), ' data-re-state="justifyRight"')
@@ -342,13 +348,13 @@
             + btn('insertUnorderedList', 'Bulleted list', svg('ul'), ' data-re-state="insertUnorderedList"')
             + btn('insertOrderedList', 'Numbered list', svg('ol'), ' data-re-state="insertOrderedList"')
             + btn('outdent', 'Decrease indent', svg('outdent')) + btn('indent', 'Increase indent', svg('indent')) + sep
-            + '<span class="vre-pop-wrap">' + btn('tablePicker', 'Insert table', svg('table') + '<span class="vre-lbl">Table</span>', ' data-re-wide="1"')
+            + hid('<span class="vre-pop-wrap">' + btn('tablePicker', 'Insert table', svg('table') + '<span class="vre-lbl">Table</span>', ' data-re-wide="1"')
             + '<div class="vre-pop" data-vre-pop hidden><div class="vre-grid" data-vre-grid></div>'
             + '<div class="vre-pop-lbl" data-vre-grid-lbl>Insert table</div>'
             + '<label class="vre-pop-chk"><input type="checkbox" data-vre-hdr checked> Header row</label></div></span>'
-            + btn('image', 'Insert picture', svg('image') + '<span class="vre-lbl">Picture</span>', ' data-re-wide="1"')
+            + btn('image', 'Insert picture', svg('image') + '<span class="vre-lbl">Picture</span>', ' data-re-wide="1"'))
             + caseMenu
-            + btn('pageBreak', 'Insert page break (PDF and Export to DA start a new page here)', svg('pagebreak'))
+            + hid(btn('pageBreak', 'Insert page break (PDF and Export to DA start a new page here)', svg('pagebreak')))
             + btn('removeFormat', 'Clear formatting', svg('clear')) + sep
             + btn('find', 'Find and replace (Ctrl+F, Ctrl+H)', svg('search'), ' data-re-state-find="1"')
             + '<input type="file" data-vre-file accept="image/png,image/jpeg,image/gif,image/webp,image/bmp" multiple hidden>'
@@ -500,10 +506,16 @@
         const inserts = Array.isArray(opts.inserts) ? opts.inserts.filter((it) => it && typeof it.run === 'function') : [];
         const keepLinks = !!opts.links;
         const onDropFiles = typeof opts.onDropFiles === 'function' ? opts.onDropFiles : null;
-        const noun = opts.noun === 'note' ? 'note' : 'report';
+        const noun = typeof opts.noun === 'string' && opts.noun.trim() ? opts.noun.trim() : 'report';
+        // textOnly: words and their formatting only — no pictures, tables,
+        // headings, sizes or page breaks. pasteFilter(html) → html runs on
+        // pasted HTML after sanitize() (e.g. to reduce it to an allow-list).
+        const textOnly = !!opts.textOnly;
+        const pasteFilter = typeof opts.pasteFilter === 'function' ? opts.pasteFilter : null;
+        const noPictures = () => toast('Pictures cannot be added to the ' + noun + ' \u2014 it holds text only.', 'warning');
         injectCss(doc);
         editor.classList.add('vre-editor');
-        if (!bar.querySelector('[data-vre-bar]')) bar.insertAdjacentHTML('afterbegin', toolbarHtml({ inserts }));
+        if (!bar.querySelector('[data-vre-bar]')) bar.insertAdjacentHTML('afterbegin', toolbarHtml({ inserts, textOnly }));
         try { doc.execCommand('defaultParagraphSeparator', false, 'p'); } catch (_) {}
 
         let savedRange = null;
@@ -843,6 +855,7 @@
         async function insertFiles(files) {
             const list = Array.from(files || []).filter((f) => /^image\//i.test(f.type || '') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name || ''));
             if (!list.length) return 0;
+            if (textOnly) { noPictures(); return 0; }
             let n = 0;
             for (const f of list) {
                 try {
@@ -1195,10 +1208,11 @@
             if (html && /<[a-z]/i.test(html)) {
                 e.preventDefault(); e.stopImmediatePropagation();
                 const r = sanitize(html, doc, { pasted: true, links: keepLinks });
-                const body = r.html.replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '');
+                let body = r.html.replace(/^[\s\S]*?<body[^>]*>/i, '').replace(/<\/body>[\s\S]*$/i, '');
+                if (pasteFilter) { try { body = String(pasteFilter(body) || ''); } catch (_) {} }
                 if (body.trim()) insertHtml(body);
                 else if (imgs.length) { insertFiles(imgs); return; }
-                if (r.droppedImages) toast('Pictures in the pasted text could not come across. Use Picture on the toolbar to add them.', 'info');
+                if (r.droppedImages) toast(textOnly ? 'Pictures in the pasted text were left out \u2014 the ' + noun + ' holds text only.' : 'Pictures in the pasted text could not come across. Use Picture on the toolbar to add them.', 'info');
                 changed();
                 return;
             }
@@ -1223,6 +1237,7 @@
             e.preventDefault(); e.stopPropagation();
             const rest = files.filter((f) => pics.indexOf(f) < 0);
             if (rest.length && onDropFiles) { try { onDropFiles(rest, e); } catch (err) { toast((err && err.message) || 'Those files could not be added.', 'error'); } }
+            if (textOnly && !onDropFiles) { noPictures(); return; }
             if (!pics.length) { if (!onDropFiles) toast('Only pictures can be dropped into the ' + noun + '.', 'warning'); return; }
             let r = null;
             try { r = doc.caretRangeFromPoint(e.clientX, e.clientY); } catch (_) {}

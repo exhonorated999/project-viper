@@ -195,6 +195,64 @@ function _formatOffenseDateForWarrant(raw) {
 }
 
 // All case offenses (primary + additional) as one warrant-ready string.
+/**
+ * The case PC as canonical rich HTML (text formatting only) for
+ * builder.build({ pcHtml }). The builder only uses it when its text
+ * matches pcNarrative, so a stale or missing copy falls back to plain.
+ */
+function _casePcHtml(caseId) {
+  try {
+    const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+    return (pcStore && typeof pcStore.getBodyHtml === 'function') ? (pcStore.getBodyHtml(caseId) || '') : '';
+  } catch (_e) { return ''; }
+}
+
+/** The rich PC editor needs the shared editor, the PC converter and a store that keeps HTML. */
+function _pcRichAvailable() {
+  if (typeof window === 'undefined') return false;
+  const pcStore = window.WarrantAuthorCasePcStore;
+  return !!(window.ViperRichEditor && typeof window.ViperRichEditor.attach === 'function'
+    && window.WarrantAuthorPcRich && pcStore && typeof pcStore.setRich === 'function' && typeof pcStore.getBodyHtml === 'function');
+}
+
+/**
+ * renderCasePc returns a string the host page inserts; the editor can only
+ * be wired once it is in the document. Polls briefly for a fresh
+ * (not-yet-attached) #waCasePcEditor for this case. Returns '' so it can sit
+ * inside the template.
+ */
+function _scheduleCasePcMount(caseId) {
+  if (typeof window === 'undefined' || typeof document === 'undefined' || !_pcRichAvailable()) return '';
+  let tries = 0;
+  const tick = () => {
+    const ed = document.getElementById('waCasePcEditor');
+    const bar = document.getElementById('waCasePcToolbar');
+    if (ed && bar && !ed._vre && ed.getAttribute('data-case-id') === String(caseId)) { _mountCasePcEditor(caseId, ed, bar); return; }
+    if (++tries < 40) setTimeout(tick, 50);
+  };
+  setTimeout(tick, 0);
+  return '';
+}
+
+function _mountCasePcEditor(caseId, ed, bar) {
+  const R = window.WarrantAuthorPcRich;
+  const toast = (m, t) => { try { if (typeof window.showToast === 'function') window.showToast(m, t || 'info'); } catch (_e) {} };
+  const ctl = window.ViperRichEditor.attach({
+    editor: ed,
+    toolbar: bar,
+    noun: 'probable cause',
+    textOnly: true,
+    pasteFilter: (html) => R.canonical(html),
+    toast,
+  });
+  if (!ctl) return;
+  // Native typing and every toolbar command fire 'input' on the editor.
+  ed.addEventListener('input', () => {
+    if (!ed.isConnected) return;
+    bus.onCasePcRichChange(caseId, ed.innerHTML);
+  });
+}
+
 function _caseOffensesText(rec) {
   if (!rec) return '';
   const CO = (typeof window !== 'undefined') ? window.WarrantAuthorCaseOffenses : null;
@@ -579,7 +637,25 @@ function _residentialBlocksToHtml(blocks) {
     } else if (k === 'heading-2') {
       out.push(`<div class="wa-lp-h2">${esc(text)}</div>`);
     } else if (k === 'paragraph') {
-      out.push(`<div class="wa-lp-p${b.indent ? ' wa-lp-p--indent' : ''}">${esc(text)}</div>`);
+      if (Array.isArray(b.runs)) {
+        // Rich probable cause paragraph: its own formatting, alignment, indent, list marker.
+        const runs = b.runs.map((r) => {
+          let h = esc(r.text).replace(/\n/g, '<br>');
+          if (r.underline) h = `<u>${h}</u>`;
+          if (r.italics) h = `<i>${h}</i>`;
+          if (r.bold) h = `<b>${h}</b>`;
+          return h;
+        }).join('');
+        const st = [];
+        if (b.leftPt) st.push(`margin-left:${Math.round(b.leftPt * 4 / 3)}px`);
+        if (b.align === 'center' || b.align === 'right') st.push(`text-align:${b.align}`);
+        else if (b.justify) st.push('text-align:justify');
+        if (b.firstIndent && !b.marker) st.push(`text-indent:${Math.round(b.firstIndent * 4 / 3)}px`);
+        const mk = b.marker ? `<span style="display:inline-block;min-width:1.4em;margin-left:-1.4em">${esc(b.marker)}</span>` : '';
+        out.push(`<div class="wa-lp-p"${st.length ? ` style="${st.join(';')}"` : ''}>${mk}${runs}</div>`);
+      } else {
+        out.push(`<div class="wa-lp-p${b.indent ? ' wa-lp-p--indent' : ''}">${esc(text)}</div>`);
+      }
     } else if (k === 'numbered') {
       out.push(`<div class="wa-lp-num">${esc(text)}</div>`);
     } else if (k === 'signature') {
@@ -626,6 +702,7 @@ function _renderResidentialLivePreview(caseId, draft) {
       agency: agencyMerged,
       caseInfo,
       pcNarrative,
+      pcHtml: _casePcHtml(caseId),
       includeDisclaimer: false,
     });
   } catch (e) {
@@ -1920,7 +1997,7 @@ function _renderDraftHeader(caseId, draft) {
             ? `<span class="text-emerald-400">✓ filled</span> · <span class="text-viper-cyan font-mono">${pcStats.words}</span> words ·
                <span class="text-slate-400">edit at the top of this screen.</span>`
             : `<span class="text-amber-400">empty</span> ·
-               <a onclick="document.querySelector('.wa-case-pc')?.setAttribute('open',''); document.getElementById('waCasePcTextarea')?.scrollIntoView({behavior:'smooth',block:'center'}); document.getElementById('waCasePcTextarea')?.focus();"
+               <a onclick="document.querySelector('.wa-case-pc')?.setAttribute('open',''); const pcEl = document.getElementById('waCasePcEditor') || document.getElementById('waCasePcTextarea'); pcEl?.scrollIntoView({behavior:'smooth',block:'center'}); pcEl?.focus();"
                   class="text-viper-cyan hover:underline cursor-pointer">open the case PC section above to author it.</a>`}
         </span>
         <span class="text-slate-500">SW # and Judge captured when marked served</span>
@@ -4340,8 +4417,8 @@ function renderCasePc(caseId) {
             </div>
             <span class="block text-[10px] text-slate-500 mt-1">
               ${inheritedDesc && !offenseDesc
-                ? `Inheriting the case\u2019s primary offense: <span class="text-viper-cyan">${esc(inheritedDesc)}</span>. Type here only to override it.`
-                : 'Manual entry or pick from your Offense Reference library. Blank inherits the primary offense from the case Overview tab.'}
+                ? `Inheriting the case\u2019s offenses: <span class="text-viper-cyan">${esc(inheritedDesc)}</span>. Type here only to override them.`
+                : 'Manual entry or pick from your Offense Reference library. Blank inherits every offense listed on the case Overview tab.'}
             </span>
           </label>
           <label class="block text-xs">
@@ -4358,10 +4435,24 @@ function renderCasePc(caseId) {
             </span>
           </label>
         </div>
+        ${_pcRichAvailable() ? `
+        <div class="wa-pc-rich">
+          <div id="waCasePcToolbar" class="wa-pc-rich-bar"></div>
+          <div id="waCasePcEditor"
+               class="wa-pc-editor"
+               contenteditable="true"
+               spellcheck="true"
+               role="textbox"
+               aria-multiline="true"
+               aria-label="Case probable cause narrative"
+               data-case-id="${attr(caseId)}"
+               data-placeholder="Probable cause narrative for this case. Author here, then re-use across every warrant draft below.">${window.WarrantAuthorPcRich.canonical(pcStore.getBodyHtml(caseId))}</div>
+        </div>` : `
         <textarea id="waCasePcTextarea"
                   oninput="WarrantAuthorUI.bus.onCasePcChange('${attr(caseId)}', this.value)"
                   class="w-full px-3 py-2 bg-viper-dark border border-slate-700 rounded text-white text-sm font-mono leading-relaxed wa-pc-textarea"
-                  placeholder="Probable cause narrative for this case. Author here, then re-use across every warrant draft below.">${esc(body)}</textarea>
+                  placeholder="Probable cause narrative for this case. Author here, then re-use across every warrant draft below.">${esc(body)}</textarea>`}
+        ${_scheduleCasePcMount(caseId)}
         <div class="wa-case-pc-footer">
           <span>
             <span id="waPcWordCount" class="text-viper-cyan">${stats.words}</span> words ·
@@ -4463,6 +4554,38 @@ function _rerender() {
     const root = document.getElementById('waSubtabContent');
     if (root) root.innerHTML = renderSubtab(_state.caseId, _state.subtab);
   }
+}
+
+/**
+ * After a Case PC write: mirror the plain narrative into every draft on the
+ * case (one-way: case → drafts, for validator/template compat) and patch the
+ * footer stats in place — no rerender, so the editor keeps focus.
+ */
+function _afterCasePcWrite(caseId, pcStore) {
+  const body = pcStore.getBody(caseId);
+  const ds = _store();
+  if (ds) {
+    try {
+      const drafts = ds.listDrafts(caseId) || [];
+      for (const d of drafts) {
+        if (d && d.probableCauseNarrative !== body) {
+          d.probableCauseNarrative = body;
+          ds.saveDraft(caseId, d, { silent: true });
+        }
+      }
+    } catch (_e) {}
+  }
+  try {
+    const stats = pcStore.stats(caseId);
+    const w = document.getElementById('waPcWordCount');
+    const c = document.getElementById('waPcCharCount');
+    const r = document.getElementById('waPcRevCount');
+    const u = document.getElementById('waPcUpdated');
+    if (w) w.textContent = stats.words;
+    if (c) c.textContent = stats.chars;
+    if (r) r.textContent = stats.revisionCount;
+    if (u) u.textContent = stats.updatedAt ? _shortDate(stats.updatedAt) : '—';
+  } catch (_e) {}
 }
 
 const bus = {
@@ -4807,6 +4930,7 @@ const bus = {
         agency: agencyMerged,
         caseInfo,
         pcNarrative: pcNarrativeDocx,
+        pcHtml: _casePcHtml(caseId),
         includeDisclaimer: false,
       });
     } catch (e) {
@@ -4890,6 +5014,7 @@ const bus = {
         agency: agencyMerged,
         caseInfo,
         pcNarrative: pcNarrativePdf,
+        pcHtml: _casePcHtml(caseId),
         includeDisclaimer: false,
       });
     } catch (e) {
@@ -4974,7 +5099,7 @@ const bus = {
     let blockStream;
     try {
       blockStream = builder.build({
-        draft, addendumComposes: [], agency: agencyMerged, caseInfo, pcNarrative, includeDisclaimer: true,
+        draft, addendumComposes: [], agency: agencyMerged, caseInfo, pcNarrative, pcHtml: _casePcHtml(caseId), includeDisclaimer: true,
       });
     } catch (e) {
       alert('Block builder failed: ' + e.message);
@@ -5178,32 +5303,19 @@ const bus = {
   onCasePcChange(caseId, body) {
     const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
     if (!pcStore) return;
-    const rec = pcStore.setBody(caseId, body);
-    // Mirror into all drafts (one-way: case → drafts) for validator/template compat.
-    const ds = _store();
-    if (ds) {
-      try {
-        const drafts = ds.listDrafts(caseId) || [];
-        for (const d of drafts) {
-          if (d && d.probableCauseNarrative !== body) {
-            d.probableCauseNarrative = body;
-            ds.saveDraft(caseId, d, { silent: true });
-          }
-        }
-      } catch (_e) {}
-    }
-    // Patch footer stats in-place (no rerender so focus stays in textarea).
-    try {
-      const stats = pcStore.stats(caseId);
-      const w = document.getElementById('waPcWordCount');
-      const c = document.getElementById('waPcCharCount');
-      const r = document.getElementById('waPcRevCount');
-      const u = document.getElementById('waPcUpdated');
-      if (w) w.textContent = stats.words;
-      if (c) c.textContent = stats.chars;
-      if (r) r.textContent = stats.revisionCount;
-      if (u) u.textContent = stats.updatedAt ? _shortDate(stats.updatedAt) : '—';
-    } catch (_e) {}
+    pcStore.setBody(caseId, body);
+    _afterCasePcWrite(caseId, pcStore);
+  },
+  /**
+   * Rich-text Case PC edit (text formatting only). The store keeps the
+   * canonical HTML plus the matching plain narrative; drafts get the plain
+   * narrative as before. Fired on every keystroke and toolbar command.
+   */
+  onCasePcRichChange(caseId, html) {
+    const pcStore = (typeof window !== 'undefined') ? window.WarrantAuthorCasePcStore : null;
+    if (!pcStore || typeof pcStore.setRich !== 'function') return;
+    pcStore.setRich(caseId, html);
+    _afterCasePcWrite(caseId, pcStore);
   },
   /**
    * Case-level offense description edit (Case Probable Cause panel).
@@ -5761,7 +5873,7 @@ const bus = {
     let blockStream;
     try {
       blockStream = builder.build({
-        draft, addendumComposes, agency: agencyMerged, caseInfo, pcNarrative, includeDisclaimer: true,
+        draft, addendumComposes, agency: agencyMerged, caseInfo, pcNarrative, pcHtml: _casePcHtml(caseId), includeDisclaimer: true,
       });
     } catch (e) {
       alert('Block builder failed: ' + e.message);

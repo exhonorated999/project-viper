@@ -38,6 +38,37 @@
 
   function _safe(s) { return (s == null) ? '' : String(s); }
 
+  // ─── Rich probable cause (text formatting only) ──────────────────────
+  // build() parses the case PC's rich HTML into _PC_RICH for the duration
+  // of one build, and only when its text matches pcNarrative. Each PC
+  // emission site asks _richPc() for formatted paragraph blocks and falls
+  // back to its plain-text path when it gets null.
+  let _PC_RICH = null;
+  function _pcRichLib() {
+    if (root && root.WarrantAuthorPcRich) return root.WarrantAuthorPcRich;
+    try { if (typeof require === 'function') return require('./pc-rich.js'); } catch (_e) { /* not available */ }
+    return null;
+  }
+  /**
+   * @param text  the plain PC text this site was about to print
+   * @param base  the plain paragraph block this site would emit (its look
+   *              — size, justification, leading, first-line indent — is kept)
+   * @param xform optional text transform applied to every run (CSAM wording)
+   */
+  function _richPc(text, base, xform) {
+    const R = _pcRichLib();
+    if (!R || !_PC_RICH || !_PC_RICH.length) return null;
+    if (!R.sameText(R.toPlain(_PC_RICH), text)) return null;
+    let paras = _PC_RICH;
+    if (typeof xform === 'function') {
+      paras = paras.map(p => Object.assign({}, p, {
+        runs: p.runs.map(r => Object.assign({}, r, { text: _safe(xform(r.text)) })),
+      }));
+    }
+    return R.toBlocks(paras, base || { kind: 'paragraph' });
+  }
+  const _isPcKey = key => /(^|-)probable-cause$/.test(_safe(key));
+
   // Column layout for the Arkansas three-column ")" caption.
   // AR_CAPTION_LEAD is the literal that anchors column 1. The caption is
   // emitted as a `caption-table` block and the composers place the ")" at
@@ -123,6 +154,17 @@
       }
       return { kind: 'paragraph', text: t, lh: AR_BODY_LH };
     };
+
+    // The case probable cause, when it was authored as rich text: one
+    // formatted paragraph block per PC paragraph, in this template's look.
+    if (_isPcKey(rb.key) && text && kind !== 'sopc-sections') {
+      const rich = _richPc(text, para(text));
+      if (rich) {
+        if (heading) out.push(h2(heading));
+        for (const b of rich) out.push(b);
+        return out;
+      }
+    }
 
     switch (kind) {
       case 'constant':
@@ -651,10 +693,14 @@
           'record is relevant.]',
       });
     } else {
-      const paras = pc.split(/\r?\n\s*\r?\n/);
-      for (const p of paras) {
-        const t = p.trim();
-        if (t) blocks.push({ kind: 'paragraph', text: t });
+      const rich = _richPc(pc, { kind: 'paragraph' });
+      if (rich) for (const b of rich) blocks.push(b);
+      else {
+        const paras = pc.split(/\r?\n\s*\r?\n/);
+        for (const p of paras) {
+          const t = p.trim();
+          if (t) blocks.push({ kind: 'paragraph', text: t });
+        }
       }
     }
     blocks.push({ kind: 'spacer', size: 'md' });
@@ -780,6 +826,8 @@
         text: '[Probable cause narrative not yet authored — author it before serving.]',
       });
     } else {
+      const rich = _richPc(pc, { kind: 'paragraph' });
+      if (rich) { for (const b of rich) blocks.push(b); return blocks; }
       // Split on blank lines into separate paragraphs
       const paras = pc.split(/\r?\n\s*\r?\n/);
       for (const p of paras) {
@@ -1133,7 +1181,8 @@
         indent: true,
       });
     } else {
-      for (const p of _bodyParagraphs(_pcText)) blocks.push(p);
+      const rich = _richPc(_pcText, { kind: 'paragraph' }, _normalizeCsam);
+      for (const p of (rich || _bodyParagraphs(_pcText))) blocks.push(p);
     }
 
     // (3) SPECIAL REQUEST OFF-SITE COMPUTER SEARCH (with verbatim 6-reason list)
@@ -1620,7 +1669,11 @@
           break;
         }
         if (heading) out.push({ kind: 'paragraph', text: heading, bold: true, size: f.large ? TX_SIZE_LARGE : TX_SIZE_BODY });
-        if (text) out.push(_txPara(text, f));
+        if (text) {
+          const rich = _isPcKey(rb.key) ? _richPc(text, _txPara(text, f)) : null;
+          if (rich) for (const b of rich) out.push(b);
+          else out.push(_txPara(text, f));
+        }
         break;
       case 'tx-provider-block': {
         const lines = Array.isArray(rb.lines) ? rb.lines : text.split('\n');
@@ -1874,7 +1927,11 @@
       case 'optional-paragraph': {
         const heading = _safe(rb.heading).trim();
         if (heading) out.push({ kind: 'paragraph', text: heading, bold: true, size: AZ_SIZE_BODY, tight: !!text });
-        if (text) out.push(_azPara(text, f));
+        if (text) {
+          const rich = _isPcKey(rb.key) ? _richPc(text, _azPara(text, f)) : null;
+          if (rich) for (const b of rich) out.push(b);
+          else out.push(_azPara(text, f));
+        }
         break;
       }
       case 'page-break':
@@ -1917,8 +1974,29 @@
 
   /**
    * Top-level: build complete document block stream.
+   *
+   * pcHtml (optional) — the case PC as rich HTML (text formatting only,
+   * see pc-rich.js). Used only when its text matches pcNarrative; every
+   * PC emission site then prints formatted paragraph blocks (`runs`,
+   * `marker`, `leftPt`, alignment) instead of plain text.
    */
-  function build({ draft, addendumComposes, agency, caseInfo, pcNarrative, includeDisclaimer }) {
+  function build(input) {
+    const R = _pcRichLib();
+    const prev = _PC_RICH;
+    _PC_RICH = null;
+    try {
+      const pcHtml = input && input.pcHtml;
+      if (R && pcHtml && typeof pcHtml === 'string') {
+        const paras = R.parse(pcHtml);
+        if (paras.length && R.sameText(R.toPlain(paras), _safe(input.pcNarrative))) _PC_RICH = paras;
+      }
+      return _buildInner(input || {});
+    } finally {
+      _PC_RICH = prev;
+    }
+  }
+
+  function _buildInner({ draft, addendumComposes, agency, caseInfo, pcNarrative, includeDisclaimer }) {
     if (!draft) throw new Error('build: draft required');
     agency = agency || {};
     caseInfo = caseInfo || {};

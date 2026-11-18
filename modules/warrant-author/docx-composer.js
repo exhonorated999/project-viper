@@ -70,6 +70,68 @@ function _run(text, opts = {}) {
   });
 }
 
+// Rich probable-cause paragraph (b.runs from pc-rich.js) → TextRun list.
+// A '\n' inside a run is a soft line break; a list marker is followed by
+// a tab that lands on the hanging-indent stop (see _richIndent).
+function _richChildren(b, font, sizeHalf) {
+  const kids = [];
+  if (b.marker) kids.push(new TextRun({ text: _safe(b.marker) + '\t', font, size: sizeHalf }));
+  for (const r of (Array.isArray(b.runs) ? b.runs : [])) {
+    const parts = _safe(r && r.text).split('\n');
+    parts.forEach((t, i) => {
+      if (!t && !i) return;
+      kids.push(new TextRun({
+        text: t, break: i ? 1 : undefined, font, size: sizeHalf,
+        bold: !!b.bold || !!r.bold, italics: !!r.italics,
+        underline: r.underline ? {} : undefined,
+      }));
+    });
+  }
+  return kids;
+}
+
+function _richAlign(b) {
+  return (b.align === 'center') ? AlignmentType.CENTER
+       : (b.align === 'right')  ? AlignmentType.RIGHT
+       : b.justify              ? AlignmentType.JUSTIFIED
+       : AlignmentType.LEFT;
+}
+
+// Indent for a rich paragraph: left = b.leftPt; a list item hangs its
+// marker max(14, size*1.5) pt to the left (same as the PDF composer).
+function _richIndent(b, sizePt) {
+  const left = Math.max(0, Math.round((+b.leftPt || 0) * 20));
+  if (b.marker) {
+    const hang = Math.round(Math.max(14, sizePt * 1.5) * 20);
+    return { indent: { left, hanging: hang }, tabStops: [{ type: TabStopType.LEFT, position: left }] };
+  }
+  const firstLine = (b.firstIndent | 0) ? Math.round((b.firstIndent | 0) * 20) : 0;
+  if (!left && !firstLine) return {};
+  return { indent: Object.assign({}, left ? { left } : {}, firstLine ? { firstLine } : {}) };
+}
+
+// Word stretches a justified line that ends in a soft break (<w:br/>)
+// across the whole column; the PDF does not. A justified rich paragraph
+// with soft breaks is therefore emitted as one Word paragraph per line
+// run: only the first keeps the marker / first-line indent, and only the
+// last keeps the spacing after.
+function _richParas(b, mk) {
+  const hasBreak = (b.runs || []).some(r => /\n/.test(String((r && r.text) || '')));
+  if (!b.justify || !hasBreak) return [mk(b, true, true)];
+  const segs = [[]];
+  for (const r of b.runs) {
+    String((r && r.text) || '').split('\n').forEach((t, i) => {
+      if (i) segs.push([]);
+      if (t) segs[segs.length - 1].push(Object.assign({}, r, { text: t }));
+    });
+  }
+  return segs.map((runs, i) => {
+    const sub = Object.assign({}, b, { runs });
+    if (i) { delete sub.marker; delete sub.firstIndent; }
+    return mk(sub, i === 0, i === segs.length - 1);
+  });
+}
+
 function _para(text, opts = {}) {
   return new Paragraph({
     children: [_run(text, opts)],
@@ -354,6 +416,13 @@ function _renderBlock(b) {
     case 'caption-table':    return _captionTable(b);
     case 'field-table':      return _fieldTable(b);
     case 'paragraph': {
+      if (Array.isArray(b.runs)) {
+        return _richParas(b, (s, first, last) => new Paragraph(Object.assign({
+          children: _richChildren(s, 'Times New Roman', 24),
+          alignment: _richAlign(s),
+          spacing: { before: 0, after: (last && !s.tight) ? 200 : 0, line: _lineTw(s, 320), lineRule: _lineRule(s) },
+        }, _richIndent(s, 12))));
+      }
       const align = b.justify              ? AlignmentType.JUSTIFIED
                   : (b.align === 'right')  ? AlignmentType.RIGHT
                   : (b.align === 'center') ? AlignmentType.CENTER
@@ -444,6 +513,15 @@ function _txGapPara(pt) {
 
 function _txParagraphs(b, beforeTw) {
   const sizeHalf = _txSz(b, 10);
+  if (Array.isArray(b.runs)) {
+    return _richParas(b, (s, first, last) => new Paragraph(Object.assign({
+      children: _richChildren(s, _txdFont, sizeHalf),
+      alignment: _richAlign(s),
+      keepNext: !last,
+      widowControl: true,
+      spacing: { before: first ? (beforeTw || 0) : 0, after: 0, line: 240 },
+    }, _richIndent(s, sizeHalf / 2))));
+  }
   const align = (b.align === 'center') ? AlignmentType.CENTER
               : b.justify ? AlignmentType.JUSTIFIED
               : (b.align === 'right') ? AlignmentType.RIGHT

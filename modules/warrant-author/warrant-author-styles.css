@@ -148,6 +148,40 @@
     border-color: rgba(34, 211, 238, 0.55); /* viper-cyan */
     box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35);
 }
+/* Rich-text PC editor (contenteditable, ViperRichEditor textOnly). */
+.wa-pc-rich {
+    border: 1px solid #334155;
+    border-radius: 0.375rem;
+    background: rgba(15, 23, 42, 0.6);
+}
+.wa-pc-rich:focus-within {
+    border-color: rgba(34, 211, 238, 0.55);
+    box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35);
+}
+.wa-pc-rich-bar {
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid #334155;
+}
+.wa-pc-editor {
+    min-height: 22rem;
+    max-height: 60rem;
+    height: 26rem;
+    resize: vertical;
+    overflow: auto;
+    padding: 0.6rem 0.9rem;
+    color: #fff;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    overflow-wrap: break-word;
+    outline: none;
+}
+.wa-pc-editor p { margin: 0 0 0.75em; }
+.wa-pc-editor li > p { margin: 0; }
+.wa-pc-editor:empty::before {
+    content: attr(data-placeholder);
+    color: #64748b;
+    pointer-events: none;
+}
 
 /* ── Select / option contrast fix ───────────────────────────────────────── */
 /* Chromium renders <option> with its own background — force dark theme so
@@ -1105,6 +1139,13 @@ body.light-mode .wa-pc-textarea:focus {
     border-color: rgba(8,145,178,0.55) !important;
     box-shadow: 0 0 0 1px rgba(8,145,178,0.30) !important;
 }
+body.light-mode .wa-pc-rich { background: #fff !important; border-color: #cbd5e1 !important; }
+body.light-mode .wa-pc-rich-bar { border-color: #cbd5e1 !important; }
+body.light-mode .wa-pc-rich:focus-within {
+    border-color: rgba(8,145,178,0.55) !important;
+    box-shadow: 0 0 0 1px rgba(8,145,178,0.30) !important;
+}
+body.light-mode .wa-pc-editor { color: var(--lm-text, #1b2733) !important; }
 
 /* ── 13. Select / option contrast — light theme ── */
 body.light-mode #waNewDraftModal select,

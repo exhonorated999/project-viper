@@ -116,6 +116,42 @@
     return rec;
   }
 
+  function _rich() {
+    if (typeof window !== 'undefined' && window.WarrantAuthorPcRich) return window.WarrantAuthorPcRich;
+    try { if (typeof require === 'function') return require('./pc-rich.js'); } catch (_e) { /* not available */ }
+    return null;
+  }
+
+  /**
+   * The narrative as canonical rich HTML (text formatting only). A case
+   * whose PC was written before rich text — or edited through setBody —
+   * has no stored HTML (or HTML that no longer matches the body); its
+   * plain body is converted (blank lines = paragraphs).
+   */
+  function getBodyHtml(caseId) {
+    const rec = getRecord(caseId);
+    const body = typeof rec.body === 'string' ? rec.body : '';
+    const R = _rich();
+    if (!R) return '';
+    if (typeof rec.bodyHtml === 'string' && rec.bodyHtml && R.sameText(R.toPlain(R.parse(rec.bodyHtml)), body)) return rec.bodyHtml;
+    return R.fromPlain(body);
+  }
+
+  /**
+   * Writes the narrative from the rich editor: canonical HTML is kept in
+   * `bodyHtml`, and `body` holds the matching plain text every older
+   * consumer (validator, templates, word counts) reads.
+   */
+  function setRich(caseId, html, opts) {
+    const R = _rich();
+    if (!R) return setBody(caseId, String(html == null ? '' : html).replace(/<[^>]*>/g, ''), opts);
+    const paras = R.parse(html);
+    const rec = setBody(caseId, R.toPlain(paras), opts);
+    rec.bodyHtml = paras.length ? R.toHtml(paras) : '';
+    _safeWrite(caseId, rec);
+    return rec;
+  }
+
   /**
    * Set the case-level offense description. Lightweight — no history
    * entry (these are short scalar fields, not the narrative). Returns
@@ -183,6 +219,8 @@
     getBody,
     getRecord,
     setBody,
+    getBodyHtml,
+    setRich,
     getOffenseDescription,
     setOffenseDescription,
     getOffenseDate,

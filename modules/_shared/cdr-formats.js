@@ -11,7 +11,12 @@
  *   - dates read MONTH first (US) unless the first part is > 12, times read as
  *     UTC when the carrier says so (T-Mobile spreadsheets are UTC), and an
  *     unreadable date is reported, never replaced with "now";
- *   - T-Mobile call-type codes (mSOriginating, …SMSinMSC, vONR_, iMS_, RCS…).
+ *   - T-Mobile call-type codes (mSOriginating, …SMSinMSC, vONR_, iMS_, RCS…);
+ *   - Verizon: the cell-site list that sits in the same sheet as the call
+ *     records (above or below) is never taken for the call-record header,
+ *     it ends the call table, and it is joined in (Cell Site Latitude /
+ *     Longitude / Azimuth) so the records plot; VoLTE columns (Record Open
+ *     Dt/Tm(GMT), CPN, Called #, DIR, SOU, ENB #) are pre-mapped.
  *
  * UMD: `module` is defined in the renderer too, so set both.
  */
@@ -22,10 +27,38 @@
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function () {
     'use strict';
 
-    // Words that appear in CDR column headers (any carrier).
-    var HEADER_WORDS = /\b(date|time|utc|duration|dur|call|type|number|no|calling|called|dialed|dialled|digits|direction|role|imei|imsi|msisdn|mdn|esn|meid|cell|tower|site|sector|lat|latitude|long|lon|longitude|azimuth|switch|neid|lac|cid|enodeb|source|conn|originating|terminating|destination|seconds|minutes|elapsed|feature|service|code|start|end|first|last|1st|from|to)\b/i;
+    // Words that appear in CDR column headers (any carrier).  The second line
+    // is Verizon's VoLTE CDR shorthand (Dt/Tm(GMT), ENB #, DIR, CPN, SOU…).
+    var HEADER_WORDS = /\b(date|time|utc|duration|dur|call|type|number|no|calling|called|dialed|dialled|digits|direction|role|imei|imsi|msisdn|mdn|esn|meid|cell|tower|site|sector|lat|latitude|long|lon|longitude|azimuth|switch|neid|lac|cid|enodeb|source|conn|originating|terminating|destination|seconds|minutes|elapsed|feature|service|code|start|end|first|last|1st|from|to|gmt|dt|tm|enb|dir|cpn|sou|nid|face|seizure)\b/i;
+
+    // Columns only a call-record table has — a cell-site list never does.
+    var CALL_COL = /\b(date|time|timestamp|dt|tm|duration|dur|elapsed|seconds|sou|calling|called|dialed|dialled|msisdn|mdn|cpn|direction|dir|imei|imsi|originating|terminating)\b/i;
 
     function clean(v) { return v == null ? '' : String(v).trim(); }
+    function cellsOf(row) { return Array.isArray(row) ? row.map(clean).filter(Boolean) : []; }
+
+    /**
+     * A cell-site (tower) list header: latitude + longitude (or azimuth +
+     * site/sector/address) and no call-record column.  Verizon puts this list
+     * in the same sheet as the call records; its header out-scores the
+     * call-record header, so it must never be taken for it.
+     */
+    function isTowerListHeader(row) {
+        var cells = cellsOf(row);
+        if (cells.length < 3) return false;
+        var lat = false, lon = false, az = false, place = false;
+        for (var i = 0; i < cells.length; i++) {
+            var l = cells[i].toLowerCase().replace(/time ?zone/g, '');
+            if (cells[i].length > 48) return false;
+            if (/^[-+\d.,:\/\s()]+$/.test(l)) return false;        // a data row
+            if (CALL_COL.test(l)) return false;
+            if (/\blat(itude)?\b/.test(l)) lat = true;
+            else if (/\b(long(itude)?|lon|lng)\b/.test(l)) lon = true;
+            if (/azimuth|\baz\b/.test(l)) az = true;
+            if (/address|\bcity\b|\bzip\b|\bsite\b|\bsector\b|enodeb|\bcell\b/.test(l)) place = true;
+        }
+        return (lat && lon) || (az && place);
+    }
 
     /** How much a row looks like a CDR column header. */
     function headerScore(row) {
@@ -44,17 +77,77 @@
         return hits * 10 + filled;
     }
 
-    /** Index of the header row within the first `scan` rows, or -1. */
-    function findHeaderRow(rows, scan) {
-        var best = -1, bestScore = 0, n = Math.min(rows ? rows.length : 0, scan || 60);
-        for (var i = 0; i < n; i++) {
-            var s = headerScore(rows[i]);
-            if (s > bestScore) { best = i; bestScore = s; }
+    var DATE_LIKE = /^\d{4}[-\/.]\d{1,2}[-\/.]\d{1,2}\b|^\d{1,2}[-\/.]\d{1,2}[-\/.](\d{4}|\d{2})\b|^[45]\d{4}\.\d+$/;
+
+    /**
+     * A header whose words this file does not know: a row of short labels
+     * (no numbers) right above a row that starts with dates.  Only used when
+     * the sheet's sole scoring header is a cell-site list.
+     */
+    function guessCallHeader(rows, skipFrom, skipTo) {
+        for (var i = 0; i < rows.length - 1; i++) {
+            if (i >= skipFrom && i < skipTo) continue;
+            var cells = cellsOf(rows[i]);
+            if (cells.length < 3 || isTowerListHeader(rows[i])) continue;
+            var labels = cells.every(function (c) { return c.length <= 48 && !/^[-+\d.,:\/\s()]+$/.test(c); });
+            if (!labels) continue;
+            var next = cellsOf(rows[i + 1]);
+            if (next.some(function (c) { return DATE_LIKE.test(c); })) return i;
         }
-        return best;
+        return -1;
     }
 
-    /** Pick the sheet holding the call records: best header, then most rows. */
+    /**
+     * Index of the call-record header row, or -1.  Looks in the first `scan`
+     * rows (60).  A cell-site list header is only returned when no
+     * call-record header exists; when the list comes first, the rows after
+     * it are searched too.
+     */
+    function findHeaderRow(rows, scan) {
+        rows = rows || [];
+        var n = Math.min(rows.length, scan || 60);
+        var call = -1, callScore = 0, any = -1, anyScore = 0, tower = -1;
+        function look(i, callOnly) {
+            var s = headerScore(rows[i]);
+            var isTower = isTowerListHeader(rows[i]);
+            if (isTower && tower < 0) tower = i;
+            if (!s) return;
+            if (!callOnly && s > anyScore) { any = i; anyScore = s; }
+            if (!isTower && s > callScore) { call = i; callScore = s; }
+        }
+        for (var i = 0; i < n; i++) look(i);
+        if (call < 0 && tower >= 0 && !scan) {
+            for (var j = n; j < rows.length; j++) look(j, true);
+            if (call < 0) {
+                var g = guessCallHeader(rows, tower, tableEnd(rows, tower));
+                if (g >= 0) call = g;
+            }
+        }
+        return call >= 0 ? call : any;
+    }
+
+    /**
+     * Index just past the table whose header is rows[headerRow]: a call
+     * table ends where a cell-site list header starts and vice versa.  A
+     * section title ("Cell Sites") just above the next table is not data.
+     */
+    function tableEnd(rows, headerRow) {
+        var tower = isTowerListHeader(rows[headerRow]);
+        for (var r = headerRow + 1; r < rows.length; r++) {
+            var row = rows[r];
+            if (!row || !row.length) continue;
+            var isT = isTowerListHeader(row);
+            var other = tower ? (!isT && headerScore(row) > 0) : isT;
+            if (other) {
+                var end = r;
+                while (end > headerRow + 1 && cellsOf(rows[end - 1]).length <= 1) end--;
+                return end;
+            }
+        }
+        return rows.length;
+    }
+
+    /** Pick the sheet holding the call records: call header first, then most rows. */
     function pickSheet(sheets) {
         var best = null;
         (sheets || []).forEach(function (sh, idx) {
@@ -62,9 +155,11 @@
             var h = findHeaderRow(rows);
             if (h < 0) return;
             var score = headerScore(rows[h]);
-            var dataRows = rows.length - h - 1;
-            var cand = { index: idx, name: sh.name, rows: rows, headerRow: h, score: score, dataRows: dataRows };
-            if (!best || dataRows > best.dataRows || (dataRows === best.dataRows && score > best.score)) best = cand;
+            var towerList = isTowerListHeader(rows[h]);
+            var dataRows = tableEnd(rows, h) - h - 1;
+            var cand = { index: idx, name: sh.name, rows: rows, headerRow: h, score: score, dataRows: dataRows, towerList: towerList };
+            if (!best || (best.towerList && !towerList) ||
+                (best.towerList === towerList && (dataRows > best.dataRows || (dataRows === best.dataRows && score > best.score)))) best = cand;
         });
         return best;
     }
@@ -81,11 +176,16 @@
         });
     }
 
-    /** rows[] (arrays) → { headers, records[] objects } from the header row on. */
+    /**
+     * rows[] (arrays) → { headers, records[] objects } for the table under
+     * the header row (up to the next table; repeated header rows skipped).
+     */
     function rowsToRecords(rows, headerRow) {
         var headers = uniqueHeaders(rows[headerRow]);
+        var headKey = cellsOf(rows[headerRow]).join('\u0001').toLowerCase();
+        var end = tableEnd(rows, headerRow);
         var records = [];
-        for (var r = headerRow + 1; r < rows.length; r++) {
+        for (var r = headerRow + 1; r < end; r++) {
             var row = rows[r] || [];
             var any = false, o = {};
             for (var c = 0; c < headers.length; c++) {
@@ -93,6 +193,7 @@
                 if (clean(v) !== '') any = true;
                 o[headers[c]] = v;
             }
+            if (any && cellsOf(row).join('\u0001').toLowerCase() === headKey) continue;   // page-break repeat
             if (any) records.push(o);
         }
         return { headers: headers, records: records };
@@ -108,6 +209,7 @@
         if (/1st tower (lat|long|azimuth)|\(utc\) ?time|dialed digits/.test(head) && /calling (number|no)/.test(head)) return 'T-Mobile';
         if (/mobile role/.test(head) && /neid|first cell/.test(head)) return 'T-Mobile';   // legacy Sprint, now T-Mobile
         if (/source/.test(head) && /conn date/.test(head)) return 'AT&T';
+        if (isVerizonHeader(rows[headerRow])) return 'Verizon';
         if (/at&t|att\b|cingular/.test(banner)) return 'AT&T';
         if (/verizon|vzw/.test(banner)) return 'Verizon';
         if (/us ?cellular|uscc/.test(banner)) return 'US Cellular';
@@ -153,6 +255,215 @@
         m.beamwidth = find(['1st tower beamwidth', '1st tower beam width', /^1st tower beam/, 'beamwidth', 'beam width']);
         Object.keys(m).forEach(function (k) { if (!m[k]) delete m[k]; });
         return m;
+    }
+
+    // ── Verizon + cell-site lists ────────────────────────────────────
+    /** find(tests, skip) → first header (in test order) that matches. */
+    function finder(headers) {
+        var low = (headers || []).map(function (h) { return { h: h, l: clean(h).toLowerCase().replace(/\s+/g, ' ') }; });
+        return function find(tests, skip) {
+            for (var t = 0; t < tests.length; t++) {
+                for (var i = 0; i < low.length; i++) {
+                    var l = low[i].l, test = tests[t];
+                    if (!l || (skip && skip.test(l))) continue;
+                    if (typeof test === 'string' ? l === test : test.test(l)) return low[i].h;
+                }
+            }
+            return undefined;
+        };
+    }
+
+    /** Verizon VoLTE CDR header (Record Open Date/Time, MSISDN, ENB #, CPN, SOU…). */
+    function isVerizonHeader(row) {
+        var head = cellsOf(row).join('|').toLowerCase();
+        if (/record open (date|dt)/.test(head)) return true;
+        return /\bmsisdn\b/.test(head) && /\benb\b|\bsou\b|\bcpn\b|cell face/.test(head);
+    }
+
+    /** Verizon's cell-site list (E-911 latitude, extended base ID, PN offset). */
+    function isVerizonTowerList(headers) {
+        var head = (headers || []).map(clean).join('|').toLowerCase();
+        return /e-?911 lat/.test(head) || /extended base id/.test(head);
+    }
+
+    /**
+     * Verizon CDR column mapping.  The GMT start column wins over the local
+     * one (exact instant; the UTC box is ticked because a GMT column exists).
+     * CPN = calling party, Called # = number dialed, DIR = MO/MT, SOU =
+     * seconds of use.  Returns only what it is sure of.
+     */
+    function verizonMapping(headers) {
+        var find = finder(headers);
+        var GMT = /\b(gmt|utc)\b/;
+        var m = {};
+        var gmt = find([/^record open.*\b(gmt|utc)\b/, /^(seizure|start|connect|connection|call) .*\b(gmt|utc)\b/, /(date|dt).*\b(gmt|utc)\b/, /\b(gmt|utc)\b.*\b(date|dt)\b/]);
+        var local = find([/^record open (date|dt)/, /^seizure (date|dt)/, /^(start|connect|connection|call) (date|dt) ?\/ ?(time|tm)/, 'date/time', /^date ?\/ ?time$/], GMT);
+        m.datetime = gmt || local;
+        m.phoneA = find(['cpn', 'calling #', 'calling number', 'calling party', 'calling party number', /^calling\b/, /^originating (number|#|party)/])
+            || find(['msisdn', 'mdn', 'target', 'target number']);
+        m.phoneB = find(['called #', 'called number', 'called party', 'called party number', 'dialed #', 'dialed digits', 'dialed number', /^called\b/, /^dialed\b/, /^terminating (number|#|party)/, /^destination\b/]);
+        m.direction = find(['dir', 'dir.', 'direction', 'call direction', 'mo/mt', /\bdirection\b/]);
+        m.duration = find(['sou', 'sou (sec)', 'sou (secs)', 'sou(sec)', /^sou\b/, /seconds of use/, /^duration\b/, /^call duration\b/, /^elapsed\b/]);
+        Object.keys(m).forEach(function (k) { if (!m[k]) delete m[k]; });
+        return m;
+    }
+
+    // Columns that identify a cell / carry its location — CDR and cell-site list alike.
+    var SITE_COLS = {
+        lat: [/\blat(itude)?\b/],
+        lon: [/\b(long(itude)?|lon|lng)\b/],
+        azimuth: [/azimuth/, /^az$/],
+        beamwidth: [/beam ?width/, /\bh-?bw\b/, /^bw$/],
+        ecgi: [/\becgi\b/],
+        enodeb: [/enodeb|\benb\b|e-?node ?b/],
+        cell: [/^cell ?(id|#|no\.?)?$/, /^lte cell id$/, /^cid$/, /^ci$/],
+        site: [/^(cell )?site( number| no\.?| #| id)?$/, /\bsite (number|no|id)\b/],
+        sector: [/^sector( id| number| no\.?| #)?$/, /cell face|^face$/, /\bsector\b/],
+        address: [/street|address/], city: [/^city$/], state: [/^state$/], zip: [/^zip/]
+    };
+    function siteColumns(headers) {
+        var find = finder(headers), out = {};
+        Object.keys(SITE_COLS).forEach(function (k) { var h = find(SITE_COLS[k]); if (h) out[k] = h; });
+        return out;
+    }
+    function normKey(v) {
+        var s = clean(v).toLowerCase().replace(/\s+/g, '');
+        if (/^\d+\.0+$/.test(s)) s = s.replace(/\.0+$/, '');
+        if (/^\d+$/.test(s)) s = s.replace(/^0+(?=\d)/, '');
+        return s;
+    }
+    // CDR columns → cell-site list columns, most exact first.  The last two
+    // only find the site (location, no sector azimuth).
+    var JOIN_KEYS = [
+        { cdr: ['ecgi'], list: ['ecgi'], sector: true },
+        { cdr: ['enodeb', 'cell'], list: ['enodeb', 'cell'], sector: true },
+        { cdr: ['enodeb', 'sector'], list: ['enodeb', 'sector'], sector: true },
+        { cdr: ['cell', 'sector'], list: ['site', 'sector'], sector: true },
+        { cdr: ['enodeb'], list: ['enodeb'], sector: false },
+        { cdr: ['cell'], list: ['site'], sector: false },
+    ];
+
+    /**
+     * Where is the cell-site list?  Same sheet first (above or below the call
+     * records), then the other sheets.  → { rows, headerRow, name } or null.
+     */
+    function findTowerTable(rows, headerRow, sheets, sheetIndex) {
+        function scan(rs, from, to) {
+            for (var i = Math.max(0, from); i < to; i++) if (isTowerListHeader(rs[i])) return i;
+            return -1;
+        }
+        if (isTowerListHeader(rows[headerRow])) return null;
+        var h = scan(rows, 0, headerRow);
+        if (h < 0) h = scan(rows, tableEnd(rows, headerRow), rows.length);
+        if (h >= 0) return { rows: rows, headerRow: h, name: '' };
+        var list = sheets || [];
+        for (var s = 0; s < list.length; s++) {
+            var rs = list[s] && list[s].rows;
+            if (s === sheetIndex || !rs || rs === rows) continue;
+            var t = scan(rs, 0, rs.length);
+            if (t >= 0) return { rows: rs, headerRow: t, name: list[s].name || '' };
+        }
+        return null;
+    }
+
+    function uniqueName(headers, name) {
+        var n = name, k = 2;
+        while (headers.indexOf(n) >= 0) n = name + ' (' + (k++) + ')';
+        return n;
+    }
+
+    /**
+     * Look each call record's cell up in the cell-site list and add
+     * "Cell Site Latitude / Longitude / Azimuth / Beam Width / Address"
+     * columns (only when at least one record is found).
+     */
+    function joinTowers(conv, list) {
+        var cc = siteColumns(conv.headers), tc = siteColumns(list.headers);
+        var out = { sites: list.records.length, matched: 0, total: conv.records.length, columns: {} };
+        if (!tc.lat || !tc.lon) return out;
+        function keyOf(rec, cols, names) {
+            var parts = names.map(function (k) { return normKey(rec[cols[k]]); });
+            return parts.some(function (p) { return !p; }) ? '' : parts.join('|');
+        }
+        var keys = JOIN_KEYS.filter(function (j) {
+            return j.cdr.every(function (k) { return cc[k]; }) && j.list.every(function (k) { return tc[k]; });
+        }).map(function (j) {
+            var idx = Object.create(null);
+            list.records.forEach(function (t) {
+                var k = keyOf(t, tc, j.list);
+                if (k && !idx[k] && clean(t[tc.lat]) && clean(t[tc.lon])) idx[k] = t;
+            });
+            return { j: j, idx: idx };
+        });
+        if (!keys.length) return out;
+        var hits = conv.records.map(function (rec) {
+            for (var i = 0; i < keys.length; i++) {
+                var k = keyOf(rec, cc, keys[i].j.cdr);
+                if (k && keys[i].idx[k]) return { t: keys[i].idx[k], sector: keys[i].j.sector };
+            }
+            return null;
+        });
+        out.matched = hits.filter(Boolean).length;
+        if (!out.matched) return out;
+        var H = conv.headers, cols = out.columns;
+        function add(field, name) { cols[field] = uniqueName(H, name); H.push(cols[field]); }
+        add('towerLat', 'Cell Site Latitude');
+        add('towerLon', 'Cell Site Longitude');
+        if (tc.azimuth) add('azimuth', 'Cell Site Azimuth');
+        if (tc.beamwidth) add('beamwidth', 'Cell Site Beam Width');
+        var addrCol = (tc.address || tc.city) ? uniqueName(H, 'Cell Site Address') : '';
+        if (addrCol) H.push(addrCol);
+        conv.records.forEach(function (rec, i) {
+            var h = hits[i], t = h && h.t;
+            rec[cols.towerLat] = t ? clean(t[tc.lat]) : '';
+            rec[cols.towerLon] = t ? clean(t[tc.lon]) : '';
+            if (cols.azimuth) rec[cols.azimuth] = t && h.sector ? clean(t[tc.azimuth]) : '';
+            if (cols.beamwidth) rec[cols.beamwidth] = t && h.sector ? clean(t[tc.beamwidth]) : '';
+            if (addrCol) {
+                rec[addrCol] = t ? [clean(t[tc.address]), clean(t[tc.city]), [clean(t[tc.state]), clean(t[tc.zip])].filter(Boolean).join(' ')]
+                    .filter(Boolean).join(', ') : '';
+            }
+        });
+        return out;
+    }
+
+    /**
+     * Everything the CDR tab needs from one table: records (bounded to the
+     * call table), carrier, the cell-site list joined in, and the carrier's
+     * own column mapping (layered over the generic auto-detect).
+     * opts: { fileName, sheetName, sheets (all workbook sheets), sheetIndex }.
+     */
+    function prepareCdr(rows, headerRow, opts) {
+        opts = opts || {};
+        var conv = rowsToRecords(rows, headerRow);
+        var carrier = detectCarrier(rows, headerRow, [opts.fileName, opts.sheetName].filter(Boolean).join(' '));
+        var towers = null;
+        var tt = findTowerTable(rows, headerRow, opts.sheets, opts.sheetIndex);
+        if (tt) {
+            var list = rowsToRecords(tt.rows, tt.headerRow);
+            if (!carrier && isVerizonTowerList(list.headers)) carrier = 'Verizon';
+            towers = joinTowers(conv, list);
+            towers.sheetName = tt.name;
+        }
+        var mapping = {};
+        if (carrier === 'Verizon') {
+            mapping = verizonMapping(conv.headers);
+            // One ID per cell: a bare Cell ID repeats across eNodeBs.
+            var cc = siteColumns(conv.headers);
+            if (cc.ecgi) mapping.towerA = cc.ecgi;
+            else if (cc.enodeb && (cc.cell || cc.sector)) {
+                var second = cc.cell || cc.sector;
+                var idCol = uniqueName(conv.headers, 'Cell Site ID');
+                conv.headers.push(idCol);
+                conv.records.forEach(function (r) {
+                    var a = normKey(r[cc.enodeb]), b = normKey(r[second]);
+                    r[idCol] = a && b ? a + '-' + b : (a || b);
+                });
+                mapping.towerA = idCol;
+            }
+        }
+        if (towers && towers.matched) Object.keys(towers.columns).forEach(function (k) { mapping[k] = towers.columns[k]; });
+        return { headers: conv.headers, records: conv.records, carrier: carrier, towers: towers, mapping: mapping };
     }
 
     // ── dates ────────────────────────────────────────────────────────
@@ -332,12 +643,19 @@
 
     return {
         headerScore: headerScore,
+        isTowerListHeader: isTowerListHeader,
         findHeaderRow: findHeaderRow,
+        tableEnd: tableEnd,
         pickSheet: pickSheet,
         uniqueHeaders: uniqueHeaders,
         rowsToRecords: rowsToRecords,
         detectCarrier: detectCarrier,
         tmobileMapping: tmobileMapping,
+        verizonMapping: verizonMapping,
+        isVerizonHeader: isVerizonHeader,
+        findTowerTable: findTowerTable,
+        joinTowers: joinTowers,
+        prepareCdr: prepareCdr,
         parseDateTime: parseDateTime,
         callType: callType,
         durationSeconds: durationSeconds,

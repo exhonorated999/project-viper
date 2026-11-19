@@ -43255,7 +43255,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 return;
             }
             const isXlsx = /\.(xlsx|xlsm)$/i.test(fileName);
-            let rows = [], headerRow = -1, sheetName = '';
+            let rows = [], headerRow = -1, sheetName = '', wbSheets = null, sheetIndex = -1;
             try {
                 if (isXlsx) {
                     if (!window.FlockXlsx || !CF) throw new Error('Excel reader not loaded');
@@ -43269,6 +43269,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                         return;
                     }
                     rows = pick.rows; headerRow = pick.headerRow; sheetName = pick.name || '';
+                    wbSheets = wb.sheets || []; sheetIndex = pick.index;
                 } else {
                     const text = await file.text();
                     rows = Papa.parse(text, { skipEmptyLines: true }).data || [];
@@ -43308,10 +43309,15 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
             window._cdrRefLat = parsedRefLat;
             window._cdrRefLon = parsedRefLon;
 
-            const carrier = CF ? CF.detectCarrier(rows, headerRow, fileName) : '';
+            // Records bounded to the call table; a carrier's cell-site list
+            // (Verizon: same sheet, above or below) is joined in, not parsed
+            // as records.
+            const prep = CF ? CF.prepareCdr(rows, headerRow, { fileName, sheetName, sheets: wbSheets, sheetIndex })
+                : { headers: rows[headerRow].map(String), records: [], carrier: '', towers: null, mapping: {} };
+            const carrier = prep.carrier || '';
             window._cdrCarrierHint = carrier;
 
-            const conv = CF ? CF.rowsToRecords(rows, headerRow) : { headers: rows[headerRow].map(String), records: [] };
+            const conv = prep;
             const lowHeads = conv.headers.map(h => String(h).trim().toLowerCase());
             const formatType = (lowHeads.includes('source') && lowHeads.some(h => h.includes('conn date'))) ? 'ATT'
                 : carrier === 'T-Mobile' ? 'TMOBILE' : 'STANDARD';
@@ -43323,9 +43329,11 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 // the case folder once the officer confirms the mapping.
                 sourcePath: _cdrFilePath(file),
                 headers: conv.headers,
-                records: conv.records
+                records: conv.records,
+                mapping: prep.mapping || {},
+                towers: prep.towers || null
             };
-            const preview = [conv.headers].concat(rows.slice(headerRow + 1, headerRow + 4));
+            const preview = [conv.headers].concat(conv.records.slice(0, 3).map(r => conv.headers.map(h => r[h])));
             showColumnMappingModal(fileName, { data: preview }, formatType);
         }
 
@@ -43394,6 +43402,19 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                 const tm = CF.tmobileMapping(headers);
                 if (tm.direction && !Object.values(autoMappings).includes(tm.direction)) autoMappings.direction = tm.direction;
             }
+            // Carrier mapping (Verizon VoLTE) + the joined cell-site columns:
+            // these win; drop any generic guess that grabbed one of them.
+            const carrierMap = (formatType !== 'ATT' && pend.mapping) ? pend.mapping : {};
+            if (Object.keys(carrierMap).length) {
+                const taken = new Set(Object.values(carrierMap));
+                Object.keys(autoMappings).forEach(k => { if (!carrierMap[k] && taken.has(autoMappings[k])) delete autoMappings[k]; });
+                if (carrierMap.datetime) { delete autoMappings.date; delete autoMappings.time; }
+                Object.assign(autoMappings, carrierMap);
+            }
+            const tw = pend.towers;
+            const towerNote = !tw ? '' : tw.matched
+                ? `Cell-site list found${tw.sheetName ? ` (sheet “${_cdrEsc(tw.sheetName)}”)` : ''}: ${tw.sites.toLocaleString()} site rows — ${tw.matched.toLocaleString()} of ${tw.total.toLocaleString()} records located (Cell Site Latitude / Longitude${tw.columns && tw.columns.azimuth ? ' / Azimuth' : ''}). The list itself is not imported as calls.`
+                : `Cell-site list found (${tw.sites.toLocaleString()} site rows) — not imported as calls. No record's cell matched it, so map the tower columns by hand if you need the map.`;
             if (formatType === 'ATT') {
                 headers.forEach((header) => {
                     const h = String(header).toLowerCase();
@@ -43459,6 +43480,7 @@ table.entry-team tr:nth-child(even) { background: #f8f9fa; }
                                 <div class="text-gray-300 text-xs">Review the mapping below. Latitude/Longitude/Azimuth are optional — fill them to plot this return on the map.</div>
                             </div>
                         `}
+                        ${towerNote ? `<div class="glass-card rounded p-3 mb-4 text-gray-300 text-xs">📡 ${towerNote}</div>` : ''}
                         
                         <form onsubmit="submitColumnMapping(event, null, '${formatType}')">
                             <div class="grid grid-cols-2 gap-4 mb-6">

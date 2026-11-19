@@ -100,6 +100,28 @@ function makeTab() {
 // CdrFormats is missing) — kept to prove the regression it caused.
 function oldParseTimestamp() { return makeTab().parseTimestamp.apply(null, arguments); }
 
+// ── synthetic Verizon VoLTE CDR + cell-site list (same sheet) ─────
+// Column names follow Verizon's published VoLTE / cell-site layouts; every
+// value is made up (555-01xx numbers, eNodeB 100001, "Testville").
+const VZ_HEAD = ['Record Open Date/Time', 'Record Open Dt/Tm(GMT)', 'SID', 'NID', 'Cell ID', 'Cell Face', 'Market ID',
+    'ENB #', 'DIR', 'MSISDN', 'Called #', 'CPN', 'SOU', 'RAT'];
+const VZ_CALLS = [
+    ['2025/06/13 13:00:05', '2025/06/13 19:00:05', '100', '1', '201', '2', '10', '100001', 'MO', '5555550100', '5555550123', '5555550100', '83', 'LTE'],
+    ['2025/06/13 13:30:00', '2025/06/13 19:30:00', '100', '1', '11', '1', '10', '100001', 'MT', '5555550100', '5555550100', '5555550124', '12', 'LTE'],
+    ['2025/06/13 14:00:00', '2025/06/13 20:00:00', '100', '1', '201', '3', '10', '100099', 'MO', '5555550100', '5555550125', '5555550100', '5', 'LTE'],
+    ['2025/06/13 15:00:00', '2025/06/13 21:00:00', '100', '1', '999', '1', '10', '999999', 'MT', '5555550100', '5555550100', '5555550126', '40', 'Wifi'],
+];
+const VZ_SITE_HEAD = ['MARKET SID', 'SWITCH NUMBER', 'SWITCH NAME', 'SITE NUMBER', 'E-911 LATITUDE DEGREES (NAD83)',
+    'E-911 LONGITUDE DEGREES (NAD83)', 'STREET ADDRESS', 'CITY', 'STATE', 'ZIP CODE', 'SECTOR', 'AZIMUTH (DEG)',
+    'ANTENNA H-BW (DEG)', 'PN OFFSET', 'EXTENDED BASE ID', 'CHANNEL TYPE', 'ENODEB ID', 'VENDOR', 'PCI', 'ECGI',
+    'GNB DU ID', 'CELL ID', 'CARRIER_ID', 'DOWNLINK_FREQUENCY'];
+function vzSite(site, sector, az, cell, lat, lon) {
+    return ['', '', '', site, lat || '39.700000', lon || '-105.000000', '100 Example St', 'Testville', 'CO', '80000', sector, az, '65',
+        '', '', 'LTE', '100001', 'VENDOR', '7', '', '', cell, '1', '2100'];
+}
+const VZ_SITES = [vzSite('201', '1', '0', '11'), vzSite('201', '2', '120', '12'), vzSite('201', '3', '240', '13')];
+const VZ_ROWS = [VZ_HEAD].concat(VZ_CALLS, [[], ['Cell Sites'], VZ_SITE_HEAD], VZ_SITES);
+
 (async () => {
     console.log('\ncdr-formats — header / sheet / carrier');
 
@@ -249,6 +271,111 @@ function oldParseTimestamp() { return makeTab().parseTimestamp.apply(null, argum
         assert.strictEqual(CF.carrierTimesUtc('AT&T', ['Conn Date', 'Conn Time']), false);
     });
 
+    console.log('\ncdr-formats — Verizon CDR with its cell-site list');
+    await ok('REGRESSION: the cell-site header out-scores the call-record header', () => {
+        assert.ok(CF.headerScore(VZ_SITE_HEAD) > CF.headerScore(VZ_HEAD), 'the bug this fixes');
+        assert.ok(CF.isTowerListHeader(VZ_SITE_HEAD));
+        assert.ok(!CF.isTowerListHeader(VZ_HEAD));
+        assert.ok(!CF.isTowerListHeader(TM_HEAD), 'T-Mobile lat/long columns sit in a call table');
+        assert.ok(!CF.isTowerListHeader(VZ_SITES[0]), 'a data row is not a header');
+    });
+    await ok('call-record header wins; records stop before the "Cell Sites" title + list', () => {
+        assert.strictEqual(CF.findHeaderRow(VZ_ROWS), 0);
+        const r = CF.rowsToRecords(VZ_ROWS, 0);
+        assert.strictEqual(r.records.length, 4);
+        assert.strictEqual(r.records[3]['ENB #'], '999999');
+        const t = CF.rowsToRecords(VZ_ROWS, VZ_ROWS.indexOf(VZ_SITE_HEAD));
+        assert.strictEqual(t.records.length, 3, 'the list parses as its own table');
+    });
+    await ok('cell-site list ABOVE the calls, longer than the 60-row scan', () => {
+        const sites = [];
+        for (let i = 0; i < 70; i++) sites.push(vzSite(String(300 + i), '1', '0', String(20 + i)));
+        const rows = [['Cell Sites'], VZ_SITE_HEAD].concat(sites, [[], VZ_HEAD], VZ_CALLS);
+        const h = CF.findHeaderRow(rows);
+        assert.strictEqual(rows[h], VZ_HEAD);
+        assert.strictEqual(CF.rowsToRecords(rows, h).records.length, 4);
+        const tt = CF.findTowerTable(rows, h);
+        assert.strictEqual(tt.headerRow, 1);
+        assert.strictEqual(CF.rowsToRecords(rows, 1).records.length, 70, 'list ends at the call header');
+    });
+    await ok('repeated header rows (page breaks) are skipped', () => {
+        const rows = [VZ_HEAD, VZ_CALLS[0], VZ_HEAD, VZ_CALLS[1]];
+        assert.strictEqual(CF.rowsToRecords(rows, 0).records.length, 2);
+    });
+    await ok('unknown call-header words: the labels above the dated rows are used', () => {
+        const rows = [['Rec Open', 'Rec Open Z', 'Orig', 'Term', 'Len'],
+            ['2025/06/13 13:00:05', '2025/06/13 19:00:05', '5555550100', '5555550123', '83'],
+            [], VZ_SITE_HEAD].concat(VZ_SITES);
+        assert.strictEqual(CF.findHeaderRow(rows), 0);
+        const p = CF.prepareCdr(rows, 0, { fileName: 'x.xlsx' });
+        assert.strictEqual(p.records.length, 1);
+        assert.strictEqual(p.carrier, 'Verizon', 'Verizon cell-site list');
+        assert.strictEqual(p.towers.matched, 0);
+    });
+    await ok('a sheet that is only a cell-site list still opens (old behaviour)', () => {
+        const rows = [VZ_SITE_HEAD].concat(VZ_SITES);
+        assert.strictEqual(CF.findHeaderRow(rows), 0);
+        const p = CF.prepareCdr(rows, 0, {});
+        assert.strictEqual(p.records.length, 3);
+        assert.strictEqual(p.towers, null);
+    });
+    await ok('pickSheet: CDR sheet beats a longer cell-site sheet; prepareCdr joins across sheets', () => {
+        const sites = VZ_SITES.concat([1, 2, 3, 4, 5, 6].map(i => vzSite(String(400 + i), '1', '0', String(40 + i))));
+        const sheets = [{ name: 'Cell Sites', rows: [VZ_SITE_HEAD].concat(sites) }, { name: 'CDR', rows: [VZ_HEAD].concat(VZ_CALLS) }];
+        const p = CF.pickSheet(sheets);
+        assert.strictEqual(p.name, 'CDR');
+        assert.strictEqual(p.towerList, false);
+        const prep = CF.prepareCdr(p.rows, p.headerRow, { sheets, sheetIndex: p.index });
+        assert.strictEqual(prep.towers.sheetName, 'Cell Sites');
+        assert.strictEqual(prep.towers.matched, 3);
+    });
+    await ok('detectCarrier: Verizon VoLTE headers', () => {
+        assert.strictEqual(CF.detectCarrier(VZ_ROWS, 0, 'return.xlsx'), 'Verizon');
+        assert.ok(CF.isVerizonHeader(['MSISDN', 'Called #', 'CPN', 'SOU']));
+        assert.ok(!CF.isVerizonHeader(['Date', 'Time', 'MSISDN', 'Number']));
+    });
+    await ok('verizonMapping: GMT start, CPN → Called #, DIR, SOU', () => {
+        const m = CF.verizonMapping(VZ_HEAD);
+        assert.strictEqual(m.datetime, 'Record Open Dt/Tm(GMT)');
+        assert.strictEqual(m.phoneA, 'CPN');
+        assert.strictEqual(m.phoneB, 'Called #');
+        assert.strictEqual(m.direction, 'DIR');
+        assert.strictEqual(m.duration, 'SOU');
+        const local = CF.verizonMapping(['Record Open Date/Time', 'MSISDN', 'Called #', 'DIR']);
+        assert.strictEqual(local.datetime, 'Record Open Date/Time', 'local when there is no GMT column');
+        assert.strictEqual(local.phoneA, 'MSISDN');
+        assert.strictEqual(CF.callType('', 'MO'), 'voice-outgoing');
+        assert.strictEqual(CF.callType('', 'MT'), 'voice-incoming');
+    });
+    await ok('prepareCdr joins the list: eNB+sector, eNB+cell, site+sector; site ID per cell', () => {
+        const p = CF.prepareCdr(VZ_ROWS, 0, { fileName: 'r.xlsx' });
+        assert.strictEqual(p.carrier, 'Verizon');
+        assert.strictEqual(p.records.length, 4);
+        assert.deepStrictEqual([p.towers.sites, p.towers.matched, p.towers.total], [3, 3, 4]);
+        const m = p.mapping;
+        assert.strictEqual(m.towerLat, 'Cell Site Latitude');
+        assert.strictEqual(m.towerLon, 'Cell Site Longitude');
+        assert.strictEqual(m.azimuth, 'Cell Site Azimuth');
+        assert.strictEqual(m.beamwidth, 'Cell Site Beam Width');
+        assert.strictEqual(m.towerA, 'Cell Site ID');
+        const r = p.records;
+        assert.deepStrictEqual([r[0]['Cell Site Latitude'], r[0]['Cell Site Azimuth']], ['39.700000', '120']);
+        assert.strictEqual(r[1]['Cell Site Azimuth'], '0', 'eNB 100001 cell 11 = sector 1');
+        assert.strictEqual(r[2]['Cell Site Azimuth'], '240', 'site 201 face 3');
+        assert.strictEqual(r[3]['Cell Site Latitude'], '', 'unknown cell left blank');
+        assert.strictEqual(r[0]['Cell Site Address'], '100 Example St, Testville, CO 80000');
+        assert.strictEqual(r[0]['Cell Site ID'], '100001-201');
+        assert.ok(p.headers.includes('Cell Site Latitude') && p.headers.includes('Cell Site ID'));
+    });
+    await ok('eNodeB-only match locates the site but gives no sector azimuth', () => {
+        const rows = [['Date/Time', 'MSISDN', 'Called #', 'CPN', 'ENB #'], ['2025/06/13 13:00:05', '5555550100', '5555550123', '5555550100', '100001'],
+            [], VZ_SITE_HEAD].concat(VZ_SITES);
+        const p = CF.prepareCdr(rows, 0, {});
+        assert.strictEqual(p.towers.matched, 1);
+        assert.strictEqual(p.records[0]['Cell Site Latitude'], '39.700000');
+        assert.strictEqual(p.records[0]['Cell Site Azimuth'], '');
+    });
+
     console.log('\nCDR tab — wiring (case-detail)');
     await ok('cdr-formats.js loads in case-detail', () => {
         assert.ok(/<script src="modules\/_shared\/cdr-formats\.js" defer><\/script>/.test(CD));
@@ -365,6 +492,41 @@ function oldParseTimestamp() { return makeTab().parseTimestamp.apply(null, argum
         assert.strictEqual(dump.records[0].duration, 90);
         assert.strictEqual(dump.records[0].timestamp, new Date(2025, 5, 13, 14, 3, 22).toISOString());
     });
+    await ok('Verizon return with its cell-site list: calls parsed, list joined, map points', async () => {
+        const tab = makeTab();
+        const { html, values, fmt, dump } = await openAndSubmit(tab, VZ_ROWS, 'verizon.csv');
+        assert.strictEqual(fmt, 'STANDARD');
+        assert.ok(/Verizon format/.test(html));
+        assert.ok(/Cell-site list found/.test(html) && /3 of 4 records located/.test(html), 'officer told about the list');
+        assert.ok(!/E-911/.test(html), 'preview + column lists show the calls, not the list');
+        assert.strictEqual(values.datetime, 'Record Open Dt/Tm(GMT)');
+        assert.strictEqual(values.date, '');
+        assert.strictEqual(values.tzUtc, '1');
+        assert.strictEqual(values.phoneA, 'CPN');
+        assert.strictEqual(values.phoneB, 'Called #');
+        assert.strictEqual(values.direction, 'DIR');
+        assert.strictEqual(values.duration, 'SOU');
+        assert.strictEqual(values.towerA, 'Cell Site ID');
+        assert.strictEqual(values.towerLat, 'Cell Site Latitude');
+        assert.strictEqual(values.azimuth, 'Cell Site Azimuth');
+        assert.strictEqual(dump.carrier, 'Verizon');
+        assert.strictEqual(dump.records.length, 4, 'calls only — the 3 cell-site rows are not calls');
+        const r = dump.records;
+        assert.strictEqual(r[0].timestamp, '2025-06-13T19:00:05.000Z');
+        assert.strictEqual(r[0].callType, 'voice-outgoing');
+        assert.strictEqual(r[1].callType, 'voice-incoming');
+        assert.strictEqual(r[1].phoneA, '5555550124');
+        assert.strictEqual(r[0].duration, 83);
+        assert.strictEqual(r[0].towerA, '100001-201');
+        assert.strictEqual(r[0].towerLat, 39.7);
+        assert.strictEqual(r[0].towerLon, -105);
+        assert.strictEqual(r[0].azimuth, 120);
+        assert.strictEqual(r[0].beamwidth, 65);
+        assert.strictEqual(r[3].towerLat, null);
+        assert.strictEqual(dump.unreadableDates, 0);
+        assert.ok(dump.hasGeo);
+        assert.strictEqual(dump.points.length, 3, 'three sectors');
+    });
     await ok('generic CSV with header on line 1 unchanged', async () => {
         const tab = makeTab();
         const rows = [
@@ -420,6 +582,26 @@ function oldParseTimestamp() { return makeTab().parseTimestamp.apply(null, argum
         const conv = CF.rowsToRecords(p.rows, p.headerRow);
         assert.strictEqual(conv.records.length, 6);
         assert.strictEqual(CF.detectCarrier(p.rows, p.headerRow, 'r.xlsx'), 'T-Mobile');
+    });
+    await ok('Verizon .xlsx: calls + cell-site list in ONE sheet → calls parsed, list joined', async () => {
+        let DOMParser;
+        try { DOMParser = require('@xmldom/xmldom').DOMParser; } catch (_) { DOMParser = null; }
+        if (!DOMParser || typeof DecompressionStream === 'undefined') { console.log('        (skipped: no DOMParser shim)'); return; }
+        global.DOMParser = DOMParser;
+        const XL = require('../../flock/flock-xlsx');
+        const AdmZip = require('adm-zip');
+        const buf = buildXlsx(AdmZip, [{ name: 'CellSites-CDR-4g_VoLTE', rows: VZ_ROWS }]);
+        const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+        const tab = makeTab();
+        tab.FlockXlsx = XL;
+        await tab.parseCDRFile({ name: 'verizon.xlsx', arrayBuffer: async () => ab });
+        const pend = tab._cdrPending;
+        assert.ok(pend, 'mapping modal opened: ' + JSON.stringify(tab.toasts));
+        assert.strictEqual(pend.carrier, 'Verizon');
+        assert.strictEqual(pend.records.length, 4);
+        assert.strictEqual(pend.towers.matched, 3);
+        assert.strictEqual(pend.records[0]['Cell Site Azimuth'], '120');
+        assert.ok(/CellSites-CDR-4g_VoLTE/.test(tab.html));
     });
 
     console.log(`\n${passed} passed, ${failed} failed`);

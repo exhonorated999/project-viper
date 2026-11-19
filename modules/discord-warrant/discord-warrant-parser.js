@@ -4,6 +4,10 @@
  * Discord serves warrant returns as Discord Data Packages — same format as
  * a user's "Request All My Data" export.  Parser handles both.
  *
+ * Two more formats are routed out of here to their own parsers:
+ *   - discord-return-parser.js       law-enforcement CSV return
+ *   - discord-html-export-parser.js  Discrub browser-extension HTML export
+ *
  * Runs in Electron main process (Node.js) — uses adm-zip + fs.
  *
  * Discord Data Package layout:
@@ -43,6 +47,7 @@ const fs = require('fs');
 const path = require('path');
 const { openZip } = require('../_shared/zip-reader');
 const { DiscordReturnParser } = require('./discord-return-parser');
+const { DiscordHtmlExportParser } = require('./discord-html-export-parser');
 
 // IP-bearing event types we surface in IP Activity table.
 const IP_EVENT_TYPES = new Set([
@@ -93,6 +98,8 @@ class DiscordWarrantParser {
             }
             // Law-enforcement return format (lowercase, CSV-based)
             if (DiscordReturnParser.detect(Array.from(names)).match) return true;
+            // Discrub HTML export (paginated <name>/<name>-page-<n>.html)
+            if (DiscordHtmlExportParser.detect(Array.from(names)).match) return true;
             return false;
         } catch (e) {
             return false;
@@ -121,6 +128,8 @@ class DiscordWarrantParser {
             }
             // Law-enforcement return format (lowercase, CSV-based)
             if (DiscordReturnParser.detect(Array.from(names)).match) return true;
+            // Discrub HTML export (paginated <name>/<name>-page-<n>.html)
+            if (DiscordHtmlExportParser.detect(Array.from(names)).match) return true;
             return false;
         } catch (e) {
             return false;
@@ -145,6 +154,8 @@ class DiscordWarrantParser {
             if (fs.existsSync(userJson) && fs.existsSync(path.join(folderPath, 'Activity'))) return true;
             // Law-enforcement return format (lowercase, CSV-based)
             if (DiscordReturnParser.isReturnFolder(folderPath)) return true;
+            // Discrub HTML export — the export root or one conversation folder
+            if (DiscordHtmlExportParser.isHtmlExportFolder(folderPath)) return true;
             return false;
         } catch (e) {
             return false;
@@ -188,6 +199,10 @@ class DiscordWarrantParser {
                 return await new DiscordReturnParser().parse({
                     entryNames, readText, readBinary, options: streamOpts
                 });
+            }
+
+            if (this._isHtmlExport(entryNames)) {
+                return await new DiscordHtmlExportParser().parse({ entryNames, readText, readBinary, options });
             }
 
             return await this._parseSources({ entryNames, readText, readBinary, options });
@@ -238,7 +253,34 @@ class DiscordWarrantParser {
             });
         }
 
+        if (this._isHtmlExport(allFiles)) {
+            return new DiscordHtmlExportParser().parse({ entryNames: allFiles, readText, readBinary, options });
+        }
+        const ownBase = path.basename(folderPath).toLowerCase();
+        if (allFiles.some(f => { const m = /^([^/]+?)[-_]page[-_]\d+\.html?$/i.exec(f); return !!m && m[1].toLowerCase() === ownBase; })) {
+            // A single conversation folder was picked: its pages sit at the
+            // top level, so present them under the folder's own name.
+            const base = path.basename(folderPath);
+            const strip = (n) => n.slice(base.length + 1);
+            return new DiscordHtmlExportParser().parse({
+                entryNames: allFiles.map(f => base + '/' + f),
+                readText: (n) => readText(strip(n)),
+                readBinary: (n) => readBinary(strip(n)),
+                options
+            });
+        }
+
         return this._parseSources({ entryNames: allFiles, readText, readBinary, options });
+    }
+
+    /**
+     * Discrub HTML export, but never at the expense of a real Data Package:
+     * a package that happens to contain HTML pages is still a package.
+     */
+    _isHtmlExport(entryNames) {
+        const names = (entryNames || []).map(n => String(n).replace(/\\/g, '/').replace(/^\/+/, ''));
+        if (names.some(n => /^(Account\/user\.json|Messages\/index\.json)$/i.test(n))) return false;
+        return DiscordHtmlExportParser.detect(names).match;
     }
 
     // ─── Core parsing ───────────────────────────────────────────────────

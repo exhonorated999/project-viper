@@ -63,10 +63,19 @@
  * boundaries; and there was no pass for IP addresses or coordinates.  Name
  * words are now also learned across the whole document and swept wherever
  * else they appear.
+ *
+ * Device mode (5.6.6, still schema 5): full-file-system phone extractions
+ * (GrayKey `<id>_files_full.zip`, .tar, extracted folders — 50–500 GB) get a
+ * streaming survey from ./device-dump.js instead of the per-file walk.  The
+ * result lands in `root_summary.device_dumps[]` (layout, known artifacts,
+ * SQLite schemas + value shapes, plist key paths, directory statistics);
+ * `tree` then only holds the extraction tool's own report files.  Keychains,
+ * password lists and memory images are never opened (`structure.withheld`).
  */
 
 const fs = require('fs');
 const path = require('path');
+const deviceDump = require('./device-dump');
 
 // ─── Limits & knobs (mirror Scout) ─────────────────────────────────────────
 
@@ -2226,7 +2235,18 @@ function readUpTo(absPath, n) {
     finally { if (fd !== undefined) try { fs.closeSync(fd); } catch {} }
 }
 
+// Credential material (keychain, passwords.txt, memory image, key files …):
+// listed by name shape and size, never read.
+function _withheldEntry(rel, size, sanitizer) {
+    const why = deviceDump.withheldReason(rel);
+    if (!why) return null;
+    const ext = path.extname(rel).replace(/^\./, '').toLowerCase();
+    return { path: sanitizer.sanitize(rel), size, ext, format: FORMAT_BY_EXT[ext] || 'binary', structure: { withheld: why } };
+}
+
 function inspectFileFromDisk(rel, abs, size, envelopeBytes, sanitizer) {
+    const withheld = _withheldEntry(rel, size, sanitizer);
+    if (withheld) return withheld;
     const ext = path.extname(rel).replace(/^\./, '').toLowerCase();
     const peek = readPeek(abs, PEEK_BYTES);
     const fmt = detectFormat(rel, peek);
@@ -2256,6 +2276,8 @@ function inspectFileFromDisk(rel, abs, size, envelopeBytes, sanitizer) {
 }
 
 function inspectZipEntry(rel, size, entryBuffer, envelopeBytes, sanitizer) {
+    const withheld = _withheldEntry(rel, size, sanitizer);
+    if (withheld) return withheld;
     const ext = path.extname(rel).replace(/^\./, '').toLowerCase();
     const peek = entryBuffer.slice(0, PEEK_BYTES);
     const fmt = detectFormat(rel, peek);
@@ -2304,7 +2326,7 @@ function _yieldToEventLoop() {
     return new Promise(r => setImmediate(r));
 }
 
-async function walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs) {
+async function walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs, skipAbs) {
     const stack = [{ dir: rootPath, depth: 0 }];
     let inspected = 0;
     while (stack.length) {
@@ -2315,6 +2337,8 @@ async function walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, 
         for (const dirent of names) {
             const abs = path.join(dir, dirent.name);
             if (dirent.isSymbolicLink()) continue;
+            // Device dumps already surveyed by device mode.
+            if (skipAbs && skipAbs.has(path.resolve(abs))) continue;
             if (dirent.isDirectory()) {
                 stack.push({ dir: abs, depth: depth + 1 });
                 continue;
@@ -2352,11 +2376,18 @@ async function walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, 
     }
 }
 
-function walkZip(zipPath, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs) {
-    const AdmZip = require('adm-zip');
-    const zip = new AdmZip(zipPath);
+async function walkZip(zipPath, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs) {
+    // node-stream-zip via ZipReader: ZIP64, reads the central directory and
+    // one entry at a time — adm-zip loaded the whole archive and failed
+    // past 2 GiB.
+    const { ZipReader } = require('../_shared/zip-reader');
+    const zip = await ZipReader.open(zipPath);
     const counters = { inspected: 0, pdfBufKept: 0 };
-    return _walkZipObject(zip, '', 1, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs, counters);
+    try {
+        return await _walkZipObject(zip, '', 1, summary, entries, sanitizer, envelopeBytesRef, onProgress, pdfRefs, counters);
+    } finally {
+        zip.close();
+    }
 }
 
 /**
@@ -2387,11 +2418,12 @@ function _walkZipObject(zip, pathPrefix, archiveDepth, summary, entries, sanitiz
         const rel = pathPrefix ? `${pathPrefix}/${innerRel}` : innerRel;
         const depth = rel.split(/[\\/]+/).filter(Boolean).length;
         if (depth > summary.max_depth) summary.max_depth = depth;
-        const size = ze.header.size;
+        const size = ze.size != null ? ze.size : ze.header.size;
         summary.total_bytes += size;
         // Read bounded — skip giant files (matches Scout's per-file cap).
+        // Credential material (mem.zip, keychain …) is never read or recursed.
         let buf;
-        if (size > PER_FILE_BUDGET_BYTES) {
+        if (size > PER_FILE_BUDGET_BYTES || deviceDump.withheldReason(rel)) {
             buf = Buffer.alloc(0);
         } else {
             try { buf = ze.getData(); }
@@ -2495,15 +2527,91 @@ async function buildSampleEnvelope(rootPath, opts = {}) {
         format_counts: {},
     };
 
+    // ── Device-dump plan ─────────────────────────────────────────────────
+    // Which inputs (the picked file, or zips / tars / file-system folders
+    // inside the picked folder) are phone extractions that get the
+    // streaming device survey instead of the per-file walk.
+    let devicePlan = { sources: [] };
+    if (opts.deviceMode !== false) {
+        try {
+            devicePlan = deviceDump.planSources(rootPath, stat, {
+                formatCategory: opts.formatCategory, deviceMode: opts.deviceMode === true, limits: opts.deviceLimits,
+            });
+        } catch { devicePlan = { sources: [] }; }
+    }
+
     // ── Start signal ─────────────────────────────────────────────────────
     if (typeof opts.onProgress === 'function') {
         let kind = 'file';
-        if (stat.isFile() && /\.zip$/i.test(rootPath)) kind = 'zip';
+        if (devicePlan.sources.length) kind = 'device';
+        else if (stat.isFile() && /\.zip$/i.test(rootPath)) kind = 'zip';
         else if (stat.isDirectory()) kind = 'dir';
-        try { opts.onProgress({ phase: 'start', kind, rootPath }); } catch {}
+        try { opts.onProgress({ phase: 'start', kind, rootPath, devices: devicePlan.sources.length }); } catch {}
     }
 
-    if (stat.isFile() && /\.zip$/i.test(rootPath)) {
+    const deviceDumps = [];
+    let deviceFilesUncounted = 0;         // device files that are not tree entries
+    if (devicePlan.sources.length) {
+        const counters = { pdfBufKept: 0 };
+        let looseAdded = 0;
+        const addLoose = (rel, size, buf) => {
+            if (entries.length >= MAX_FILES) return;
+            const entry = inspectZipEntry(rel, size, buf, envelopeBytesRef.value, sanitizer);
+            envelopeBytesRef.value += approxEntrySize(entry);
+            entries.push(entry);
+            looseAdded++;
+            if (entry.format === 'pdf' && counters.pdfBufKept < PDF_TEXT_SAMPLES_DEFAULT && buf && buf.length) {
+                pdfRefs.push({ entryIdx: entries.length - 1, buf });
+                counters.pdfBufKept++;
+            }
+        };
+        // Several dumps share the envelope budget.
+        const n = devicePlan.sources.length;
+        const lim = Object.assign({}, deviceDump.DEFAULT_LIMITS, opts.deviceLimits || {});
+        if (n > 1) {
+            for (const k of ['budgetDirsBytes', 'budgetSqliteBytes', 'budgetPlistBytes']) lim[k] = Math.floor(lim[k] / Math.min(n, 4));
+        }
+        const skipAbs = new Set();
+        for (let i = 0; i < n; i++) {
+            const s = devicePlan.sources[i];
+            const onDevProgress = typeof opts.onProgress === 'function'
+                ? (p) => { try { opts.onProgress(Object.assign({}, p, { device: i + 1, devices: n })); } catch {} }
+                : null;
+            const before = looseAdded;
+            const r = await deviceDump.scanDevice(s.path, {
+                kind: s.kind, limits: lim, onProgress: onDevProgress, label: i + 1,
+                fallbackAllowed: !!s.fallbackAllowed && n === 1 && !devicePlan.rootIsDevice,
+                addLoose, tmpDir: opts.tmpDir,
+            });
+            if (r && r.isDevice === false && r.scanner === undefined) {
+                // An ordinary zip after all — normal walk below.
+                devicePlan = { sources: [], fellBack: true };
+                break;
+            }
+            skipAbs.add(path.resolve(s.path));
+            deviceDumps.push(r);
+            summary.total_bytes += r.bytes || 0;
+            if ((r.max_depth || 0) > summary.max_depth) summary.max_depth = r.max_depth;
+            for (const [ext, c] of Object.entries(r.ext_counts || {})) {
+                const fmt = FORMAT_BY_EXT[ext] || (ext === 'plist' ? 'plist' : 'binary');
+                summary.format_counts[fmt] = (summary.format_counts[fmt] || 0) + c;
+            }
+            deviceFilesUncounted += Math.max(0, (r.files || 0) - (looseAdded - before));
+        }
+        if (devicePlan.sources.length) {
+            summary.mode = 'device';
+            summary.device_dumps = deviceDumps;
+            if (stat.isDirectory() && !devicePlan.rootIsDevice) {
+                await walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, opts.onProgress, pdfRefs, skipAbs);
+            }
+        } else {
+            summary.device_fallback = 'not_a_device_dump';
+        }
+    }
+
+    if (devicePlan.sources.length) {
+        // Device scan (and the walk of the folder around it) done above.
+    } else if (stat.isFile() && /\.(zip|ufdr)$/i.test(rootPath)) {
         await walkZip(rootPath, summary, entries, sanitizer, envelopeBytesRef, opts.onProgress, pdfRefs);
     } else if (stat.isDirectory()) {
         await walkDir(rootPath, summary, entries, sanitizer, envelopeBytesRef, opts.onProgress, pdfRefs);
@@ -2514,7 +2622,7 @@ async function buildSampleEnvelope(rootPath, opts = {}) {
     } else {
         throw new Error(`Root path is not a regular file, directory, or .zip: ${rootPath}`);
     }
-    summary.total_files = entries.length + summary.truncated_files;
+    summary.total_files = entries.length + summary.truncated_files + deviceFilesUncounted;
 
     // Walk-complete signal — UI can switch the bar from indeterminate to a
     // determinate "N files found, enriching PDFs…" state.
@@ -2650,6 +2758,8 @@ module.exports = {
         CAPS_KEEP,
         STREET_SUFFIXES,
         SCHEMA_VERSION,
+        walkZip,
+        _withheldEntry,
         PDF_SKELETON_MAX_CHARS,
         PDF_TOP_HEADINGS,
         PDF_TOP_VERTICAL_LABELS,

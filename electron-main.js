@@ -10410,9 +10410,12 @@ ipcMain.handle('parser-sample-pick-folder', async () => {
 ipcMain.handle('parser-sample-pick-zip', async () => {
   try {
     const result = await dialog.showOpenDialog({
-      title: 'Select warrant-return .zip',
+      title: 'Select warrant-return .zip / phone extraction',
       properties: ['openFile'],
-      filters: [{ name: 'ZIP archives', extensions: ['zip'] }],
+      filters: [
+        { name: 'Archives / extractions', extensions: ['zip', 'tar', 'ufdr'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
     });
     if (result.canceled || !result.filePaths.length) {
       return { success: false, cancelled: true };
@@ -10461,7 +10464,8 @@ ipcMain.handle('parser-sample-build', async (event, opts) => {
     const onProgress = (p) => {
       try {
         const now = Date.now();
-        const isMilestone = p && (p.phase === 'start' || p.phase === 'walk-complete' || p.phase === 'done' || p.phase === 'pdf-text');
+        const isMilestone = p && (p.phase === 'start' || p.phase === 'walk-complete' || p.phase === 'done' || p.phase === 'pdf-text'
+          || p.phase === 'device-done' || (p.phase === 'device-list' && p.done));
         if (!isMilestone && now - lastEmit < 100) return;
         lastEmit = now;
         if (event && event.sender && !event.sender.isDestroyed()) {
@@ -10492,6 +10496,17 @@ ipcMain.handle('parser-sample-build', async (event, opts) => {
         max_depth: envelope.root_summary.max_depth,
         format_counts: envelope.root_summary.format_counts,
         envelope_size_bytes: envelopeText.length,
+        device: (envelope.root_summary.device_dumps || []).map(d => ({
+          platform: d.platform,
+          os_version: d.device && d.device.os_version,
+          files: d.files,
+          bytes: d.bytes,
+          known_artifacts: (d.known_artifacts || []).length,
+          sqlite_profiled: d.sqlite ? d.sqlite.profiled : 0,
+          sqlite_candidates: d.sqlite ? d.sqlite.candidates : 0,
+          plists_profiled: d.plists ? d.plists.profiled : 0,
+          withheld: (d.withheld || []).length + (d.withheld_omitted || 0),
+        })),
       },
     };
   } catch (err) {

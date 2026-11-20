@@ -11190,7 +11190,7 @@
         mobile_forensics: {
             providerLabel: 'Tool + Version *',
             providerPlaceholder: 'e.g. Cellebrite UFED 7.62, Magnet AXIOM 8.0',
-            hint: 'Pick the extracted bundle folder or the original .ufdr / .zip.',
+            hint: 'Pick the extracted bundle folder, the original .ufdr / .zip, or a full-file-system dump (GrayKey <id>_files_full.zip, .tar, or its output folder). Dumps of any size are surveyed in place — expect several minutes for 256 GB+. Only structure leaves your machine: database tables/columns and value shapes, plist keys, folder statistics. Keychains, password lists and memory images are never opened.',
         },
         other: {
             providerLabel: 'What is this format? *',
@@ -11338,9 +11338,15 @@
             const truncNote = s.truncated_files ? (' · ' + s.truncated_files + ' truncated') : '';
             const envKb = ((s.envelope_size_bytes || 0) / 1024).toFixed(1);
             const mb    = ((s.total_bytes || 0) / 1024 / 1024).toFixed(2);
+            const devNote = (s.device || []).map(d =>
+                ' · ' + (d.platform === 'ios' ? 'iOS' : d.platform === 'android' ? 'Android' : 'unknown-platform')
+                + (d.os_version ? ' ' + d.os_version : '') + ' extraction: '
+                + (d.sqlite_profiled || 0) + '/' + (d.sqlite_candidates || 0) + ' databases profiled, '
+                + (d.plists_profiled || 0) + ' plists, ' + (d.known_artifacts || 0) + ' known artifacts'
+                + (d.withheld ? ', ' + d.withheld + ' credential file(s) withheld' : '')).join('');
             brSetStatus(
                 '✓ Built: ' + (s.total_files || 0) + ' file(s), ' + mb + ' MB scanned · depth ' + (s.max_depth || 0)
-                + ' · ' + fcStr + truncNote + ' · envelope ' + envKb + ' KB',
+                + ' · ' + fcStr + truncNote + devNote + ' · envelope ' + envKb + ' KB',
                 'success'
             );
             btn.classList.add('hidden');

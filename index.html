@@ -10804,7 +10804,7 @@
         mobile_forensics: {
             providerLabel: 'Tool + Version *',
             providerPlaceholder: 'e.g. Cellebrite UFED 7.62, Magnet AXIOM 8.0',
-            hint: 'Pick the extracted bundle folder or the original .ufdr / .zip.',
+            hint: 'Pick the extracted bundle folder, the original .ufdr / .zip, or a full-file-system dump (GrayKey <id>_files_full.zip, .tar, or its output folder). Dumps of any size are surveyed in place — expect several minutes for 256 GB+. Only structure leaves your machine: database tables/columns and value shapes, plist keys, folder statistics. Keychains, password lists and memory images are never opened.',
         },
         other: {
             providerLabel: 'What is this format? *',
@@ -10944,10 +10944,42 @@
         if (!phaseEl || !statsEl || !barEl) return;
         switch (payload.phase) {
             case 'start': {
-                const k = payload.kind === 'zip' ? 'Reading ZIP…' : payload.kind === 'dir' ? 'Walking folder…' : 'Inspecting file…';
+                const k = payload.kind === 'device' ? 'Phone extraction detected — surveying in place…'
+                    : payload.kind === 'zip' ? 'Reading ZIP…' : payload.kind === 'dir' ? 'Walking folder…' : 'Inspecting file…';
                 phaseEl.textContent = k;
                 statsEl.textContent = '0 files';
                 barEl.style.width = '4%';
+                break;
+            }
+            case 'device-list':
+            case 'device-apps':
+            case 'device-sqlite':
+            case 'device-plist':
+            case 'device-done': {
+                const dev = payload.devices > 1 ? ' (dump ' + payload.device + '/' + payload.devices + ')' : '';
+                let pct = 30;
+                if (payload.phase === 'device-list') {
+                    phaseEl.textContent = (payload.done ? 'Listing complete' : 'Listing extraction') + dev + '…';
+                    statsEl.textContent = (payload.files || 0).toLocaleString() + ' files · ' + __brFormatBytes(payload.bytes || 0);
+                    pct = payload.done ? 30 : Math.min(28, 5 + ((payload.files || 0) / 50000) % 23);
+                } else if (payload.phase === 'device-apps') {
+                    phaseEl.textContent = 'Mapping app containers' + dev + '…';
+                    statsEl.textContent = (payload.done || 0) + ' / ' + (payload.total || 0) + ' containers';
+                    pct = 32;
+                } else if (payload.phase === 'device-sqlite') {
+                    phaseEl.textContent = 'Profiling databases (schema + value shapes only)' + dev + '…';
+                    statsEl.textContent = (payload.done || 0) + ' / ' + (payload.total || 0) + ' databases';
+                    pct = 34 + (payload.total ? (payload.done / payload.total) * 50 : 0);
+                } else if (payload.phase === 'device-plist') {
+                    phaseEl.textContent = 'Reading plist key structure' + dev + '…';
+                    statsEl.textContent = (payload.done || 0) + ' / ' + (payload.total || 0) + ' plists';
+                    pct = 86;
+                } else {
+                    phaseEl.textContent = 'Survey complete' + dev;
+                    statsEl.textContent = (payload.files || 0).toLocaleString() + ' files';
+                    pct = 90;
+                }
+                barEl.style.width = pct.toFixed(1) + '%';
                 break;
             }
             case 'walk':
@@ -11038,9 +11070,15 @@
             const truncNote = s.truncated_files ? (' · ' + s.truncated_files + ' truncated') : '';
             const envKb = ((s.envelope_size_bytes || 0) / 1024).toFixed(1);
             const mb    = ((s.total_bytes || 0) / 1024 / 1024).toFixed(2);
+            const devNote = (s.device || []).map(d =>
+                ' · ' + (d.platform === 'ios' ? 'iOS' : d.platform === 'android' ? 'Android' : 'unknown-platform')
+                + (d.os_version ? ' ' + d.os_version : '') + ' extraction: '
+                + (d.sqlite_profiled || 0) + '/' + (d.sqlite_candidates || 0) + ' databases profiled, '
+                + (d.plists_profiled || 0) + ' plists, ' + (d.known_artifacts || 0) + ' known artifacts'
+                + (d.withheld ? ', ' + d.withheld + ' credential file(s) withheld' : '')).join('');
             brSetStatus(
                 '✓ Built: ' + (s.total_files || 0) + ' file(s), ' + mb + ' MB scanned · depth ' + (s.max_depth || 0)
-                + ' · ' + fcStr + truncNote + ' · envelope ' + envKb + ' KB',
+                + ' · ' + fcStr + truncNote + devNote + ' · envelope ' + envKb + ' KB',
                 'success'
             );
             btn.classList.add('hidden');

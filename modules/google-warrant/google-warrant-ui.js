@@ -81,37 +81,47 @@ class GoogleWarrantUI {
             this.activeImportIdx = this.module.imports.findIndex(i => i.id === record.id);
             this.activeSection = 'overview';
             this.render();
-            const notice = this.module._mergeNotice;
-            if (notice && notice.targetId === record.id) {
-                this._toast(`Merged into existing import for ${notice.accountEmail} — ${notice.partsCount} part(s) total`, 'success');
-            } else {
-                const photoCount = (record.photos && record.photos.filter(p => p.isMedia).length) || 0;
-                this._toast(`Imported: ${record.accountEmail || fileName}${photoCount ? ` · ${photoCount} media file(s) extracted` : ''}`, 'success');
-            }
+            this._importedToast(record, fileName);
         } catch (err) {
             this._toast('Import failed: ' + err.message, 'error');
             this.render();
         }
     }
 
-    async handleFilePicker() {
+    /**
+     * @param {{folder?: boolean}} [opts] folder:true picks a whole folder
+     *   (every part of a split return in one go); otherwise a multi-select
+     *   file dialog.
+     */
+    async handleFilePicker(opts) {
         try {
             this._showLoading('Importing Google warrant data...');
-            const record = await this.module.importFromPicker();
+            const record = await this.module.importFromPicker(opts);
             if (!record) { this.render(); return; } // Cancelled
             this.activeImportIdx = this.module.imports.findIndex(i => i.id === record.id);
             this.activeSection = 'overview';
             this.render();
-            const notice = this.module._mergeNotice;
-            if (notice && notice.targetId === record.id) {
-                this._toast(`Merged into existing import for ${notice.accountEmail} — ${notice.partsCount} part(s) total`, 'success');
-            } else {
-                const photoCount = (record.photos && record.photos.filter(p => p.isMedia).length) || 0;
-                this._toast(`Imported: ${record.accountEmail || record.fileName}${photoCount ? ` · ${photoCount} media file(s) extracted` : ''}`, 'success');
-            }
+            this._importedToast(record, record.fileName);
         } catch (err) {
             this._toast('Import failed: ' + err.message, 'error');
             this.render();
+        }
+    }
+
+    /** Success toast — mentions split-return parts and anything replaced. */
+    _importedToast(record, fallbackName) {
+        const notice = this.module._mergeNotice;
+        const parts = (record.sourceFiles && record.sourceFiles.length) || 1;
+        const partsTxt = parts > 1 ? ` · ${parts} parts` : '';
+        if (notice && notice.targetId === record.id && notice.replaced) {
+            const missed = Array.isArray(notice.missedParts) ? notice.missedParts.length : (notice.missedParts || 0);
+            this._toast(`Re-imported ${record.accountEmail || fallbackName}${partsTxt} — replaced ${notice.replaced} earlier import(s)` +
+                (missed ? `; ${missed} earlier part(s) were not in this import` : ''), missed ? 'warning' : 'success');
+        } else if (notice && notice.targetId === record.id) {
+            this._toast(`Merged into existing import for ${notice.accountEmail} — ${notice.partsCount} part(s) total`, 'success');
+        } else {
+            const photoCount = (record.photos && record.photos.filter(p => p.isMedia).length) || 0;
+            this._toast(`Imported: ${record.accountEmail || fallbackName}${partsTxt}${photoCount ? ` · ${photoCount} media file(s) extracted` : ''}`, 'success');
         }
     }
 
@@ -132,6 +142,9 @@ class GoogleWarrantUI {
         if (this.activeSection === 'location') {
             const imp = this.currentImport;
             setTimeout(() => { if (this.activeSection === 'location' && this.currentImport === imp) this.initLocationMap(imp); }, 0);
+        } else if (this.activeSection === 'other') {
+            // Image files kept from unrecognised parts (e.g. Gemini uploads)
+            setTimeout(() => { if (this.activeSection === 'other') this._hydratePhotoThumbs(null, '#gwp-content-area .gwp-raw-thumb'); }, 50);
         }
     }
 
@@ -161,8 +174,15 @@ class GoogleWarrantUI {
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
                         </svg>
-                        Import Google Warrant ZIP
+                        Import Google Warrant ZIP(s)
                     </button>
+                    <button onclick="window.googleWarrantUI.handleFilePicker({ folder: true })" class="gwp-btn-outline" title="Pick the folder that holds every part of the return">
+                        Import Folder
+                    </button>
+                </div>
+                <div class="gwp-empty-hint">
+                    Large returns are split into many ZIPs — select all of them (or pick their folder) and they are imported together as one return.
+                    Picking a single part also pulls in its sibling parts from the same folder.
                 </div>
                 <div class="gwp-empty-hint">
                     Place ZIP files in the case Evidence or Warrants/Production folder for auto-detection.
@@ -238,7 +258,7 @@ class GoogleWarrantUI {
         const tasksCount = imp.tasks?.length || 0;
         const meetCount = imp.meetHistory?.length || 0;
         const linkedCount = imp.linkedByPhone?.length || 0;
-        const aggCount = imp.aggregatedActivity?.length || 0;
+        const aggCount = (imp.aggregatedActivity?.length || 0) + (imp.accessLogActivity?.length || 0);
         const photosCount = imp.photos?.filter(p => p.isMedia !== false).length || 0;
 
         const sections = [
@@ -274,7 +294,10 @@ class GoogleWarrantUI {
             </nav>
             <div class="gwp-nav-footer">
                 <button onclick="window.googleWarrantUI.handleFilePicker()" class="gwp-btn-outline gwp-btn-full">
-                    Import Another ZIP
+                    Import ZIP(s)
+                </button>
+                <button onclick="window.googleWarrantUI.handleFilePicker({ folder: true })" class="gwp-btn-outline gwp-btn-full" title="Pick the folder that holds every part of a split return">
+                    Import Folder
                 </button>
                 <button onclick="window.googleWarrantUI.deleteImport('${imp.id}')" class="gwp-btn-danger-sm gwp-btn-full">
                     Remove Import
@@ -1533,9 +1556,25 @@ class GoogleWarrantUI {
     _renderActivity(imp) {
         const myAct = imp.myActivity || [];
         const agg = imp.aggregatedActivity || [];
-        if (!myAct.length && !agg.length) return '<div class="gwp-empty-section">No activity records.</div>';
+        const access = imp.accessLogActivity || [];
+        if (!myAct.length && !agg.length && !access.length) return '<div class="gwp-empty-section">No activity records.</div>';
 
         let html = '';
+        if (access.length) {
+            // Access log (IP activity) — friendly column names first, any
+            // extra columns the return carried after them.
+            const rows = access.slice(0, 500).map(a => {
+                const out = { 'Time': a.timestamp || '', 'IP Address': a.ip || '', 'Activity': a.activity || '', 'Details': a.details || '' };
+                for (const k of Object.keys(a || {})) {
+                    if (k === 'timestamp' || k === 'ip' || k === 'activity' || k === 'details' || k.startsWith('_')) continue;
+                    out[k] = a[k];
+                }
+                return out;
+            });
+            html += `<div class="gwp-section-header"><h2>Access Log (IP Activity)</h2><span class="gwp-count-badge">${access.length.toLocaleString()}</span></div>`;
+            html += this._renderRowsTable(rows);
+            if (access.length > 500) html += `<div class="gwp-note">Showing first 500 of ${access.length.toLocaleString()} records.</div>`;
+        }
         if (myAct.length) {
             html += `<div class="gwp-section-header"><h2>My Activity</h2><span class="gwp-count-badge">${myAct.length.toLocaleString()}</span></div>`;
             html += this._renderRowsTable(myAct.slice(0, 500));
@@ -1956,10 +1995,34 @@ class GoogleWarrantUI {
         }
         if (bucket.other?.length) {
             for (const f of bucket.other) {
-                html += `<div class="gwp-raw-file"><div class="gwp-raw-name">📎 ${this._escape(f.name)} (${this._escape(f.ext)})</div>${f.text ? `<pre class="gwp-raw-content">${this._escape(f.text.slice(0, 20000))}</pre>` : '<div class="gwp-note">Binary file — not displayed.</div>'}</div>`;
+                const size = f.size ? ` · ${(f.size / 1048576 >= 1 ? (f.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(f.size / 1024)) + ' KB')}` : '';
+                let body;
+                if (f.text) {
+                    body = `<pre class="gwp-raw-content">${this._escape(f.text.slice(0, 20000))}</pre>`;
+                } else if (f.relPath) {
+                    // Kept file (a type VIPER has no viewer for) — copied to the case folder.
+                    const rel = this._escape(f.relPath);
+                    const isImg = /^image\//.test(f.mimeType || '') && (f.size || 0) <= 25 * 1048576;
+                    // Main only opens known types (OPENABLE_EXT); others: Show in folder only.
+                    const canOpen = GoogleWarrantUI.OPENABLE_RE.test(f.relPath);
+                    body = `${isImg ? `<div class="gwp-photo-thumb gwp-raw-thumb" data-rel="${rel}" data-video="0" style="width:160px;height:120px;margin:6px 0;"><div class="gwp-photo-loading">…</div></div>` : ''}
+                        <div class="gwp-note">${f.mimeType ? this._escape(f.mimeType) + ' — ' : ''}saved in the case folder.
+                            ${canOpen ? `<button class="gwp-btn-sm" data-rel="${rel}" onclick="window.googleWarrantUI.openRawFile(this, false)">Open</button>` : ''}
+                            <button class="gwp-btn-sm" data-rel="${rel}" onclick="window.googleWarrantUI.openRawFile(this, true)">Show in folder</button></div>`;
+                } else {
+                    body = `<div class="gwp-note">${this._escape(f.note || 'Binary file — not displayed.')}</div>`;
+                }
+                html += `<div class="gwp-raw-file"><div class="gwp-raw-name">📎 ${this._escape(f.name)} (${this._escape(f.ext)})${size}</div>${body}</div>`;
             }
         }
         return html;
+    }
+
+    async openRawFile(btn, reveal) {
+        const rel = btn && btn.getAttribute('data-rel');
+        if (!rel) return;
+        const res = await this.module.openMedia(rel, !!reveal);
+        if (!res || !res.success) this._toast('Could not open file: ' + ((res && res.error) || 'unknown error'), 'error');
     }
 
     _escape(s) {

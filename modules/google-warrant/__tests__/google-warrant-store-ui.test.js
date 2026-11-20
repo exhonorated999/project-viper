@@ -409,6 +409,74 @@ function email(i) {
         ok(reExt === gwStore.OPENABLE_EXT.slice().sort().join(), 'UI OPENABLE_RE matches main OPENABLE_EXT');
     }
 
+    // ── UI: split returns — access log, kept files, picker, toasts ──
+    {
+        const { sb, calls, toasts, runTimers } = makeSandbox();
+        const m = new sb.window.GoogleWarrantModule('c1', 'CASE-1', 'Case');
+        const ui = new sb.window.GoogleWarrantUI('cont', m);
+        m.ui = ui; sb.googleWarrantUI = ui;
+        const imp = {
+            id: 'sp1', fileName: 'a.zip (+2 parts)', accountEmail: 'sus@x.com', emails: [], locationRecords: [],
+            sourceFiles: ['C:\\r\\a.zip', 'C:\\r\\b.zip', 'C:\\r\\c.zip'],
+            accessLogActivity: [
+                { timestamp: '2024-05-01 10:00:00 Z', activity: 'Login', ip: '203.0.113.10', details: '<script>x</script>', 'Device Type': 'Phone' },
+                { timestamp: '2024-05-02 11:00:00 Z', activity: 'Logout', ip: '198.51.100.7', details: '' },
+            ],
+            rawSections: { 'Gemini.Uploads': { html: [], csv: [], json: [], other: [
+                { name: 'file_1.gtraw', ext: 'gtraw', size: 2048, relPath: 'Gemini.Uploads/file_1.gtraw', mimeType: 'image/jpeg' },
+                { name: 'scan.pdf', ext: 'pdf', size: 4096, relPath: 'Gemini.Uploads/scan.pdf', mimeType: 'application/pdf' },
+                { name: 'lost.bin', ext: 'bin', size: 1, relPath: null },
+            ] } },
+        };
+        m.imports = [imp];
+
+        const nav = ui._renderNav(imp);
+        ok(/data-section="activity"/.test(nav), 'Activity tab shows when only the access log has rows');
+        ok(/handleFilePicker\(\{ folder: true \}\)/.test(nav) && /Import ZIP\(s\)/.test(nav), 'nav footer offers Import ZIP(s) + Import Folder');
+        const empty = ui._renderEmptyState();
+        ok(/handleFilePicker\(\{ folder: true \}\)/.test(empty) && /split into many ZIPs/.test(empty), 'empty state has Import Folder + split-return hint');
+
+        const act = ui._renderActivity(imp);
+        ok(/Access Log \(IP Activity\)/.test(act) && /203\.0\.113\.10/.test(act) && /198\.51\.100\.7/.test(act), 'access log rows rendered');
+        ok(/<th>IP Address<\/th>/.test(act) && /<th>Device Type<\/th>/.test(act), 'friendly headers + extra CSV columns');
+        ok(/&lt;script&gt;/.test(act) && !/<script>x/.test(act), 'access log cells escaped');
+        ok(/No activity records/.test(ui._renderActivity({})), 'empty activity message still shown');
+
+        const other = ui._renderOther(imp);
+        ok(/gwp-raw-thumb" data-rel="Gemini\.Uploads\/file_1\.gtraw"/.test(other), 'kept image (sniffed JPEG) gets a thumbnail');
+        ok(!/data-rel="Gemini\.Uploads\/file_1\.gtraw" onclick="window\.googleWarrantUI\.openRawFile\(this, false\)"/.test(other) &&
+           /data-rel="Gemini\.Uploads\/file_1\.gtraw" onclick="window\.googleWarrantUI\.openRawFile\(this, true\)"/.test(other), '.gtraw: Show in folder only (main will not open it)');
+        ok(/data-rel="Gemini\.Uploads\/scan\.pdf" onclick="window\.googleWarrantUI\.openRawFile\(this, false\)"/.test(other), 'kept PDF gets Open');
+        ok(/Binary file — not displayed/.test(other), 'unsaved kept file labelled');
+        await ui.openRawFile({ getAttribute: () => 'Gemini.Uploads/scan.pdf' }, true);
+        const oc = calls.filter(c => c[0] === 'open').pop();
+        ok(oc && oc[1].relPath === 'Gemini.Uploads/scan.pdf' && oc[1].reveal === true, 'openRawFile → open-media');
+
+        // Other section hydrates kept-image thumbs
+        let sel = null;
+        ui._hydratePhotoThumbs = (media, s) => { sel = s; };
+        ui.activeSection = 'other';
+        ui._afterSectionRender();
+        await runTimers();
+        ok(sel === '#gwp-content-area .gwp-raw-thumb', 'Other Data section hydrates kept-image thumbnails');
+
+        // picker passes options through; toasts mention parts / replacements
+        let pickOpts = 'unset';
+        m.importFromPicker = async (o) => { pickOpts = o; return imp; };
+        ui.render = () => {}; ui._showLoading = () => {};
+        m._mergeNotice = null;
+        await ui.handleFilePicker({ folder: true });
+        ok(pickOpts && pickOpts.folder === true, 'handleFilePicker passes {folder:true} to the module');
+        ok(/Imported: sus@x\.com · 3 parts/.test(toasts[toasts.length - 1][0]), 'toast shows the parts count');
+        m._mergeNotice = { targetId: 'sp1', replaced: 2, partsCount: 3, missedParts: ['C:\\r\\old.zip'], accountEmail: 'sus@x.com' };
+        await ui.handleFilePicker();
+        const t = toasts[toasts.length - 1];
+        ok(/replaced 2 earlier import/.test(t[0]) && /1 earlier part\(s\) were not in this import/.test(t[0]) && t[1] === 'warning', 'replace toast warns about earlier parts not covered');
+        m._mergeNotice = { targetId: 'sp1', accountEmail: 'sus@x.com', partsCount: 4 };
+        await ui.handleFilePicker();
+        ok(/Merged into existing import for sus@x\.com — 4 part/.test(toasts[toasts.length - 1][0]), 'account merge toast unchanged');
+    }
+
     // ═══ 4. Static wiring ═══
     {
         const main = fs.readFileSync(path.join(ROOT, 'electron-main.js'), 'utf8');

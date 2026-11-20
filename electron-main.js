@@ -13831,7 +13831,8 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
       path.join(casesDir, caseNumber, 'Warrants', 'Production')
     ];
 
-    const googlePattern = /\.\d+\.(GoogleAccount|GooglePlayStore|Mail|LocationHistory|GoogleChat|Hangouts|GooglePay|Drive)\./i;
+    // Per-product ZIP names: <email>.<gaiaId>.<Service>.<Resource>_NNN[.x].zip
+    const googlePattern = /\.\d{6,}\.[A-Za-z]\w*\.[A-Za-z]\w*_\d+(?:\.[\w]+)*\.zip$|\.\d+\.(GoogleAccount|GooglePlayStore|Mail|LocationHistory|GoogleChat|Hangouts|GooglePay|Drive)\./i;
     const files = [];
 
     for (const dir of dirsToScan) {
@@ -13885,12 +13886,53 @@ ipcMain.handle('google-warrant-scan', async (event, { caseNumber }) => {
   }
 });
 
-ipcMain.handle('google-warrant-import', async (event, { filePath, caseNumber }) => {
+/**
+ * Sibling parts of a split Google return next to the picked ZIP:
+ *   <email>.<gaiaId>.<Service>.<Resource>_NNN.zip → every ZIP with the same
+ *   "<email>.<gaiaId>." prefix;  <prod#>-<YYYYMMDD>-<n>.zip → same "<prod#>-<date>-".
+ * Large returns are dozens of ZIPs; importing one of them used to give
+ * partial evidence.  Returns the picked path first, then the rest (sorted).
+ */
+function _gwSiblingParts(filePath) {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  let m = base.match(/^(.+?\.\d{6,}\.)[A-Za-z]\w*\.[A-Za-z]\w*_\d+(?:\.[\w]+)*\.zip$/i);
+  if (!m) m = base.match(/^(\d+-\d{8}-)\d+\.zip$/i);
+  if (!m) return [filePath];
+  const prefix = m[1].toLowerCase();
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch (_) { return [filePath]; }
+  const out = [];
+  for (const n of names.sort()) {
+    if (!/\.zip$/i.test(n) || !n.toLowerCase().startsWith(prefix) || n === base) continue;
+    const full = path.join(dir, n);
+    try { if (fs.statSync(full).isFile()) out.push(full); } catch (_) {}
+    if (out.length >= 5000) break;
+  }
+  return [filePath].concat(out);
+}
+
+ipcMain.handle('google-warrant-import', async (event, { filePath, filePaths, caseNumber, siblings } = {}) => {
   try {
+    // Parts of one return: several picked together, or the picked ZIP plus
+    // its sibling parts in the same folder.
+    let parts = Array.isArray(filePaths) ? filePaths.filter(p => typeof p === 'string' && p) : [];
+    if (!parts.length && typeof filePath === 'string' && filePath) parts = [filePath];
+    parts = Array.from(new Set(parts.map(p => path.resolve(p))));
+    if (!parts.length) throw new Error('No file selected');
+    filePath = parts[0];
     const stat = fs.statSync(filePath);
+    let siblingsAdded = 0;
+    if (parts.length === 1 && !stat.isDirectory() && siblings !== false) {
+      parts = _gwSiblingParts(filePath);
+      siblingsAdded = parts.length - 1;
+      if (siblingsAdded) console.log(`[google-warrant] ${siblingsAdded} sibling part(s) of ${path.basename(filePath)} added`);
+    }
+    const extraPaths = parts.slice(1);
     // Fingerprint the original alongside the parse (Source Validation).
-    // A folder of Google's per-product ZIPs is fingerprinted as a folder.
-    const fingerprintP = _sourceFingerprint({ path: filePath });
+    // A folder of Google's per-product ZIPs is fingerprinted as a folder;
+    // a split return as all of its parts.
+    const fingerprintP = _sourceFingerprint(extraPaths.length ? { path: filePath, extraPaths } : { path: filePath });
 
     // Build a media output root for any GooglePhotos.PhotoResourceLegal / video
     // payloads the parser encounters. Without this, large binary attachments
@@ -13917,19 +13959,21 @@ ipcMain.handle('google-warrant-import', async (event, { filePath, caseNumber }) 
     let storeKey = null;
     if (mediaRoot) {
       storeDir = path.join(mediaRoot, '_store');
-      storeKey = gwStore.storeKeyFor(filePath);
+      // A split return gets the same store whichever of its parts was picked.
+      storeKey = gwStore.storeKeyFor(extraPaths.length ? parts.slice().sort()[0] : filePath);
       try { writer = gwStore.openWriter(storeDir, storeKey); }
       catch (e) { console.error('[google-warrant] store unavailable, keeping data inline:', e.message); writer = null; }
     }
     let sizeMB = 0;
     try { sizeMB = stat.isDirectory() ? 0 : Math.round(stat.size / 1048576); } catch (_) {}
-    _crashMark('google-warrant:import-start', { kind: stat.isDirectory() ? 'folder' : 'zip', sizeMB });
+    _crashMark('google-warrant:import-start', { kind: stat.isDirectory() ? 'folder' : (extraPaths.length ? 'parts' : 'zip'), sizeMB, parts: parts.length });
     let data;
     try {
       data = await gwParser.parseOuterZip(input, {
         security,
         mediaRoot,
         inputName: path.basename(filePath).replace(/\.zip$/i, ''),
+        extraPaths,
         sink: writer ? writer.sink : null,
         storeDir: writer ? storeDir : null,
         storeKey: writer ? writer.overflowKey : null,   // overflow is staged, swapped in by finish()
@@ -13948,7 +13992,7 @@ ipcMain.handle('google-warrant-import', async (event, { filePath, caseNumber }) 
       locations: data && data.store ? data.store.locationCount : (data && data.locationRecords ? data.locationRecords.length : 0),
     });
     if (data) data.sourceIntegrity = await fingerprintP;
-    return { success: true, data };
+    return { success: true, data, parts, siblingsAdded };
   } catch (error) {
     console.error('Google warrant import error:', error);
     try { if (crashLog) crashLog.error('google-warrant import failed', error); } catch (_) {}
@@ -14164,15 +14208,20 @@ ipcMain.handle('google-warrant-open-media', async (event, { caseNumber, relPath,
   }
 });
 
-ipcMain.handle('google-warrant-pick-file', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select Google Warrant Return ZIP',
-    properties: ['openFile'],
+ipcMain.handle('google-warrant-pick-file', async (event, opts) => {
+  opts = opts || {};
+  const result = await dialog.showOpenDialog(mainWindow, opts.folder ? {
+    title: 'Select the folder holding the Google return ZIPs',
+    properties: ['openDirectory'],
+  } : {
+    title: 'Select Google Warrant Return ZIP(s) — select every part of a split return',
+    properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'ZIP Archives', extensions: ['zip'] }]
   });
   restoreFocus();
   if (result.canceled || !result.filePaths.length) return null;
-  return result.filePaths[0];
+  // One pick → a path (older renderers expect a string); several → an array.
+  return result.filePaths.length === 1 ? result.filePaths[0] : result.filePaths.slice();
 });
 
 // ─── META Warrant IPC ───────────────────────────────────────────────────

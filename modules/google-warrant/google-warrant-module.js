@@ -137,11 +137,17 @@ class GoogleWarrantModule {
             });
 
             if (result.success && result.files.length > 0) {
-                // Mark which files are already imported
-                const importedPaths = this.imports.map(i => i.filePath);
+                // Mark which files are already imported (as a part of any import)
+                const norm = (p) => String(p || '').replace(/\//g, '\\').toLowerCase();
+                const importedPaths = new Set();
+                for (const i of this.imports) {
+                    if (!i) continue;
+                    importedPaths.add(norm(i.filePath));
+                    for (const f of (i.sourceFiles || [])) importedPaths.add(norm(f));
+                }
                 this.evidenceFiles = result.files.map(f => ({
                     ...f,
-                    alreadyImported: importedPaths.includes(f.path)
+                    alreadyImported: importedPaths.has(norm(f.path))
                 }));
             } else {
                 this.evidenceFiles = [];
@@ -166,10 +172,22 @@ class GoogleWarrantModule {
             throw new Error('Google Warrant IPC handler not available');
         }
 
-        const result = await window.electronAPI.googleWarrantImport({ filePath, caseNumber: this.caseNumber });
+        // Several parts picked together → one import.
+        const picked = Array.isArray(filePath) ? filePath.filter(Boolean) : [filePath];
+        filePath = picked[0];
+        const result = await window.electronAPI.googleWarrantImport(picked.length > 1
+            ? { filePath, filePaths: picked, caseNumber: this.caseNumber }
+            : { filePath, caseNumber: this.caseNumber });
 
         if (!result.success) {
             throw new Error(result.error || 'Import failed');
+        }
+        // Every file that went into this import (main adds sibling parts).
+        const parts = (Array.isArray(result.parts) && result.parts.length) ? result.parts : picked;
+        filePath = parts[0];
+        if (!fileName || picked.length > 1 || parts.length > 1) {
+            const base = filePath.split(/[\\/]/).pop();
+            fileName = parts.length > 1 ? `${base} (+${parts.length - 1} part${parts.length > 2 ? 's' : ''})` : (fileName || base);
         }
 
         // Build import record
@@ -216,7 +234,7 @@ class GoogleWarrantModule {
             photos: result.data.photos || [],
             bundleSources: result.data.bundleSources || [],
             rawSections: result.data.rawSections || {},
-            sourceFiles: [filePath], // tracks which physical files contributed
+            sourceFiles: parts.slice(), // tracks which physical files contributed
             // Source Validation: SHA-256 of the original taken at import.
             sourceIntegrity: result.data.sourceIntegrity || null,
             sourceIntegrityByPath: result.data.sourceIntegrity ? { [filePath]: result.data.sourceIntegrity } : {},
@@ -240,13 +258,33 @@ class GoogleWarrantModule {
         // different slice of the per-service inner zips. We detect a
         // previously-imported record for the same account (+ overlapping
         // date range) and merge instead of creating a second card.
-        const existingMergeIdx = this._findMergeTarget(importRecord);
-        const sameFileIdx = this.imports.findIndex(i => i.filePath === filePath);
+        // A re-import that covers files already imported (the same ZIP, or
+        // parts that were imported one at a time before) REPLACES those
+        // imports — merging would count their data twice.
+        const norm = (p) => String(p || '').replace(/\//g, '\\').toLowerCase();
+        const newParts = new Set(parts.map(norm));
+        const overlapping = [];
+        this.imports.forEach((imp, i) => {
+            if (!imp) return;
+            const files = (imp.sourceFiles && imp.sourceFiles.length) ? imp.sourceFiles : [imp.filePath];
+            if (files.some(f => newParts.has(norm(f)))) overlapping.push(i);
+        });
+        const sameFileIdx = overlapping.length ? overlapping[0] : -1;
+        const existingMergeIdx = sameFileIdx >= 0 ? -1 : this._findMergeTarget(importRecord);
 
         if (sameFileIdx >= 0) {
-            // Re-import of the exact same file — replace (current behaviour)
+            // Note parts the old import had that this one does not cover.
+            const old = overlapping.map(i => this.imports[i]);
+            const missed = [];
+            for (const o of old) for (const f of (o.sourceFiles || [o.filePath])) if (f && !newParts.has(norm(f))) missed.push(f);
+            const oldKeys = [];
+            for (const o of old) if (this.hasStore(o)) oldKeys.push(...o.store.keys);
             this.imports[sameFileIdx] = importRecord;
-            this._mergeNotice = null;
+            for (const i of overlapping.slice(1).sort((a, b) => b - a)) this.imports.splice(i, 1);
+            this._dropUnusedStores(oldKeys);
+            this._mergeNotice = (overlapping.length > 1 || missed.length)
+                ? { targetId: importRecord.id, replaced: overlapping.length, partsCount: parts.length, missedParts: missed, accountEmail: importRecord.accountEmail }
+                : null;
         } else if (existingMergeIdx >= 0) {
             // Merge into the existing import for this account
             const merged = this._mergeImports(this.imports[existingMergeIdx], importRecord);
@@ -463,14 +501,17 @@ class GoogleWarrantModule {
     /**
      * Import via file picker
      */
-    async importFromPicker() {
+    async importFromPicker(opts) {
         if (!window.electronAPI?.googleWarrantPickFile) {
             throw new Error('File picker not available');
         }
 
-        const filePath = await window.electronAPI.googleWarrantPickFile();
-        if (!filePath) return null; // User cancelled
+        // A path, or an array when several parts were selected.
+        const picked = await window.electronAPI.googleWarrantPickFile(opts || {});
+        if (!picked || (Array.isArray(picked) && !picked.length)) return null; // User cancelled
 
+        if (Array.isArray(picked) && picked.length > 1) return this.importWarrant(picked);
+        const filePath = Array.isArray(picked) ? picked[0] : picked;
         const fileName = filePath.split(/[\\/]/).pop();
         return this.importWarrant(filePath, fileName);
     }
@@ -483,14 +524,18 @@ class GoogleWarrantModule {
         this.imports = this.imports.filter(i => i.id !== importId);
         this.saveData();
         // Remove its e-mail / location store unless another import still uses it.
-        if (this.hasStore(gone) && window.electronAPI?.googleWarrantStoreDelete) {
-            const inUse = new Set();
-            for (const i of this.imports) if (this.hasStore(i)) i.store.keys.forEach(k => inUse.add(k));
-            const keys = gone.store.keys.filter(k => !inUse.has(k));
-            if (keys.length) {
-                window.electronAPI.googleWarrantStoreDelete({ caseNumber: this.caseNumber, keys })
-                    .catch(e => console.warn('[google-warrant] store delete failed:', e));
-            }
+        if (this.hasStore(gone)) this._dropUnusedStores(gone.store.keys);
+    }
+
+    /** Delete the SQLite stores among `keys` that no import uses any more. */
+    _dropUnusedStores(keys) {
+        if (!keys || !keys.length || !window.electronAPI?.googleWarrantStoreDelete) return;
+        const inUse = new Set();
+        for (const i of this.imports) if (this.hasStore(i)) i.store.keys.forEach(k => inUse.add(k));
+        const drop = Array.from(new Set(keys)).filter(k => !inUse.has(k));
+        if (drop.length) {
+            window.electronAPI.googleWarrantStoreDelete({ caseNumber: this.caseNumber, keys: drop })
+                .catch(e => console.warn('[google-warrant] store delete failed:', e));
         }
     }
 

@@ -222,7 +222,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Google Warrant Parser
   googleWarrantScan: (data) => ipcRenderer.invoke('google-warrant-scan', data),
   googleWarrantImport: (data) => ipcRenderer.invoke('google-warrant-import', data),
-  googleWarrantPickFile: () => ipcRenderer.invoke('google-warrant-pick-file'),
+  googleWarrantPickFile: (opts) => ipcRenderer.invoke('google-warrant-pick-file', opts),
   googleWarrantReadMedia: (data) => ipcRenderer.invoke('google-warrant-read-media', data),
   googleWarrantGetMediaUrl: (data) => ipcRenderer.invoke('google-warrant-get-media-url', data),
   googleWarrantOpenMedia: (data) => ipcRenderer.invoke('google-warrant-open-media', data),

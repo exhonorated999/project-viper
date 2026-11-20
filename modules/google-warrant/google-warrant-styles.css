@@ -528,8 +528,8 @@
 .gwp-empty-icon { font-size: 48px; margin-bottom: 16px; }
 .gwp-empty h3 { font-size: 20px; font-weight: 600; color: #fff; margin-bottom: 8px; }
 .gwp-empty p { font-size: 0.93em; color: rgba(255,255,255,0.5); max-width: 400px; margin-bottom: 20px; }
-.gwp-empty-actions { margin-bottom: 16px; }
-.gwp-empty-hint { font-size: 0.8em; color: rgba(255,255,255,0.3); margin-bottom: 20px; }
+.gwp-empty-actions { margin-bottom: 16px; display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.gwp-empty-hint { font-size: 0.8em; color: rgba(255,255,255,0.3); margin-bottom: 20px; max-width: 460px; }
 .gwp-empty-section { display: flex; align-items: center; justify-content: center; min-height: 200px; color: rgba(255,255,255,0.3); font-size: 0.93em; }
 
 /* Loading */

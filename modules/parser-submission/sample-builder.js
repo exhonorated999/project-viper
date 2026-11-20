@@ -85,6 +85,11 @@ const MAX_FILES = 50_000;
 const MAX_STRUCTURE_DEPTH = 32;
 const MAX_NODES_PER_FILE = 100_000;
 const ENVELOPE_SOFT_CAP_BYTES = 8 * 1024 * 1024;    // 8 MB
+// The dashboard (/api/parser-submissions) rejects request bodies over
+// 16 MiB.  The body is { envelope, submitter } and the submitter repeats
+// the notes, so the envelope itself is held well under that.
+const SERVER_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
+const ENVELOPE_HARD_CAP_BYTES = 12 * 1024 * 1024;
 const PEEK_BYTES = 4096;
 const MAX_ARCHIVE_DEPTH = 4;                        // outer.zip → inner.zip → ... — guards zip-bombs
 const MAX_INNER_ARCHIVE_BYTES = 64 * 1024 * 1024;   // per inner zip; skip absurdly large
@@ -2211,6 +2216,81 @@ function approxEntrySize(entry) {
     catch { return 256; }
 }
 
+function _jsonBytes(v) {
+    try { return Buffer.byteLength(JSON.stringify(v), 'utf8'); }
+    catch { return 256; }
+}
+
+/**
+ * Hard size fit — the last step before an envelope is returned.  The soft
+ * caps keep normal envelopes small, but a folder holding many phone dumps,
+ * or a walk that overshoots the soft cap with metadata-only entries, could
+ * still produce a body the dashboard rejects (16 MiB).  Rows are removed
+ * from the least useful end until the envelope fits:
+ *   1. device directory rows (deepest first)
+ *   2. plist profiles that are not known artifacts
+ *   3. SQLite profiles that are not known artifacts
+ *   4. tree entries (last first; counted in truncated_files)
+ *   5. known-artifact plist profiles
+ *   6. known-artifact SQLite profiles
+ * Each removal is counted in root_summary.size_trimmed so the reader knows
+ * the envelope is partial.  Returns the final size in UTF-8 bytes.
+ */
+function _fitEnvelope(env, cap) {
+    let size = _jsonBytes(env);
+    if (!(cap > 0) || size <= cap) return size;
+    const rs = env.root_summary || {};
+    const dumps = Array.isArray(rs.device_dumps) ? rs.device_dumps : [];
+    const before = size;
+    const trimmed = {};
+    const steps = [
+        { key: 'device_dir_rows', lists: dumps.map(d => [d.directories && d.directories.rows, d.directories, 'omitted']), keepHead: 50 },
+        { key: 'device_plists', lists: dumps.map(d => [d.plists && d.plists.items, d.plists, 'omitted_for_size']), pick: it => !it.artifact },
+        { key: 'device_sqlite_dbs', lists: dumps.map(d => [d.sqlite && d.sqlite.dbs, d.sqlite, 'omitted_for_size']), pick: it => !it.artifact },
+        { key: 'tree_entries', lists: [[env.tree, rs, 'truncated_files']] },
+        { key: 'device_known_plists', lists: dumps.map(d => [d.plists && d.plists.items, d.plists, 'omitted_for_size']) },
+        { key: 'device_known_sqlite_dbs', lists: dumps.map(d => [d.sqlite && d.sqlite.dbs, d.sqlite, 'omitted_for_size']) },
+    ];
+    for (const step of steps) {
+        if (size <= cap) break;
+        // Candidates from every list, tail first and interleaved across
+        // dumps so no single dump loses everything.
+        const cands = [];
+        for (const [arr, owner, field] of step.lists) {
+            if (!Array.isArray(arr)) continue;
+            for (let i = arr.length - 1; i >= (step.keepHead || 0); i--) {
+                if (step.pick && !step.pick(arr[i])) continue;
+                cands.push({ arr, owner, field, i });
+            }
+        }
+        if (!cands.length) continue;
+        cands.sort((a, b) => b.i - a.i);
+        const over = size - cap + Math.ceil(cap * 0.02);
+        let freed = 0;
+        const drop = new Map();   // arr → Set(idx)
+        for (const c of cands) {
+            if (freed >= over) break;
+            freed += _jsonBytes(c.arr[c.i]) + 1;
+            if (!drop.has(c.arr)) drop.set(c.arr, { owner: c.owner, field: c.field, idx: new Set() });
+            drop.get(c.arr).idx.add(c.i);
+        }
+        let n = 0;
+        for (const [arr, d] of drop) {
+            const keep = arr.filter((_, i) => !d.idx.has(i));
+            arr.length = 0;
+            for (const x of keep) arr.push(x);
+            if (d.owner) d.owner[d.field] = (d.owner[d.field] || 0) + d.idx.size;
+            n += d.idx.size;
+        }
+        trimmed[step.key] = n;
+        size = _jsonBytes(env);
+    }
+    rs.size_trimmed = Object.assign({ cap_bytes: cap, before_bytes: before }, trimmed);
+    size = _jsonBytes(env);
+    rs.size_trimmed.after_bytes = size;
+    return _jsonBytes(env);
+}
+
 // ─── Walkers ───────────────────────────────────────────────────────────────
 
 function readPeek(absPath, n) {
@@ -2565,11 +2645,12 @@ async function buildSampleEnvelope(rootPath, opts = {}) {
                 counters.pdfBufKept++;
             }
         };
-        // Several dumps share the envelope budget.
+        // Several dumps share the envelope budget (every dump, not just the
+        // first four — the total has to stay under the server's body limit).
         const n = devicePlan.sources.length;
         const lim = Object.assign({}, deviceDump.DEFAULT_LIMITS, opts.deviceLimits || {});
         if (n > 1) {
-            for (const k of ['budgetDirsBytes', 'budgetSqliteBytes', 'budgetPlistBytes']) lim[k] = Math.floor(lim[k] / Math.min(n, 4));
+            for (const k of ['budgetDirsBytes', 'budgetSqliteBytes', 'budgetPlistBytes']) lim[k] = Math.floor(lim[k] / n);
         }
         const skipAbs = new Set();
         for (let i = 0; i < n; i++) {
@@ -2707,7 +2788,7 @@ async function buildSampleEnvelope(rootPath, opts = {}) {
         if (typeof opts.onProgress === 'function') {
             try { opts.onProgress({ phase: 'done', files: summary.total_files }); } catch {}
         }
-        return ({
+        const env = ({
             schema_version: SCHEMA_VERSION,
             scout_version: opts.appVersion || '',
             submitted_at: new Date().toISOString(),
@@ -2720,6 +2801,8 @@ async function buildSampleEnvelope(rootPath, opts = {}) {
             root_summary: summary,
             tree: entries,
         });
+        _fitEnvelope(env, typeof opts.envelopeHardCapBytes === 'number' ? opts.envelopeHardCapBytes : ENVELOPE_HARD_CAP_BYTES);
+        return env;
     });
 }
 
@@ -2766,5 +2849,9 @@ module.exports = {
         MAX_FILES,
         PER_FILE_BUDGET_BYTES,
         ENVELOPE_SOFT_CAP_BYTES,
+        ENVELOPE_HARD_CAP_BYTES,
+        SERVER_BODY_LIMIT_BYTES,
+        _fitEnvelope,
+        _jsonBytes,
     },
 };

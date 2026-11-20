@@ -413,6 +413,120 @@ function colShape(db, table, col) {
     try { await buildSampleEnvelope(TGZ, { formatCategory: 'mobile_forensics' }); } catch (e) { tgzErr = e; }
     ok('tgz rejected with guidance', tgzErr && /extract it to a \.tar or a folder/.test(tgzErr.message), tgzErr && tgzErr.message);
 
+    // ── Envelope size: the dashboard rejects bodies over 16 MiB ────────────
+    const SB = require('../sample-builder')._internal;
+    const bodyBytes = (env, notes) => Buffer.byteLength(JSON.stringify({
+        envelope: env,
+        submitter: { format_category: 'mobile_forensics', provider_hint: 'GrayKey', submitter_email: 'a@example.org',
+            submitter_notes: notes, agency_name: 'x', reporter_name: 'x', product_slug: 'project-viper', app_version: '0', platform: 'desktop' },
+    }), 'utf8');
+    const NOTES = 'n'.repeat(20000);   // a long note — it is sent twice (envelope + submitter)
+    const MiB = 1024 * 1024;
+
+    section('size fit (unit)');
+    {
+        const big = (n, s) => Array.from({ length: n }, (_, i) => s(i));
+        const env = {
+            root_summary: {
+                truncated_files: 0,
+                device_dumps: [{
+                    directories: { rows: big(20000, i => ['<fs>/data/' + 'd'.repeat(60) + i, 1, 1, 1, 'x:1']) },
+                    plists: { items: big(100, i => ({ path: 'p' + i, keys: 'k'.repeat(4000) })).concat([{ path: 'known-plist', artifact: 'ios.wifi', keys: 'k'.repeat(4000) }]) },
+                    sqlite: { dbs: big(100, i => ({ path: 'd' + i, tables: 't'.repeat(8000) })).concat([{ path: 'known-db', artifact: 'ios.sms', tables: 't'.repeat(8000) }]) },
+                }],
+            },
+            tree: big(30000, i => ({ path: 'file_' + i, structure: 's'.repeat(600) })),
+        };
+        const before = SB._jsonBytes(env);
+        const cap = 2 * MiB;
+        const after = SB._fitEnvelope(env, cap);
+        const D0 = env.root_summary.device_dumps[0], st = env.root_summary.size_trimmed;
+        ok('fixture is over the cap', before > 18 * MiB, before);
+        ok('fits the cap', after <= cap && SB._jsonBytes(env) <= cap, after);
+        ok('size_trimmed recorded', st && st.cap_bytes === cap && st.before_bytes === before && st.after_bytes <= cap, st);
+        ok('known plist kept', D0.plists.items.some(p => p.artifact === 'ios.wifi'));
+        ok('known db kept', D0.sqlite.dbs.some(d => d.artifact === 'ios.sms'));
+        ok('first directory rows kept', D0.directories.rows.length >= 50 && /0$/.test(D0.directories.rows[0][0]), D0.directories.rows.length);
+        ok('omitted counters', D0.directories.omitted === st.device_dir_rows && (D0.plists.omitted_for_size || 0) === (st.device_plists || 0)
+            && env.root_summary.truncated_files === (st.tree_entries || 0), [st, D0.directories.omitted, env.root_summary.truncated_files]);
+        const small = { root_summary: {}, tree: [{ a: 1 }] };
+        ok('small envelope untouched', SB._fitEnvelope(small, cap) && !small.root_summary.size_trimmed);
+    }
+
+    section('size fit (GrayKey folder, tiny cap)');
+    {
+        const full = await buildSampleEnvelope(GK, { formatCategory: 'mobile_forensics', tmpDir: TMPDIR });
+        const fullBytes = SB._jsonBytes(full);
+        const cap = Math.floor(fullBytes * 0.85);
+        const envC = await buildSampleEnvelope(GK, { formatCategory: 'mobile_forensics', tmpDir: TMPDIR, envelopeHardCapBytes: cap });
+        const DC = envC.root_summary.device_dumps[0];
+        ok('trimmed under cap', SB._jsonBytes(envC) <= cap, [SB._jsonBytes(envC), cap]);
+        ok('size_trimmed set', !!envC.root_summary.size_trimmed, envC.root_summary.size_trimmed);
+        ok('sms.db still profiled', !!findDb(DC, 'ios.sms'));
+        ok('full build not trimmed', !full.root_summary.size_trimmed);
+        ok('NO SENTINEL LEAKS (trimmed)', leaks(envC).length === 0, leaks(envC));
+    }
+
+    // Worst case: one dump that saturates every budget (40k directory rows,
+    // 300 wide databases, 200 deep plists), then five of them in one folder.
+    section('size: budget-saturating dump');
+    const STRESS = path.join(ROOT, 'stress');
+    fs.mkdirSync(STRESS);
+    {
+        const W = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet', 'kilo', 'lima',
+            'mike', 'november', 'oscar', 'papa', 'quebec', 'romeo', 'sierra', 'tango', 'uniform', 'victor', 'whiskey', 'xray',
+            'yankee', 'zulu', 'amber', 'basil', 'cedar', 'dune', 'ember', 'fern', 'grove', 'heath', 'iris', 'jade', 'kelp', 'larch', 'moss', 'nettle'];
+        const letters = (n) => { let s = ''; do { s = String.fromCharCode(97 + (n % 26)) + s; n = Math.floor(n / 26); } while (n > 0); return s; };
+        const wide = makeDb(db => {
+            for (let t = 0; t < 15; t++) {
+                const cols = W.slice(0, 30).map(w => w + '_' + W[t] + ' TEXT').join(', ');
+                db.exec('CREATE TABLE ' + W[t] + '_records (' + cols + ')');
+                db.prepare('INSERT INTO ' + W[t] + '_records VALUES (' + W.slice(0, 30).map(() => '?').join(',') + ')').run(...W.slice(0, 30).map(() => 'value'));
+            }
+        });
+        const deep = {}; for (const a of W) { deep[a] = {}; for (const b of W) deep[a][b] = 1; }
+        const deepPlist = xmlPlist(deep);
+        const files = [['system/build.prop', Buffer.from('ro.build.version.release=14\nro.build.version.sdk=34\n')]];
+        for (let i = 0; i < 20000; i++) files.push(['data/data/com.example.' + letters(i + 1000) + '/files/f.bin', Buffer.from('x')]);
+        for (let i = 0; i < 300; i++) files.push(['data/data/com.example.store' + letters(i) + '/databases/store.db', wide]);
+        for (let i = 0; i < 200; i++) files.push(['data/data/com.example.conf' + letters(i) + '/files/settings.plist', deepPlist]);
+        writeTar(path.join(STRESS, 'dump1.tar'), files);
+    }
+    const t0 = Date.now();
+    const envS = await buildSampleEnvelope(path.join(STRESS, 'dump1.tar'), { formatCategory: 'mobile_forensics', tmpDir: TMPDIR, submitterNotes: NOTES });
+    const S = envS.root_summary.device_dumps && envS.root_summary.device_dumps[0];
+    const sBytes = SB._jsonBytes(envS), sBody = bodyBytes(envS, NOTES);
+    console.log('       one saturated dump: envelope ' + (sBytes / MiB).toFixed(2) + ' MiB, body ' + (sBody / MiB).toFixed(2) + ' MiB, '
+        + ((Date.now() - t0) / 1000).toFixed(1) + ' s');
+    ok('stress dump scanned', S && S.platform === 'android' && S.files === 20501, S && [S.platform, S.files]);
+    ok('directory budget saturated', S.directories.omitted > 0, S.directories.omitted);
+    ok('300 databases profiled', S.sqlite.profiled === 300, S.sqlite.profiled);
+    ok('sqlite budget saturated', (S.sqlite.omitted_for_size || 0) > 0 || S.sqlite.dbs.some(d => d.tables_trimmed || d.detail), [S.sqlite.omitted_for_size, S.sqlite.dbs.length]);
+    ok('one dump stays ≤ 7 MiB', SB._jsonBytes(S) <= 7 * MiB, SB._jsonBytes(S));
+    ok('envelope ≤ hard cap (budgets alone)', sBytes <= SB.ENVELOPE_HARD_CAP_BYTES && !envS.root_summary.size_trimmed, sBytes);
+    ok('body ≤ server limit', sBody <= SB.SERVER_BODY_LIMIT_BYTES, sBody);
+
+    section('size: five saturated dumps in one folder');
+    const MULTI = path.join(ROOT, 'multi');
+    fs.mkdirSync(MULTI);
+    for (let i = 1; i <= 5; i++) {
+        const dst = path.join(MULTI, 'dump' + i + '.tar');
+        try { fs.linkSync(path.join(STRESS, 'dump1.tar'), dst); } catch { fs.copyFileSync(path.join(STRESS, 'dump1.tar'), dst); }
+    }
+    const t1 = Date.now();
+    const envM = await buildSampleEnvelope(MULTI, { formatCategory: 'mobile_forensics', tmpDir: TMPDIR, submitterNotes: NOTES, deviceLimits: { mobileMinBytes: 0 } });
+    const mBytes = SB._jsonBytes(envM), mBody = bodyBytes(envM, NOTES);
+    console.log('       five saturated dumps: envelope ' + (mBytes / MiB).toFixed(2) + ' MiB, body ' + (mBody / MiB).toFixed(2) + ' MiB, '
+        + ((Date.now() - t1) / 1000).toFixed(1) + ' s');
+    ok('five dumps', (envM.root_summary.device_dumps || []).length === 5, (envM.root_summary.device_dumps || []).length);
+    ok('envelope ≤ hard cap', mBytes <= SB.ENVELOPE_HARD_CAP_BYTES, mBytes);
+    ok('body ≤ server limit', mBody <= SB.SERVER_BODY_LIMIT_BYTES, mBody);
+    if (process.env.DD_DUMP_ENVELOPES) {
+        fs.writeFileSync(path.join(process.env.DD_DUMP_ENVELOPES, 'env-one.json'), JSON.stringify(envS));
+        fs.writeFileSync(path.join(process.env.DD_DUMP_ENVELOPES, 'env-five.json'), JSON.stringify(envM));
+    }
+    ok('temp folder cleaned (stress)', fs.readdirSync(TMPDIR).length === 0, fs.readdirSync(TMPDIR));
+
     try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
     console.log('\n' + pass + ' passed, ' + fail + ' failed');
     process.exit(fail ? 1 : 0);

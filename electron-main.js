@@ -10495,7 +10495,8 @@ ipcMain.handle('parser-sample-build', async (event, opts) => {
         truncated_files: envelope.root_summary.truncated_files,
         max_depth: envelope.root_summary.max_depth,
         format_counts: envelope.root_summary.format_counts,
-        envelope_size_bytes: envelopeText.length,
+        envelope_size_bytes: Buffer.byteLength(envelopeText, 'utf8'),
+        size_trimmed: envelope.root_summary.size_trimmed || null,
         device: (envelope.root_summary.device_dumps || []).map(d => ({
           platform: d.platform,
           os_version: d.device && d.device.os_version,
@@ -10531,6 +10532,18 @@ ipcMain.handle('parser-sample-submit', async (event, opts) => {
       envelope,
       submitter: submitter || {},
     });
+    // The dashboard rejects bodies over 16 MiB with a bare 413; say why
+    // before uploading anything.
+    const { SERVER_BODY_LIMIT_BYTES } = require('./modules/parser-submission/sample-builder')._internal;
+    const bodyBytes = Buffer.byteLength(body, 'utf8');
+    if (bodyBytes > SERVER_BODY_LIMIT_BYTES) {
+      return {
+        success: false,
+        status: 413,
+        error: `Submission is ${(bodyBytes / 1048576).toFixed(1)} MB; the server accepts up to `
+          + `${SERVER_BODY_LIMIT_BYTES / 1048576} MB. Shorten the notes, or pick a smaller folder.`,
+      };
+    }
 
     // Use the global fetch (Electron / Node 18+).
     const resp = await fetch(url, {

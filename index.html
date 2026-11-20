@@ -11076,9 +11076,10 @@
                 + (d.sqlite_profiled || 0) + '/' + (d.sqlite_candidates || 0) + ' databases profiled, '
                 + (d.plists_profiled || 0) + ' plists, ' + (d.known_artifacts || 0) + ' known artifacts'
                 + (d.withheld ? ', ' + d.withheld + ' credential file(s) withheld' : '')).join('');
+            const trimNote = s.size_trimmed ? ' · trimmed to fit the upload limit' : '';
             brSetStatus(
                 '✓ Built: ' + (s.total_files || 0) + ' file(s), ' + mb + ' MB scanned · depth ' + (s.max_depth || 0)
-                + ' · ' + fcStr + truncNote + devNote + ' · envelope ' + envKb + ' KB',
+                + ' · ' + fcStr + truncNote + devNote + ' · envelope ' + envKb + ' KB' + trimNote,
                 'success'
             );
             btn.classList.add('hidden');

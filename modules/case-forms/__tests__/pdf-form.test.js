@@ -86,7 +86,11 @@ const vOf = (dict) => { const v = dict.lookup(PDFName.of('V')); return v && v.de
   // ---- inspect ---------------------------------------------------------------------------------
   const info = await PF.inspect(bytes);
   eq(info.pageCount, 2, 'inspect: page count');
-  eq(info.pages[0], { width: 612, height: 792, rotation: 0 }, 'inspect: page size');
+  eq(info.pages[0], { width: 612, height: 792, rotation: 0, crop: { x: 0, y: 0, width: 612, height: 792 } }, 'inspect: page size');
+  {
+    const pick = info.fields.find(f => f.name === 'Pick');
+    eq(pick.widgets.map(w => w.option), ['alpha', 'beta'], 'inspect: radio widgets carry their choice');
+  }
   eq(info.fields.map(f => f.name), ['Case Number', 'Last Name', 'First Name', 'Agree', 'Choice', 'Pick', 'Short', 'Notes', 'Page Two Box'],
     'inspect: reading order (rows within 4pt join, left to right, page 2 last)');
   const by = Object.fromEntries(info.fields.map(f => [f.name, f]));
@@ -153,6 +157,29 @@ const vOf = (dict) => { const v = dict.lookup(PDFName.of('V')); return v && v.de
   const flat = await PF.fill(bytes, { 'Case Number': '26-0002' }, { flatten: true });
   eq((await PDFDocument.load(flat.bytes)).getForm().getFields().length, 0, 'fill: flatten removes the fields');
   eq(flat.warnings, [], 'fill: flatten without warnings');
+
+  // ---- empty signature box (no appearance stream) listed FIRST — pdf-lib's flatten throws on it ----
+  {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const form = doc.getForm();
+    const ctx = doc.context;
+    const sig = ctx.obj({
+      Type: 'Annot', Subtype: 'Widget', FT: 'Sig', T: PDFString.of('Signature1'),
+      Rect: [50, 100, 250, 140], F: 4, P: page.ref,
+    });
+    const sigRef = ctx.register(sig);
+    page.node.addAnnot(sigRef);
+    form.acroForm.addField(sigRef);
+    form.createTextField('After Sig').addToPage(page, { x: 50, y: 300, width: 150, height: 18 });
+    const sbytes = Buffer.from(await doc.save());
+    const types = (await PF.inspect(sbytes)).fields.map(f => f.type).sort();
+    eq(types, ['signature', 'text'], 'sig-flatten: fixture has an empty signature + a text box');
+    const sf = await PF.fill(sbytes, { 'After Sig': 'kept' }, { flatten: true });
+    eq((await PDFDocument.load(sf.bytes)).getForm().getFields().length, 0, 'sig-flatten: no live fields left');
+    eq(sf.warnings, [], 'sig-flatten: no warnings');
+    eq(sf.filled, ['After Sig'], 'sig-flatten: text still filled');
+  }
 
   // ---- stale /Fields copies (the page draws different widgets) ---------------------------------
   {

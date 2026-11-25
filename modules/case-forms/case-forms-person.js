@@ -239,17 +239,56 @@
     }
 
     // The fill context for one form — same shape as the Forms tab builds.
-    function ctxFor(picks, people, vehicles, st) {
+    function ctxFor(caseCtx, picks, people, vehicles, st) {
         const P = {}, V = {};
         Object.keys(picks.people).forEach(slot => { const p = people.find(x => x.key === picks.people[slot]); if (p) P[slot] = p.record; });
         Object.keys(picks.vehicles).forEach(slot => { const v = vehicles.find(x => x.key === picks.vehicles[slot]); if (v) V[slot] = v.record; });
         let officer = {};
         try { officer = Tab().officerProfile ? Tab().officerProfile() : {}; } catch (_) { officer = {}; }
         return {
-            currentCase: M.ctx.currentCase || { caseNumber: M.ctx.caseNumber },
+            currentCase: caseCtx.currentCase || { caseNumber: caseCtx.caseNumber },
             suspects: Array.isArray(st.suspects) ? st.suspects : [],
-            offenseDescription: M.ctx.offenseDescription || '',
+            offenseDescription: caseCtx.offenseDescription || '',
             officer, people: P, vehicles: V, now: new Date(),
+        };
+    }
+
+    /**
+     * Everything needed to fill one form for one person (or for the case when
+     * listKey is empty): the form spec, the values the case supplies, a name
+     * for the file and who went in each slot. Shared with Field Work, which
+     * sends the same pre-filled form to a phone.
+     *   o: { ctx, setId, formId, listKey?, index?, name? }
+     */
+    async function prepareFill(o) {
+        const T = Tab(), S = Sources();
+        const caseCtx = o.ctx || {};
+        const spec = await api().caseFormsGetForm({ setId: o.setId, formId: o.formId });
+        if (!spec || !spec.success) throw new Error((spec && spec.error) || 'Could not open the form');
+        let st = {};
+        try { st = (caseCtx.getStores && caseCtx.getStores()) || {}; } catch (_) { st = {}; }
+        const people = S.peopleFromCase(st), vehicles = S.vehiclesFromCase(st);
+        let picks;
+        const role = o.listKey ? ROLE_OF[o.listKey] : null;
+        if (role) {
+            const key = o.listKey + ':' + o.index;
+            // A person with no name yet is still this person.
+            if (!people.some(p => p.key === key)) {
+                const rec = (st[o.listKey] || [])[o.index];
+                if (rec) people.push({ key, role, roleLabel: '', label: o.name || S.normPerson(rec).fullName || 'this ' + ROLE_LABEL[role], record: rec });
+            }
+            picks = picksForPerson(spec.form, key, role, people, vehicles);
+        } else {
+            picks = T.defaultPicks(spec.form.slots, people, spec.form.vehicleSlots, vehicles);
+        }
+        const input = ctxFor(caseCtx, picks, people, vehicles, st);
+        const rows = T.computeRows(spec, input, {});
+        return {
+            spec, input,
+            values: T.collectValues(rows.rows),
+            nameHint: T.nameHint(spec, input),
+            blank: rows.rows.filter(r => r.blank).length,
+            who: picksSummary(spec.form, picks, people, vehicles),
         };
     }
 
@@ -259,7 +298,6 @@
         M.choices.forEach(c => c.entries.forEach(en => { const id = entryId(c.setId, en.key); if (M.checked.has(id)) ids.push(id); }));
         const save = M.save && !!M.ctx.caseNumber;
         M.busy = true; M.results = []; M.progress = 0; M.total = ids.length; render();
-        const T = Tab(), S = Sources();
         for (const id of ids) {
             if (!M) return;
             const hit = findEntry(id);
@@ -268,23 +306,12 @@
             M.results.push(res);
             try {
                 if (!form) throw new Error('Form not found');
-                const spec = await api().caseFormsGetForm({ setId: hit.set.setId, formId: form.id });
-                if (!spec || !spec.success) throw new Error((spec && spec.error) || 'Could not open the form');
-                const st = stores();
-                const people = S.peopleFromCase(st), vehicles = S.vehiclesFromCase(st);
-                // A person with no name yet is still this person.
-                if (!people.some(p => p.key === M.personKey)) {
-                    const rec = (st[M.listKey] || [])[M.index];
-                    if (rec) people.push({ key: M.personKey, role: M.role, roleLabel: '', label: M.name, record: rec });
-                }
-                const picks = picksForPerson(spec.form, M.personKey, M.role, people, vehicles);
-                const input = ctxFor(picks, people, vehicles, st);
-                const rows = T.computeRows(spec, input, {});
-                res.blank = rows.rows.filter(r => r.blank).length;
-                res.who = picksSummary(spec.form, picks, people, vehicles);
+                const prep = await prepareFill({ ctx: M.ctx, setId: hit.set.setId, formId: form.id, listKey: M.listKey, index: M.index, name: M.name });
+                res.blank = prep.blank;
+                res.who = prep.who;
                 const fill = await api().caseFormsFill({
-                    setId: spec.set.id, formId: spec.form.id, mode: save ? 'case' : 'open',
-                    values: T.collectValues(rows.rows), caseNumber: M.ctx.caseNumber || '', nameHint: T.nameHint(spec, input),
+                    setId: prep.spec.set.id, formId: prep.spec.form.id, mode: save ? 'case' : 'open',
+                    values: prep.values, caseNumber: M.ctx.caseNumber || '', nameHint: prep.nameHint,
                 });
                 if (!fill || !fill.success) throw new Error((fill && fill.error) || 'Could not fill the form');
                 res.warnings = (fill.warnings || []).filter(w => w.code !== 'missing');
@@ -409,5 +436,5 @@
         if (box && scroll) box.scrollTop = scroll;
     }
 
-    return Object.assign({}, helpers, { open, close });
+    return Object.assign({}, helpers, { open, close, prepareFill });
 }));

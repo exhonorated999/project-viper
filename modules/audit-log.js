@@ -106,6 +106,8 @@ const EVENT_TYPES = Object.freeze({
   CASE_FORM_SET_INSTALLED: 'case_form_set_installed',
   CASE_FORM_SET_REMOVED: 'case_form_set_removed',
   CASE_FORM_FILLED:     'case_form_filled',
+  CASE_FORM_SENT_TO_PHONE: 'case_form_sent_to_phone',
+  CASE_FORM_SIGNED_ON_PHONE: 'case_form_signed_on_phone',
 
   // Update
   UPDATE_CHECKED:       'update_checked',

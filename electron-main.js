@@ -4091,6 +4091,23 @@ const _caseForms = (() => {
     defaultDir: () => app.getPath('documents'),
     audit: () => audit, AUDIT_EVENTS,
   });
+  // Agency forms completed and signed on a phone through Field Work
+  // (end-to-end encrypted with the Field Work form's key; see fieldwork-sign.js).
+  const FWS = require('./modules/case-forms/fieldwork-sign.js');
+  FWS.registerFieldWorkSignIpc(ipcMain, {
+    store, pdfForm: require('./modules/case-forms/pdf-form.js'),
+    checkValues: C.checkValues, outputFileName: C.outputFileName,
+    relay: FWS.createRelayClient({ fetch: (...a) => fetch(...a), base: () => CANVAS_API_BASE }),
+    render: FWS.makeMupdfRenderer(() => import('mupdf')),
+    writeCaseFile: (caseNumber, subdir, name, bytes) => _writeCaseMediaFile(caseNumber, subdir, name, bytes),
+    readCaseFile: (caseNumber, subdir, name) => {
+      const r = _readCaseMediaFile(caseNumber, subdir, name);
+      if (!r.success) throw new Error(r.error || 'File not found');
+      return Buffer.from(r.dataBase64, 'base64');
+    },
+    locked: () => caseForms.locked(),
+    audit: (ev, data) => { if (AUDIT_EVENTS[ev]) audit.write(AUDIT_EVENTS[ev], data); },
+  });
   return store;
 })();
 

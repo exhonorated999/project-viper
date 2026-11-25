@@ -31056,6 +31056,10 @@
 
                 syncBoard: (quiet) => _fieldWorkSyncConnectionBoard(quiet),
 
+                // Agency forms sent to the phone to fill in and sign.
+                formsAvailable: () => _caseFormsAvailable(),
+                formsCtx: () => _caseFormsCtx(),
+
                 audit: (evt, detail) => {
                     try {
                         audit(evt, Object.assign({

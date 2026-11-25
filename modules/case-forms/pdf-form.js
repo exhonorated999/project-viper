@@ -187,7 +187,13 @@ function widgetPage(doc, widget, refMap, pageRefs) {
 
 async function inspect(bytes) {
     const doc = await load(bytes);
-    const pages = doc.getPages().map(p => ({ width: p.getWidth(), height: p.getHeight(), rotation: p.getRotation().angle || 0 }));
+    const pages = doc.getPages().map(p => {
+        const out = { width: p.getWidth(), height: p.getHeight(), rotation: p.getRotation().angle || 0 };
+        // The visible area (what a viewer or renderer shows) — Field Work
+        // places boxes as fractions of it.
+        try { const c = p.getCropBox(); out.crop = { x: c.x, y: c.y, width: c.width, height: c.height }; } catch (_) { /* media box */ }
+        return out;
+    });
     const pageRefs = doc.getPages().map(p => p.ref.toString());
     const refMap = pageIndexMap(doc);
     let raw = [];
@@ -196,9 +202,20 @@ async function inspect(bytes) {
     const all = raw.map((field, order) => {
         const type = typeOf(field);
         const widgets = field.acroField.getWidgets();
-        const boxes = widgets.map(w => {
+        // A radio button's choice: its /Opt export value when the form has
+        // them (on-states are then just "0", "1"), else its on-state name.
+        let exportValues = null;
+        if (type === 'radio') { try { exportValues = field.acroField.getExportValues() || null; } catch (_) { exportValues = null; } }
+        const boxes = widgets.map((w, wi) => {
             const r = w.getRectangle();
-            return { page: widgetPage(doc, w, refMap, pageRefs), x: r.x, y: r.y, width: r.width, height: r.height };
+            const box = { page: widgetPage(doc, w, refMap, pageRefs), x: r.x, y: r.y, width: r.width, height: r.height };
+            if (type === 'radio') {
+                try {
+                    if (exportValues && exportValues[wi]) box.option = exportValues[wi].decodeText();
+                    else { const on = w.getOnValue(); if (on) box.option = on.decodeText(); }
+                } catch (_) { /* no appearance */ }
+            }
+            return box;
         });
         const first = boxes[0] || { page: 0, x: 0, y: 0, width: 0, height: 0 };
         const out = {
@@ -211,6 +228,12 @@ async function inspect(bytes) {
             required: field.isRequired(),
             order,
         };
+        // The form author's own description of the box (/TU), when there is one.
+        try {
+            const tu = field.acroField.dict.lookup(PDFName.of('TU'));
+            const t = tu && typeof tu.decodeText === 'function' ? tu.decodeText().replace(/\s+/g, ' ').trim() : '';
+            if (t) out.tooltip = t.slice(0, 200);
+        } catch (_) { /* none */ }
         if (type === 'text') {
             out.multiline = field.isMultiline();
             const max = field.getMaxLength();
@@ -440,6 +463,37 @@ async function fill(bytes, values, opts) {
         warnings.push({ field: '', code: 'appearance', message: String(err && err.message || err) });
     }
     if (o.flatten) {
+        // pdf-lib's flatten() throws ("Unexpected N type") on the first widget
+        // without a normal appearance — typically an empty signature box — and
+        // leaves every later field live. Such widgets draw nothing, so drop
+        // those fields first; the rest flatten normally.
+        for (const field of form.getFields()) {
+            let blank = false;
+            try {
+                blank = field.acroField.getWidgets().some(w => {
+                    try { w.getNormalAppearance(); return false; } catch (_) { return true; }
+                });
+            } catch (_) { blank = false; }
+            if (!blank) continue;
+            // form.removeField() trips over the same missing appearance, so unhook by hand:
+            // widget refs off every page's /Annots, field out of /Fields (or its parent's /Kids).
+            try {
+                const af = field.acroField;
+                for (const w of af.getWidgets()) {
+                    const ref = doc.context.getObjectRef(w.dict);
+                    if (!ref) continue;
+                    for (const page of doc.getPages()) {
+                        const annots = page.node.lookup(PDFName.of('Annots'));
+                        if (!(annots instanceof PDFArray)) continue;
+                        const i = annots.indexOf(ref);
+                        if (i !== undefined && i >= 0) annots.remove(i);
+                    }
+                }
+                form.acroForm.removeField(af);
+            } catch (err) {
+                warnings.push({ field: field.getName(), code: 'flatten', message: String(err && err.message || err) });
+            }
+        }
         try { form.flatten(); } catch (err) {
             warnings.push({ field: '', code: 'flatten', message: String(err && err.message || err) });
         }

@@ -155,6 +155,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   caseFormsFill: (req) => ipcRenderer.invoke('case-forms-fill', req),
   caseFormsCaseFiles: (req) => ipcRenderer.invoke('case-forms-case-files', req),
   caseFormsOpen: (req) => ipcRenderer.invoke('case-forms-open', req),
+  fieldWorkSignSend: (req) => ipcRenderer.invoke('fieldwork-sign-send', req),
+  fieldWorkSignCollect: (req) => ipcRenderer.invoke('fieldwork-sign-collect', req),
 
   // Diagnostic Report (diagnostic-edition builds)
   isDiagnosticMode: () => ipcRenderer.invoke('is-diagnostic-mode'),

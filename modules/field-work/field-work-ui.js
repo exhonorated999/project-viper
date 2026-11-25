@@ -1032,7 +1032,8 @@
             captures: SCHEMA.normalizeCaptureKinds(preset.captures),
             title: preset.label + ' — ' + (host.getCaseRef() || 'Field Work')
         };
-
+        fp = null;
+        if (formsSupported()) fpStart(FW_MAX_DOCS);
         document.body.insertAdjacentHTML('beforeend',
             '<div id="fwCreateModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">' +
                 '<div class="glass-card rounded-xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto" id="fwCreateBody"></div>' +
@@ -1099,6 +1100,8 @@
                     : '<p class="text-xs text-gray-500 mt-3">No attachments — a text-only form. That is a valid choice and the fastest to fill in.</p>') +
             '</div>' +
 
+            pickerHtml() +
+
             '<div class="bg-viper-cyan/10 border border-viper-cyan/30 rounded-lg p-3 text-xs text-gray-300 leading-relaxed">' +
                 '<p>📱 A page is created on the Intellect server and you open it from your phone — no WiFi or VPN needed. ' +
                 'Everything you type and capture — notes, names, addresses, photos, clips, recordings and documents — is <strong>encrypted on the phone before it is uploaded</strong>, ' +
@@ -1142,9 +1145,11 @@
     }
 
     function closeCreate() {
+        if (fp && fp.busy && !fp.formId) return;
         var el = document.getElementById('fwCreateModal');
         if (el) el.remove();
         draft = null;
+        if (fp && !fp.formId) fp = null;
     }
 
     function createForm() {
@@ -1166,11 +1171,15 @@
         };
         var chosenFields = draft.fields.slice();
         var chosenCaptures = draft.captures.slice();
+        var presetId = draft.presetId;
+        var sel = fpSelection();
+        if (sel && !sel.items.length) sel = null;
+        if (sel) fp.busy = true;
 
         call(function (key) {
             return api().fieldWorkFormCreate(Object.assign({ apiKey: key }, payload));
         }).then(function (result) {
-            forms.push({
+            var rec = {
                 formId: result.formId,
                 formUrl: result.formUrl,
                 qrDataUrl: result.qrDataUrl,
@@ -1182,7 +1191,7 @@
                 mediaKey: result.mediaKey || '',
                 expiresAt: result.expiresAt,
                 title: title,
-                preset: draft.presetId,
+                preset: presetId,
                 presetLabel: payload.presetLabel,
                 fields: chosenFields,
                 // What the SERVER accepted, which may be less than was asked
@@ -1193,13 +1202,27 @@
                     : payload.captures,
                 capturesRequested: chosenCaptures,
                 createdAt: new Date().toISOString(),
-                entryCount: 0
-            });
+                entryCount: 0,
+                docs: []
+            };
+            forms.push(rec);
             saveForms();
-            closeCreate();
-            showQrModal(result.formId);
-            host.rerender();
-        }).catch(function (error) {
+            // The field form exists from here on; a form that will not send
+            // is reported, not treated as a failed create.
+            var sending = sel
+                ? sendDocs(rec, sel, function (i, n) {
+                    if (go) go.textContent = 'Sending form ' + i + ' of ' + n + '…';
+                })
+                : Promise.resolve(null);
+            return sending.then(function (sent) {
+                if (fp) fp.busy = false;
+                closeCreate();
+                showQrModal(rec.formId);
+                host.rerender();
+                reportSend(sent);
+            });
+        }, function (error) {
+            if (fp) fp.busy = false;
             if (go) { go.disabled = false; go.textContent = 'Create Form'; }
             reportFormError(error);
         });
@@ -1226,6 +1249,460 @@
         }
     }
 
+    /* ── Agency forms to sign on the phone ───────────────────────────────
+     * The officer picks agency forms (Settings → Agency Forms) when making
+     * a field form, or adds them to one already out. VIPER fills in what the
+     * case knows and sends each form to the relay sealed with this field
+     * form's key. On the phone the officer or subject fills the blanks and
+     * signs; "Collect" puts the signatures on the copy kept in the case and
+     * saves the signed PDF in the case's Forms folder.
+     */
+
+    var FW_MAX_DOCS = 8;        // the relay's limit per field form
+    var fp = null;              // the forms picker (create dialog or "+ Add forms")
+
+    function formsPerson() {
+        return (typeof window !== 'undefined' && window.ViperCaseFormsPerson) || null;
+    }
+    function formSources() {
+        return (typeof window !== 'undefined' && window.ViperCaseFormSources) || null;
+    }
+
+    /** Agency forms can be sent: a set is turned on and this build has the pieces. */
+    function formsSupported() {
+        var a = api();
+        if (!a || typeof a.fieldWorkSignSend !== 'function' || typeof a.caseFormsInstalled !== 'function') return false;
+        if (!formsPerson() || !formSources() || typeof host.formsCtx !== 'function') return false;
+        try { return typeof host.formsAvailable === 'function' ? !!host.formsAvailable() : true; } catch (_) { return false; }
+    }
+
+    function docsOf(form) { return (form && Array.isArray(form.docs)) ? form.docs : []; }
+    /** Sent, not yet signed and saved into the case. */
+    function outstandingDocs(form) {
+        return docsOf(form).filter(function (d) { return d.status !== 'saved' && d.status !== 'gone'; });
+    }
+    /** How many more forms the relay will take on this field form. */
+    function docsRoom(form) {
+        var used = docsOf(form).filter(function (d) {
+            return d.status !== 'gone' && !(d.status === 'saved' && d.purged);
+        }).length;
+        return Math.max(0, FW_MAX_DOCS - used);
+    }
+
+    function errText(e) { return String((e && e.message) || e || 'unknown error'); }
+
+    // IPC handlers answer {success:false, error}; throwing lets the host's
+    // stale-key refresh-and-retry see the error.
+    function signCall(fn) {
+        return call(function (key) {
+            return Promise.resolve(fn(key)).then(function (r) {
+                if (!r || !r.success) {
+                    var e = new Error((r && r.error) || 'No response');
+                    if (r && r.status) e.status = r.status;
+                    throw e;
+                }
+                return r;
+            });
+        });
+    }
+
+    function fpStart(limit) {
+        var people = [];
+        try { people = formSources().peopleFromCase(host.formsCtx().getStores()) || []; } catch (_) { people = []; }
+        fp = { loading: true, error: '', sets: [], choices: [], personKey: '', people: people, checked: [], lang: {}, limit: limit, busy: false };
+        var mine = fp;
+        Promise.resolve().then(function () { return api().caseFormsInstalled(); }).then(function (r) {
+            if (fp !== mine) return;
+            if (!r || !r.success) throw new Error((r && r.error) || 'Could not list form sets');
+            fp.sets = (r.sets || []).filter(function (s) { return s && !s.error; });
+            fpChoices();
+        }).catch(function (e) {
+            if (fp === mine) fp.error = errText(e);
+        }).then(function () {
+            if (fp !== mine) return;
+            fp.loading = false;
+            fpRepaint();
+        });
+    }
+
+    function fpRole() {
+        var listKey = fp && fp.personKey ? fp.personKey.split(':')[0] : '';
+        return (formsPerson().ROLE_OF || {})[listKey] || '';
+    }
+
+    function fpChoices() {
+        fp.choices = formsPerson().formChoices(fp.sets, fpRole());
+        // Drop picks a set change made impossible.
+        fp.checked = fp.checked.filter(function (id) { return !!fpFind(id); });
+    }
+
+    function fpFind(id) {
+        for (var i = 0; i < fp.choices.length; i++) {
+            var c = fp.choices[i];
+            for (var j = 0; j < c.entries.length; j++) {
+                if (c.setId + '|' + c.entries[j].key === id) return { set: c, entry: c.entries[j] };
+            }
+        }
+        return null;
+    }
+
+    function fpLang(id, entry) {
+        if (fp.lang[id]) return fp.lang[id];
+        var l = entry.languages || [];
+        var pref = '';
+        try { pref = localStorage.getItem('viperPersonFormsLanguage') || ''; } catch (_) { pref = ''; }
+        if (pref && l.indexOf(pref) !== -1) return pref;
+        return l.indexOf('en') !== -1 ? 'en' : (l[0] || '');
+    }
+
+    function langName(l) {
+        var T = (typeof window !== 'undefined' && window.ViperCaseFormsTab) || null;
+        return T && typeof T.langName === 'function' ? T.langName(l) : String(l || '').toUpperCase();
+    }
+
+    function pickerHtml() {
+        if (!fp) return '';
+        var inner;
+        if (fp.loading) {
+            inner = '<p class="text-xs text-gray-400">Loading agency forms…</p>';
+        } else if (fp.error) {
+            inner = '<p class="text-xs text-amber-300">⚠️ ' + esc(fp.error) + '</p>';
+        } else if (!fp.choices.length) {
+            inner = '<p class="text-xs text-gray-400">No agency forms are installed. Turn a set on in Settings → Agency Forms.</p>';
+        } else if (!fp.limit) {
+            inner = '<p class="text-xs text-gray-400">This field form already carries ' + FW_MAX_DOCS + ' forms, the most the server allows.</p>';
+        } else {
+            var personSel = '<label class="block text-xs text-gray-400 mb-1">Who are the forms about?</label>' +
+                '<select onchange="FieldWorkUI.fpSetPerson(this.value)" class="w-full px-3 py-2 mb-3 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm">' +
+                    '<option value=""' + (fp.personKey ? '' : ' selected') + '>No one in particular — fill from the case only</option>' +
+                    fp.people.map(function (p) {
+                        return '<option value="' + esc(p.key) + '"' + (p.key === fp.personKey ? ' selected' : '') + '>' +
+                            esc((p.roleLabel ? p.roleLabel + ': ' : '') + p.label) + '</option>';
+                    }).join('') +
+                '</select>';
+            var list = fp.choices.map(function (c) {
+                return '<p class="text-xs text-gray-500 mt-2 mb-1">' + esc(c.setName || c.setId) + '</p>' +
+                    c.entries.map(function (en) {
+                        var id = c.setId + '|' + en.key;
+                        var on = fp.checked.indexOf(id) !== -1;
+                        var lang = fpLang(id, en);
+                        var langSel = (en.languages || []).length > 1
+                            ? ' <select onchange="FieldWorkUI.fpSetLang(\'' + jsq(id) + '\', this.value)" class="ml-1 px-1 py-0 bg-viper-dark border border-gray-600 rounded text-xs text-white">' +
+                                en.languages.map(function (l) {
+                                    return '<option value="' + esc(l) + '"' + (l === lang ? ' selected' : '') + '>' + esc(langName(l)) + '</option>';
+                                }).join('') + '</select>'
+                            : '';
+                        var hint = fp.personKey && en.fit === 'other' ? ' <span class="text-gray-600">(for someone else)</span>' : '';
+                        return '<div class="fw-pick" style="display:flex;align-items:center;gap:6px">' +
+                            '<label style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">' +
+                                '<input type="checkbox"' + (on ? ' checked' : '') +
+                                    ' onchange="FieldWorkUI.fpToggle(\'' + jsq(id) + '\', this.checked)">' +
+                                '<span>' + esc(en.title) + hint + '</span>' +
+                            '</label>' + langSel +
+                        '</div>';
+                    }).join('');
+            }).join('');
+            inner = personSel +
+                '<div style="max-height:220px;overflow-y:auto">' + list + '</div>' +
+                '<p class="text-xs text-gray-500 mt-3">' + fp.checked.length + ' picked' +
+                    (fp.limit < FW_MAX_DOCS ? ' · room for ' + fp.limit + ' more on this form' : ' · up to ' + FW_MAX_DOCS) + '</p>';
+        }
+        return '<div id="fwFormsPicker" class="bg-viper-card/30 border border-gray-700 rounded-lg p-4 mb-4">' +
+            '<p class="text-xs font-semibold text-viper-cyan mb-1">AGENCY FORMS TO COMPLETE ON THE PHONE</p>' +
+            '<p class="text-xs text-gray-500 mb-3">VIPER fills in what the case already knows. On the phone, fill the blanks ' +
+                '(PINs, usernames, initials, checkboxes) and sign with a finger. Collect the signed forms here and they are saved in the case\'s Forms folder.</p>' +
+            inner +
+        '</div>';
+    }
+
+    function fpRepaint() {
+        var el = document.getElementById('fwFormsPicker');
+        if (el) el.outerHTML = pickerHtml();
+    }
+
+    function fpSetPerson(key) {
+        if (!fp || fp.busy) return;
+        fp.personKey = String(key || '');
+        fpChoices();
+        fpRepaint();
+    }
+
+    function fpToggle(id, on) {
+        if (!fp || fp.busy) return;
+        var i = fp.checked.indexOf(id);
+        if (on && i === -1) {
+            if (fp.checked.length >= fp.limit) {
+                host.toast('A field form can carry ' + FW_MAX_DOCS + ' forms at most.', 'info');
+            } else {
+                fp.checked.push(id);
+            }
+        } else if (!on && i !== -1) {
+            fp.checked.splice(i, 1);
+        }
+        fpRepaint();
+    }
+
+    function fpSetLang(id, lang) {
+        if (!fp || fp.busy) return;
+        fp.lang[id] = String(lang || '');
+        if (fp.checked.indexOf(id) === -1 && fp.checked.length < fp.limit) fp.checked.push(id);
+        fpRepaint();
+    }
+
+    /** What to send: [{setId, formId, title, lang}] in pick order, and who it is about. */
+    function fpSelection() {
+        if (!fp || fp.loading || fp.error) return null;
+        var items = [];
+        fp.checked.forEach(function (id) {
+            var hit = fpFind(id);
+            if (!hit) return;
+            var lang = fpLang(id, hit.entry);
+            var f = formsPerson().formForLanguage(hit.entry, lang);
+            if (f) items.push({ setId: hit.set.setId, formId: f.id, title: f.title || hit.entry.title, lang: f.language || lang || 'en' });
+        });
+        var person = null;
+        if (fp.personKey) {
+            var p = null;
+            fp.people.forEach(function (x) { if (x.key === fp.personKey) p = x; });
+            var parts = fp.personKey.split(':');
+            var name = '';
+            try { name = formSources().normPerson(p.record).fullName; } catch (_) { name = ''; }
+            person = { listKey: parts[0], index: Number(parts[1]), name: name || (p ? p.label.replace(/ \(DOB [^)]*\)$/, '') : '') };
+        }
+        return { items: items, person: person };
+    }
+
+    /**
+     * Fill and send each picked form, one at a time. Never rejects.
+     * → { sent, failed: [{ title, error }] }
+     */
+    function sendDocs(form, sel, onProgress) {
+        var caseId = host.getCaseId();
+        var caseNumber = host.getCaseNumber();
+        var ctx = host.formsCtx();
+        var sent = 0, failed = [];
+        var chain = Promise.resolve();
+        sel.items.forEach(function (it, i) {
+            chain = chain.then(function () {
+                if (host.getCaseId() !== caseId) { failed.push({ title: it.title, error: 'the case was closed' }); return; }
+                if (onProgress) onProgress(i + 1, sel.items.length);
+                return formsPerson().prepareFill({
+                    ctx: ctx, setId: it.setId, formId: it.formId,
+                    listKey: sel.person ? sel.person.listKey : undefined,
+                    index: sel.person ? sel.person.index : undefined,
+                    name: sel.person ? sel.person.name : undefined
+                }).then(function (prep) {
+                    return signCall(function (key) {
+                        return api().fieldWorkSignSend({
+                            apiKey: key, relayFormId: form.formId, mediaKey: form.mediaKey || '', caseNumber: caseNumber,
+                            setId: it.setId, formId: it.formId, values: prep.values,
+                            who: sel.person ? sel.person.name : '', lang: it.lang, title: it.title
+                        });
+                    });
+                }).then(function (r) {
+                    if (!Array.isArray(form.docs)) form.docs = [];
+                    form.docs.push({
+                        docId: r.docId, position: r.position, title: r.title, who: r.who,
+                        setId: r.setId, formId: r.formId, setName: r.setName, setVersion: r.setVersion,
+                        keptFile: r.keptFile, sha256: r.sha256, sentAt: r.sentAt, pageCount: r.pageCount,
+                        status: 'waiting'
+                    });
+                    if (host.getCaseId() === caseId) saveForms();
+                    sent++;
+                }).catch(function (e) {
+                    console.error('[fieldwork] form send failed:', e);
+                    failed.push({ title: it.title, error: errText(e) });
+                });
+            });
+        });
+        return chain.then(function () { return { sent: sent, failed: failed }; });
+    }
+
+    function reportSend(r) {
+        if (!r) return;
+        if (r.failed.length) {
+            host.toast((r.sent ? r.sent + ' form(s) sent to the phone; ' : '') +
+                r.failed.length + ' could not be sent — ' + r.failed[0].title + ': ' + r.failed[0].error, 'error');
+        } else if (r.sent) {
+            host.toast('✓ ' + r.sent + ' form' + (r.sent === 1 ? '' : 's') + ' ready to sign on the phone', 'success');
+        }
+    }
+
+    /* "+ Add forms" on a field form that is already out. */
+    function showAddFormsModal(formId) {
+        load();
+        var form = formById(formId);
+        if (!form) return;
+        if (!formsSupported()) { host.toast('Turn on a form set in Settings → Agency Forms first.', 'info'); return; }
+        if (!form.mediaKey) { host.toast('This field form has no encryption key on record, so forms cannot be added to it. Create a new field form.', 'error'); return; }
+        if (isExpired(form)) { host.toast('This field form has expired.', 'error'); return; }
+        closeAddForms();
+        fpStart(docsRoom(form));
+        fp.formId = formId;
+        document.body.insertAdjacentHTML('beforeend',
+            '<div id="fwAddFormsModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">' +
+                '<div class="glass-card rounded-xl p-6 max-w-xl w-full max-h-[90vh] overflow-y-auto">' +
+                    '<h3 class="text-xl font-bold text-white mb-1">Add forms to sign</h3>' +
+                    '<p class="text-sm text-gray-400 mb-4">' + esc(form.title) + ' — they appear on the phone the next time the page is opened or refreshed.</p>' +
+                    pickerHtml() +
+                    '<div class="flex gap-3 justify-end mt-4 pt-4 border-t border-gray-700">' +
+                        '<button onclick="FieldWorkUI.closeAddForms()" class="px-5 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg text-white text-sm transition">Cancel</button>' +
+                        '<button id="fwAddFormsGo" onclick="FieldWorkUI.sendAddForms()" class="px-5 py-2 bg-viper-cyan hover:bg-viper-cyan/80 rounded-lg text-black text-sm font-semibold transition">Send to phone</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>');
+    }
+
+    function closeAddForms(force) {
+        if (fp && fp.busy && !force) return;
+        var el = document.getElementById('fwAddFormsModal');
+        if (el) el.remove();
+        if (fp && fp.formId) fp = null;
+    }
+
+    function sendAddForms() {
+        if (!fp || fp.busy) return;
+        var form = formById(fp.formId);
+        var sel = fpSelection();
+        if (!form) { closeAddForms(); return; }
+        if (!sel || !sel.items.length) { host.toast('Pick at least one form.', 'info'); return; }
+        fp.busy = true;
+        var go = document.getElementById('fwAddFormsGo');
+        if (go) go.disabled = true;
+        return sendDocs(form, sel, function (i, n) {
+            if (go) go.textContent = 'Sending form ' + i + ' of ' + n + '…';
+        }).then(function (r) {
+            closeAddForms(true);
+            reportSend(r);
+            paintFormsPanel(document.getElementById('fieldWorkFormsSection'));
+        });
+    }
+
+    /** Fold the relay's view of the docs (from /info) into the records. */
+    function applyDocInfo(form, info) {
+        if (!info || !Array.isArray(info.docs)) return;
+        var byId = {};
+        info.docs.forEach(function (d) { if (d && d.doc_id) byId[d.doc_id] = d; });
+        docsOf(form).forEach(function (d) {
+            if (d.status === 'saved') return;
+            var r = byId[d.docId];
+            if (!r) { d.status = 'gone'; return; }
+            d.status = r.has_result ? 'ready' : (d.status === 'error' ? 'error' : 'waiting');
+        });
+    }
+
+    /**
+     * Bring signed forms into the case. Never rejects.
+     * → { saved, waiting, failed, gone, firstError }
+     */
+    function collectDocs(form) {
+        var out = { saved: 0, waiting: 0, failed: 0, gone: 0, firstError: '' };
+        var todo = outstandingDocs(form);
+        var a = api();
+        if (!todo.length || !a || typeof a.fieldWorkSignCollect !== 'function') return Promise.resolve(out);
+        var caseId = host.getCaseId();
+        var caseNumber = host.getCaseNumber();
+        var chain = Promise.resolve();
+        todo.forEach(function (d) {
+            chain = chain.then(function () {
+                return signCall(function (key) {
+                    return api().fieldWorkSignCollect({
+                        apiKey: key, relayFormId: form.formId, mediaKey: form.mediaKey || '', caseNumber: caseNumber,
+                        docId: d.docId, keptFile: d.keptFile, sha256: d.sha256, title: d.title, who: d.who,
+                        setName: d.setName, setVersion: d.setVersion, sentAt: d.sentAt
+                    });
+                }).then(function (r) {
+                    if (r.pending) { d.status = 'waiting'; out.waiting++; return; }
+                    d.status = 'saved';
+                    d.fileName = r.fileName;
+                    d.savedAt = new Date().toISOString();
+                    d.signatures = r.signatures;
+                    d.purged = !!r.purged;
+                    delete d.error;
+                    out.saved++;
+                }).catch(function (e) {
+                    if (e && e.status === 404) { d.status = 'gone'; out.gone++; return; }
+                    d.status = 'error';
+                    d.error = errText(e);
+                    out.failed++;
+                    if (!out.firstError) out.firstError = d.title + ': ' + d.error;
+                });
+            });
+        });
+        return chain.then(function () {
+            if (host.getCaseId() === caseId) saveForms();
+            return out;
+        });
+    }
+
+    function collectSummary(r) {
+        var parts = [];
+        if (r.saved) parts.push('✓ ' + r.saved + ' signed form' + (r.saved === 1 ? '' : 's') + ' saved to the case\'s Forms folder');
+        if (r.waiting) parts.push(r.waiting + ' still waiting to be signed');
+        if (r.gone) parts.push(r.gone + ' no longer on the server');
+        if (r.failed) parts.push(r.failed + ' failed — ' + r.firstError);
+        return parts.join(' · ');
+    }
+
+    function collectSigned(formId) {
+        load();
+        var form = formById(formId);
+        if (!form) return Promise.resolve();
+        if (!outstandingDocs(form).length) { host.toast('Every form on this field form has been collected.', 'info'); return Promise.resolve(); }
+        return collectDocs(form).then(function (r) {
+            host.toast(collectSummary(r) || 'Nothing to collect yet.', r.failed ? 'error' : (r.saved ? 'success' : 'info'));
+            paintFormsPanel(document.getElementById('fieldWorkFormsSection'));
+        });
+    }
+
+    function openSignedFile(formId, docId) {
+        var form = formById(formId);
+        var d = null;
+        docsOf(form).forEach(function (x) { if (x.docId === docId) d = x; });
+        var a = api();
+        if (!d || !d.fileName || !a || typeof a.caseFormsOpen !== 'function') return;
+        Promise.resolve(a.caseFormsOpen({ caseNumber: host.getCaseNumber(), fileName: d.fileName, action: 'open' })).then(function (r) {
+            if (r && r.success === false) host.toast('Could not open the form: ' + (r.error || 'unknown error'), 'error');
+        }).catch(function (e) { host.toast('Could not open the form: ' + errText(e), 'error'); });
+    }
+
+    var DOC_STATUS = {
+        waiting: ['⏳', 'text-gray-400', 'Waiting for signature'],
+        ready:   ['✍️', 'text-green-300', 'Signed — ready to collect'],
+        saved:   ['✓', 'text-viper-cyan', 'Saved'],
+        gone:    ['✕', 'text-gray-500', 'No longer on the server'],
+        error:   ['⚠️', 'text-amber-300', 'Could not collect']
+    };
+
+    function docsBlock(form) {
+        var docs = docsOf(form);
+        var canAdd = formsSupported() && !!form.mediaKey && !isExpired(form) && !form._gone && docsRoom(form) > 0;
+        if (!docs.length && !canAdd) return '';
+        var saved = docs.filter(function (d) { return d.status === 'saved'; }).length;
+        var open = outstandingDocs(form).length;
+        var rows = docs.map(function (d) {
+            var st = DOC_STATUS[d.status] || DOC_STATUS.waiting;
+            var label = d.status === 'saved' && d.fileName
+                ? '<a href="#" class="underline" onclick="FieldWorkUI.openSignedFile(\'' + jsq(form.formId) + '\', \'' + jsq(d.docId) + '\');return false" title="' + esc(d.fileName) + '">Saved — open</a>'
+                : esc(st[2]) + (d.status === 'error' && d.error ? ': ' + esc(d.error) : '');
+            return '<li class="flex items-start gap-2 text-xs py-0.5">' +
+                '<span class="' + st[1] + '">' + st[0] + '</span>' +
+                '<span class="flex-1 min-w-0"><span class="text-white">' + esc(d.title) + '</span>' +
+                    (d.who ? ' <span class="text-gray-500">— ' + esc(d.who) + '</span>' : '') +
+                    '<br><span class="' + st[1] + '">' + label + '</span></span>' +
+            '</li>';
+        }).join('');
+        return '<div class="bg-viper-card/30 border border-gray-700 rounded-lg p-3 mb-3">' +
+            '<p class="text-xs font-semibold text-viper-cyan mb-1">FORMS TO SIGN' +
+                (docs.length ? ' <span class="text-gray-400 font-normal">(' + saved + ' of ' + docs.length + ' saved)</span>' : '') + '</p>' +
+            (docs.length ? '<ul>' + rows + '</ul>' : '<p class="text-xs text-gray-500">None yet. Add agency forms for the phone to fill in and sign.</p>') +
+            '<div class="flex gap-2 mt-2">' +
+                (open ? '<button onclick="FieldWorkUI.collectSigned(\'' + jsq(form.formId) + '\')" class="px-2 py-1 bg-green-500/15 hover:bg-green-500/25 border border-green-500/40 rounded text-green-300 text-xs transition">Collect signed forms</button>' : '') +
+                (canAdd ? '<button onclick="FieldWorkUI.showAddFormsModal(\'' + jsq(form.formId) + '\')" class="px-2 py-1 bg-viper-cyan/15 hover:bg-viper-cyan/25 border border-viper-cyan/40 rounded text-viper-cyan text-xs transition">+ Add forms</button>' : '') +
+            '</div>' +
+        '</div>';
+    }
+
     /* ── Active forms panel ──────────────────────────────────────────── */
 
     function loadFormsPanel() {
@@ -1249,6 +1726,7 @@
                         form.entryCount = info.entry_count;
                         form._gone = false;
                         form._unreachable = false;
+                        applyDocInfo(form, info);
                     } else if (info && info.gone) {
                         // The relay itself says this form no longer exists.
                         form._gone = true;
@@ -1333,6 +1811,7 @@
                     (kinds ? '<p class="text-xs text-gray-600 mt-2">' + esc(kinds) + '</p>' : '<p class="text-xs text-gray-600 mt-2">Text only</p>') +
                 '</div>' +
             '</div>' +
+            docsBlock(form) +
             '<div class="flex gap-2">' +
                 '<button onclick="FieldWorkUI.downloadResults(\'' + jsq(form.formId) + '\')" class="flex-1 px-3 py-2 bg-green-500/15 hover:bg-green-500/25 border border-green-500/40 rounded-lg text-green-300 text-sm transition">⬇ Download &amp; Import</button>' +
                 '<button onclick="FieldWorkUI.refreshCount(\'' + jsq(form.formId) + '\')" class="px-3 py-2 bg-viper-cyan/15 hover:bg-viper-cyan/25 border border-viper-cyan/40 rounded-lg text-viper-cyan text-sm transition" title="Refresh count">↻</button>' +
@@ -1394,9 +1873,12 @@
             }
             form.entryCount = info.entry_count;
             form._unreachable = false;
+            applyDocInfo(form, info);
             saveForms();
             paintFormsPanel(document.getElementById('fieldWorkFormsSection'));
-            host.toast(info.entry_count + ' entr' + (info.entry_count === 1 ? 'y' : 'ies') + ' waiting', 'info');
+            var ready = docsOf(form).filter(function (d) { return d.status === 'ready'; }).length;
+            host.toast(info.entry_count + ' entr' + (info.entry_count === 1 ? 'y' : 'ies') + ' waiting' +
+                (ready ? ' · ' + ready + ' signed form' + (ready === 1 ? '' : 's') + ' ready to collect' : ''), 'info');
         }).catch(function (err) {
             host.toast('Could not reach the form: ' + ((err && err.message) || err), 'error');
         });
@@ -1520,20 +2002,30 @@
         var form = formById(formId);
         if (!form) return;
         var caseNumber = host.getCaseNumber();
+        var docRes = null;
 
-        // Anything left over from a previous import goes first. It cannot be
-        // re-requested from the server, so it must not be stranded behind an
-        // early return when there are no new entries to fetch.
-        retryPending(formId).then(function (retried) {
+        // Signed agency forms come in first; they are their own files and
+        // do not depend on the entries below.
+        collectDocs(form).then(function (r) {
+            docRes = (r.saved || r.waiting || r.failed || r.gone) ? r : null;
+            if (docRes) paintFormsPanel(document.getElementById('fieldWorkFormsSection'));
+            // Anything left over from a previous import goes first. It cannot be
+            // re-requested from the server, so it must not be stranded behind an
+            // early return when there are no new entries to fetch.
+            return retryPending(formId);
+        }).then(function (retried) {
             if (retried.recovered) {
                 host.toast('Recovered ' + retried.recovered + ' attachment(s) from a previous import', 'success');
+            }
+            if (docRes) {
+                host.toast(collectSummary(docRes), docRes.failed ? 'error' : (docRes.saved ? 'success' : 'info'));
             }
             return call(function (key) {
                 return api().fieldWorkFormDownload({ apiKey: key, formId: formId, mediaKey: form.mediaKey || '' });
             }).then(function (result) {
                 var rows = (result && result.entries) || [];
                 if (!rows.length) {
-                    if (retried.recovered) host.rerender();
+                    if (retried.recovered || docRes) host.rerender();
                     else host.toast('No entries to download yet.', 'info');
                     return;
                 }
@@ -1588,10 +2080,15 @@
         var mediaLine = mediaCount
             ? '\n\n' + mediaCount + ' attachment(s) will be downloaded, decrypted and saved into the case folder.'
             : '';
+        var unsigned = outstandingDocs(form).length;
+        var closeLine = unsigned
+            ? '\n\nThe form stays open: ' + unsigned + ' agency form' + (unsigned === 1 ? ' is' : 's are') +
+                ' still waiting to be signed on the phone. Close it once they are collected.'
+            : '\n\nThe form will be closed and all data removed from the server.';
 
         return Promise.resolve(host.confirm(
             'Import ' + unique.length + ' field work entr' + (unique.length === 1 ? 'y' : 'ies') + '?' + mediaLine +
-            '\n\nThe form will be closed and all data removed from the server.'
+            closeLine
         )).then(function (ok) {
             if (!ok) return;
             var saved = 0, failed = 0, noKey = false;
@@ -1619,9 +2116,9 @@
 
                 // Deleting the form purges every remaining blob on the
                 // server, so it must not run while anything is still waiting
-                // to be pulled down.
+                // to be pulled down — attachments or forms to be signed.
                 var closed = Promise.resolve();
-                if (!failed) {
+                if (!failed && !unsigned) {
                     closed = call(function (key) {
                         return api().fieldWorkFormDelete({ apiKey: key, formId: form.formId });
                     }).catch(function () { /* may already be expired */ }).then(function () {
@@ -1638,6 +2135,10 @@
                         host.toast('Imported ' + unique.length + ' entr' + (unique.length === 1 ? 'y' : 'ies') +
                             ' and ' + saved + ' attachment(s). ' + failed + ' did not download — ' +
                             'the form is still open, press Download again to retry.', 'error');
+                    } else if (unsigned) {
+                        host.toast('✓ Imported ' + unique.length + ' entr' + (unique.length === 1 ? 'y' : 'ies') +
+                            (saved ? ' and ' + saved + ' attachment(s)' : '') + ' — the form stays open for ' +
+                            unsigned + ' form' + (unsigned === 1 ? '' : 's') + ' still to be signed', 'success');
                     } else {
                         host.toast('✓ Imported ' + unique.length + ' entr' + (unique.length === 1 ? 'y' : 'ies') +
                             (saved ? ' and ' + saved + ' attachment(s)' : '') + ' — form closed', 'success');
@@ -1668,6 +2169,14 @@
             msg += '\n\n⚠️ ' + stranded + ' attachment(s) from entries you already imported have not come down yet. ' +
                 'Closing the form abandons them for good.';
         }
+        var unsigned = outstandingDocs(formById(formId));
+        if (unsigned.length) {
+            var ready = unsigned.filter(function (d) { return d.status === 'ready'; }).length;
+            msg += '\n\n⚠️ ' + unsigned.length + ' agency form' + (unsigned.length === 1 ? '' : 's') +
+                ' sent to the phone ' + (unsigned.length === 1 ? 'has' : 'have') + ' not been collected' +
+                (ready ? ' (' + ready + ' already signed — press "Collect signed forms" first)' : '') +
+                '. Closing deletes ' + (unsigned.length === 1 ? 'it' : 'them') + ' from the server.';
+        }
 
         Promise.resolve(host.confirm(msg, { danger: true, okText: 'Close Form' })).then(function (ok) {
             if (!ok) return;
@@ -1688,7 +2197,8 @@
                 }
                 host.audit('fieldwork_form_closed', {
                     formId: formId,
-                    abandonedAttachments: stranded
+                    abandonedAttachments: stranded,
+                    abandonedForms: unsigned.length
                 });
                 host.rerender();
             });
@@ -2104,6 +2614,14 @@
         downloadResults: downloadResults,
         closeForm: closeForm,
 
+        fpSetPerson: fpSetPerson,
+        fpToggle: fpToggle,
+        fpSetLang: fpSetLang,
+        showAddFormsModal: showAddFormsModal,
+        closeAddForms: closeAddForms,
+        sendAddForms: sendAddForms,
+        collectSigned: collectSigned,
+        openSignedFile: openSignedFile,
         showEntryModal: showEntryModal,
         closeEntryModal: closeEntryModal,
         saveEntryFromModal: saveEntryFromModal,
@@ -2120,7 +2638,8 @@
         guardModalFocus: guardModalFocus,
 
         // Exposed for tests — not part of the host contract.
-        _state: function () { return { entries: entries, forms: forms, filter: filter, draft: draft, viewIndex: viewIndex }; },
+        _docs: { outstandingDocs: outstandingDocs, docsRoom: docsRoom, applyDocInfo: applyDocInfo, collectSummary: collectSummary, collectDocs: collectDocs, sendDocs: sendDocs },
+        _state: function () { return { entries: entries, forms: forms, filter: filter, draft: draft, viewIndex: viewIndex, fp: fp }; },
         _setState: function (s) {
             if (s.entries) entries = s.entries;
             if (s.forms) forms = s.forms;

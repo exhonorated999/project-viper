@@ -591,6 +591,160 @@ function relayStub(answers) {
     globalThis.document.hasFocus = savedHasFocus;
     ['fwCreateModal', 'fwCreateBody', 'fwTitle', 'fweStreet'].forEach(k => { delete DOM.byId[k]; });
 
+    /* ── agency forms to sign on the phone ──────────────────────────── */
+    console.log('\n[agency forms to sign on the phone]');
+    const sends = [], collects = [], deletes = [];
+    let collectScript = {};
+    let infoDocs = null;
+    let downloadEntries = [];
+    const SETS = [{ id: 'demo-set', name: 'Demo Set', forms: [{ id: 'consent-en' }, { id: 'consent-es' }] }];
+    globalThis.window.ViperCaseFormsPerson = {
+        ROLE_OF: { suspects: 'suspect', victims: 'victim' },
+        formChoices: (sets, role) => sets.map(s => ({
+            setId: s.id, setName: s.name,
+            entries: [
+                { key: 'consent', title: 'Consent to Search', languages: ['en', 'es'], fit: 'open', suggested: true,
+                  forms: [{ id: 'consent-en', language: 'en', title: 'Consent to Search' }, { id: 'consent-es', language: 'es', title: 'Consent to Search (Spanish)' }] },
+                { key: 'victim-rights', title: 'Victim Rights', languages: ['en'], fit: role === 'victim' ? 'match' : 'other', suggested: role === 'victim',
+                  forms: [{ id: 'vr-en', language: 'en', title: 'Victim Rights' }] }
+            ].concat(Array.from({ length: 8 }, (_, i) => ({ key: 'extra' + i, title: 'Extra ' + i, languages: ['en'], fit: 'case', suggested: false,
+                  forms: [{ id: 'extra' + i, language: 'en', title: 'Extra ' + i }] })))
+        })),
+        formForLanguage: (entry, lang) => entry.forms.find(f => f.language === lang) || entry.forms[0],
+        prepareFill: async (o) => ({ values: { 'Subject.LastName': 'Testperson', _form: o.formId, _who: o.listKey + ':' + o.index } })
+    };
+    globalThis.window.ViperCaseFormSources = {
+        peopleFromCase: () => [{ key: 'suspects:0', role: 'suspect', roleLabel: 'Suspect', label: 'Alex Testperson (DOB 01/02/1990)', record: { firstName: 'Alex' } }],
+        normPerson: () => ({ fullName: 'Alex Testperson' })
+    };
+    let docSeq = 0;
+    globalThis.window.electronAPI = {
+        fieldWorkFormCreate: async () => ({ success: true, formId: 'signform01', formUrl: 'https://x/fieldwork/signform01#k=mk', qrDataUrl: '', mediaKey: 'mk', expiresAt: new Date(Date.now() + 40 * 3600e3).toISOString(), captures: [] }),
+        fieldWorkFormGetInfo: async () => ({ success: true, gone: false, entry_count: 0, docs: infoDocs }),
+        fieldWorkFormDelete: async (p) => { deletes.push(p.formId); return { success: true }; },
+        fieldWorkFormDownload: async () => ({ success: true, entries: downloadEntries }),
+        caseFormsInstalled: async () => ({ success: true, sets: SETS }),
+        fieldWorkSignSend: async (r) => {
+            sends.push(r);
+            if (r.formId === 'extra1') return { success: false, error: 'Synthetic relay refusal' };
+            docSeq++;
+            const docId = 'doc' + String(docSeq).padStart(14, '0');
+            return { success: true, docId, position: docSeq - 1, keptFile: r.relayFormId + '_' + docId + '.pdf', sha256: 'ab'.repeat(32), sentAt: new Date().toISOString(),
+                title: r.title, who: r.who, setId: r.setId, setName: 'Demo Set', setVersion: '1.0.0', formId: r.formId, pageCount: 1, fieldCount: 3, bytes: 1000 };
+        },
+        fieldWorkSignCollect: async (r) => { collects.push(r); return collectScript[r.docId] || { success: true, pending: true }; },
+        caseFormsOpen: async () => ({ success: true })
+    };
+    const formsHost = { apiCall: (fn) => fn('APIKEY'), formsAvailable: () => true, formsCtx: () => ({ caseNumber: CNUM, getStores: () => ({}) }) };
+
+    // Not offered when no set is turned on.
+    seed([], []);
+    wireHost(Object.assign({}, formsHost, { formsAvailable: () => false }));
+    DOM.byId.fwCreateBody = fakeEl('fwCreateBody');
+    UI.showCreateFormModal();
+    await flush();
+    ok('no form set turned on → the create dialog has no forms picker',
+        DOM.byId.fwCreateBody.innerHTML.indexOf('AGENCY FORMS') === -1 && UI._state().fp === null);
+    UI.closeCreate();
+
+    seed([], []);
+    wireHost(formsHost);
+    DOM.byId.fwCreateBody = fakeEl('fwCreateBody');
+    UI.showCreateFormModal();
+    ok('a set turned on → the create dialog offers agency forms',
+        DOM.byId.fwCreateBody.innerHTML.indexOf('AGENCY FORMS TO COMPLETE ON THE PHONE') !== -1);
+    await flush(); await flush();
+    const fpS = UI._state().fp;
+    ok('  — the picker lists the installed forms', fpS && !fpS.loading && fpS.choices.length === 1 && fpS.choices[0].entries.length === 10, fpS && fpS.error);
+    UI.fpSetPerson('suspects:0');
+    UI.fpToggle('demo-set|consent', true);
+    UI.fpSetLang('demo-set|consent', 'es');
+    UI.fpToggle('demo-set|extra0', true);
+    UI.fpToggle('demo-set|extra1', true);
+    ok('  — picking a language keeps the form picked once', UI._state().fp.checked.length === 3, UI._state().fp.checked);
+    for (let i = 2; i < 8; i++) UI.fpToggle('demo-set|extra' + i, true);
+    ok('  — no more than 8 forms on one field form', UI._state().fp.checked.length === 8, UI._state().fp.checked.length);
+    for (let i = 2; i < 8; i++) UI.fpToggle('demo-set|extra' + i, false);
+    ok('  — unticking removes them', UI._state().fp.checked.length === 3);
+
+    H.toasts = [];
+    UI.createForm();
+    for (let i = 0; i < 12; i++) await flush();
+    const made = UI._state().forms.find(f => f.formId === 'signform01');
+    ok('create → each picked form is sent to the new field form', sends.length === 3 && sends.every(s => s.relayFormId === 'signform01' && s.mediaKey === 'mk'), sends.length);
+    ok('  — in the chosen language', sends[0].formId === 'consent-es' && sends[0].lang === 'es', sends[0]);
+    ok('  — pre-filled for the chosen person', sends[0].who === 'Alex Testperson' && sends[0].values._who === 'suspects:0', sends[0]);
+    ok('  — with the case number and set', sends[0].caseNumber === CNUM && sends[0].setId === 'demo-set');
+    ok('  — sent forms are recorded on the field form and saved',
+        made && made.docs.length === 2 && JSON.parse(STORE['fieldworkForms_' + CID])[0].docs.length === 2, made && made.docs);
+    ok('  — a form that would not send is reported, not lost silently',
+        H.toasts.some(t => /^error: .*1 could not be sent.*Extra 1.*Synthetic relay refusal/.test(t)), H.toasts);
+    ok('  — the field form itself still exists', !!made);
+
+    // The card shows them.
+    UI.renderTab(); UI.afterRender();
+    infoDocs = [{ doc_id: made.docs[0].docId, position: 0, has_result: true, result_at: new Date().toISOString() },
+                { doc_id: made.docs[1].docId, position: 1, has_result: false, result_at: null }];
+    for (let i = 0; i < 6; i++) await flush();
+    ok('the relay\'s has_result marks a form ready to collect', made.docs[0].status === 'ready' && made.docs[1].status === 'waiting',
+        made.docs.map(d => d.status));
+    const panel = DOM.byId.fieldWorkFormsSection.innerHTML;
+    ok('the card lists forms to sign with Collect and + Add forms',
+        /FORMS TO SIGN/.test(panel) && /Collect signed forms/.test(panel) && /\+ Add forms/.test(panel) && /Consent to Search \(Spanish\)/.test(panel));
+
+    // Collect: one signed, one still waiting.
+    collectScript = { [made.docs[0].docId]: { success: true, fileName: 'Consent to Search (Spanish) - Alex Testperson - signed - 2026-11-25.pdf', signatures: 2, changed: [], purged: true } };
+    H.toasts = [];
+    await UI.collectSigned('signform01');
+    ok('collect → the signed form is saved and named', made.docs[0].status === 'saved' && /signed/.test(made.docs[0].fileName));
+    ok('  — the unsigned one stays waiting', made.docs[1].status === 'waiting');
+    ok('  — collect carries what main needs to verify the kept copy',
+        collects[0].keptFile === made.docs[0].keptFile && collects[0].sha256 === made.docs[0].sha256 && collects[0].mediaKey === 'mk' && collects[0].caseNumber === CNUM);
+    ok('  — the toast says both', H.toasts.some(t => /1 signed form saved.*1 still waiting/.test(t)), H.toasts);
+    collects.length = 0;
+    await UI.collectSigned('signform01');
+    ok('  — a saved form is not collected twice', collects.length === 1 && collects[0].docId === made.docs[1].docId);
+
+    // Import entries while a form is unsigned → the field form stays open.
+    downloadEntries = [{ id: 901, street: '1 Test Ln', city: 'Testville', state: 'TX', submittedAt: D, notes: 'n' }];
+    H.confirmPrompts = []; H.confirmAnswer = true; deletes.length = 0;
+    UI.downloadResults('signform01');
+    for (let i = 0; i < 20; i++) await flush();
+    ok('import with a form still unsigned → confirm says the form stays open',
+        H.confirmPrompts.some(p => /stays open: 1 agency form is still waiting/.test(p)), H.confirmPrompts);
+    ok('  — and the field form is NOT deleted from the relay', deletes.length === 0 && !!UI._state().forms.find(f => f.formId === 'signform01'));
+    ok('  — the entries were imported', UI._state().entries.some(e => e.id === 'fw_901'));
+
+    // A form the relay no longer has.
+    collectScript = { [made.docs[1].docId]: { success: false, error: 'Document not found', status: 404 } };
+    await UI.collectSigned('signform01');
+    ok('a 404 from the relay marks the form gone', made.docs[1].status === 'gone');
+
+    // Closing warns about outstanding forms.
+    made.docs.push({ docId: 'docpending00000001', title: 'Extra 9', status: 'ready' });
+    H.confirmPrompts = []; H.confirmAnswer = false;
+    UI.closeForm('signform01');
+    await flush(); await flush();
+    ok('closing names the forms not yet collected', H.confirmPrompts.some(p => /1 agency form sent to the phone has not been collected \(1 already signed/.test(p)), H.confirmPrompts);
+
+    // Room on the relay.
+    const D2 = UI._docs;
+    ok('docsRoom: saved-and-purged and gone forms free their slots',
+        D2.docsRoom({ docs: [{ status: 'saved', purged: true }, { status: 'gone' }, { status: 'waiting' }, { status: 'saved', purged: false }] }) === 6);
+    ok('applyDocInfo ignores an old relay without docs', (() => { const f = { docs: [{ docId: 'a', status: 'waiting' }] }; D2.applyDocInfo(f, { success: true }); return f.docs[0].status === 'waiting'; })());
+
+    // Host wiring.
+    const hostHtml = require('fs').readFileSync(path.join(__dirname, '..', '..', '..', 'case-detail-with-analytics.html'), 'utf8');
+    ok('host passes formsAvailable and formsCtx to Field Work',
+        /formsAvailable:\s*\(\)\s*=>\s*_caseFormsAvailable\(\)/.test(hostHtml) && /formsCtx:\s*\(\)\s*=>\s*_caseFormsCtx\(\)/.test(hostHtml));
+    ok('preload exposes fieldWorkSignSend / fieldWorkSignCollect',
+        /fieldWorkSignSend:[^\n]*'fieldwork-sign-send'/.test(require('fs').readFileSync(path.join(__dirname, '..', '..', '..', 'preload.js'), 'utf8')) &&
+        /fieldWorkSignCollect:[^\n]*'fieldwork-sign-collect'/.test(require('fs').readFileSync(path.join(__dirname, '..', '..', '..', 'preload.js'), 'utf8')));
+    delete globalThis.window.ViperCaseFormsPerson;
+    delete globalThis.window.ViperCaseFormSources;
+    globalThis.window.electronAPI = savedApi;
+    delete DOM.byId.fwCreateBody;
+
     console.log('\n' + (fail ? 'FAILED' : 'OK') + ' — ' + pass + ' passed, ' + fail + ' failed');
     process.exit(fail ? 1 : 0);
 })();

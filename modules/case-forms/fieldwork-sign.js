@@ -44,6 +44,9 @@ const DOC_ID_RE = /^[A-Za-z0-9_-]{16,40}$/;
 const RELAY_FORM_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const KEPT_SUBDIR = nodePath.join('Forms', '.fieldwork');
 const FORMS_SUBDIR = 'Forms';
+// A second copy goes beside the field's photos and videos so the signed form
+// is a Field Work attachment like any other — preserved to Evidence the same way.
+const MEDIA_SUBDIR = 'Field Work Media';
 const PHONE_TYPES = new Set(['text', 'checkbox', 'radio', 'dropdown', 'list', 'signature']);
 
 class SignError extends Error {}
@@ -525,7 +528,7 @@ function registerFieldWorkSignIpc(ipcMain, deps) {
 
     /*
      * r: { apiKey, relayFormId, mediaKey, caseNumber, docId, keptFile, sha256, title, who, setName, setVersion, sentAt, keepOnRelay }
-     * → { pending: true } | { fileName, signatures, changed, purged }
+     * → { pending: true } | { fileName, signatures, changed, purged, mediaFile, mediaError, bytes }
      */
     ipcMain.handle('fieldwork-sign-collect', wrap(async (_e, r) => {
         r = req(r);
@@ -565,16 +568,25 @@ function registerFieldWorkSignIpc(ipcMain, deps) {
             case_number: caseNumber, relay_form_id: r.relayFormId, doc_id: r.docId, file: saved.fileName,
             signatures: out.signatures, changed: out.changed.length, sha256: sha256(out.bytes),
         });
+        // The Forms copy is the record; the Field Work copy is a convenience,
+        // so failing to write it never fails the collect.
+        let mediaFile = '', mediaError = '';
+        try { mediaFile = deps.writeCaseFile(caseNumber, MEDIA_SUBDIR, saved.fileName, out.bytes).fileName || ''; } catch (e) {
+            mediaError = String(e && e.message || e);
+        }
         let purged = false;
         if (!r.keepOnRelay) {
             try { await deps.relay.deleteDoc(r.apiKey, r.relayFormId, r.docId); purged = true; } catch (_) { /* expires with the form */ }
         }
-        return { fileName: saved.fileName, signatures: out.signatures, changed: out.changed, purged };
+        return {
+            fileName: saved.fileName, signatures: out.signatures, changed: out.changed, purged,
+            mediaFile, mediaError, bytes: out.bytes.length,
+        };
     }));
 }
 
 module.exports = {
-    LIMITS, DEFAULT_SIGNERS, DOC_ID_RE, KEPT_SUBDIR, SignError,
+    LIMITS, DEFAULT_SIGNERS, DOC_ID_RE, KEPT_SUBDIR, MEDIA_SUBDIR, SignError,
     keyFrom, seal, open, toFrac, fromFrac, labelFor, describeFields, buildPacket, makeMupdfRenderer,
     validateResult, changedFields, applyResult, createRelayClient, registerFieldWorkSignIpc, wrapText, ansi,
 };

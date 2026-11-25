@@ -693,14 +693,66 @@ function relayStub(answers) {
         /FORMS TO SIGN/.test(panel) && /Collect signed forms/.test(panel) && /\+ Add forms/.test(panel) && /Consent to Search \(Spanish\)/.test(panel));
 
     // Collect: one signed, one still waiting.
-    collectScript = { [made.docs[0].docId]: { success: true, fileName: 'Consent to Search (Spanish) - Alex Testperson - signed - 2026-11-25.pdf', signatures: 2, changed: [], purged: true } };
+    collectScript = { [made.docs[0].docId]: { success: true, fileName: 'Consent to Search (Spanish) - Alex Testperson - signed - 2026-11-25.pdf', signatures: 2, changed: [], purged: true,
+        mediaFile: 'Consent to Search (Spanish) - Alex Testperson - signed - 2026-11-25.pdf', mediaError: '', bytes: 4321 } };
     H.toasts = [];
+    const rerendersBefore = H.rerenders;
     await UI.collectSigned('signform01');
     ok('collect → the signed form is saved and named', made.docs[0].status === 'saved' && /signed/.test(made.docs[0].fileName));
     ok('  — the unsigned one stays waiting', made.docs[1].status === 'waiting');
     ok('  — collect carries what main needs to verify the kept copy',
         collects[0].keptFile === made.docs[0].keptFile && collects[0].sha256 === made.docs[0].sha256 && collects[0].mediaKey === 'mk' && collects[0].caseNumber === CNUM);
-    ok('  — the toast says both', H.toasts.some(t => /1 signed form saved.*1 still waiting/.test(t)), H.toasts);
+    ok('  — the toast says both', H.toasts.some(t => /1 signed form saved.*Signed agency forms.*1 still waiting/.test(t)), H.toasts);
+
+    // The signed form becomes a Field Work attachment, like a photo or a video.
+    const sEntry = UI._state().entries.find(e => e.id === 'fwsign_signform01');
+    ok('the signed form is attached to a "Signed agency forms" entry',
+        sEntry && sEntry.signedForms === true && sEntry.media.length === 1 && UI._docs.entryTitle(sEntry, 'x') === 'Signed agency forms', sEntry);
+    const sm = sEntry && sEntry.media[0];
+    ok('  — as a discoverable PDF document from Field Work Media',
+        sm && sm.kind === 'document' && sm.mime === 'application/pdf' && sm.fileName === made.docs[0].fileName && sm.bytes === 4321 && sm.discoverable === true && !sm.evidenceTag, sm);
+    ok('  — linked to the form it came from', sm && sm.docId === made.docs[0].docId && sm.formTitle === 'Consent to Search (Spanish)' && sm.who === 'Alex Testperson', sm);
+    ok('  — the entry has no address, so it is never a map pin', sEntry && !sEntry.address && UI.boardPins(CID, CNUM).every(p => p.sourceId !== 'fwsign_signform01'));
+    ok('  — notes list the signed forms', sEntry && /Consent to Search \(Spanish\) — Alex Testperson/.test(sEntry.notes));
+    ok('  — saved with the case entries', JSON.parse(STORE['fieldwork_' + CID]).some(e => e.id === 'fwsign_signform01'));
+    ok('  — the tab re-renders so it shows', H.rerenders > rerendersBefore);
+    ok('  — attaching the same form again is refused', UI._docs.attachSigned(made, made.docs[0], collectScript[made.docs[0].docId]) === false && sEntry.media.length === 1);
+    ok('  — no Field Work copy (main could not write it) → nothing attached',
+        UI._docs.attachSigned(made, { docId: 'docnomedia0000001', savedAt: D }, { mediaFile: '' }) === false);
+
+    // Copy to Evidence uses the same path as photos and videos.
+    {
+        const sIdx = UI._state().entries.indexOf(sEntry);
+        const evCalls = [];
+        const api0 = globalThis.window.electronAPI;
+        globalThis.window.electronAPI = Object.assign({}, api0, {
+            fieldWorkMediaToEvidence: async (p) => { evCalls.push(p); return { success: true, files: p.fileNames.map(n => ({ name: n, path: 'Evidence/' + p.evidenceTag + '/' + n, size: 4321 })), failed: [] }; }
+        });
+        const qsa = globalThis.document.querySelectorAll;
+        globalThis.document.querySelectorAll = (sel) => sel.indexOf('data-fw-pick^="' + sIdx + ':"') !== -1
+            ? [{ getAttribute: () => sIdx + ':0' }] : [];
+        UI.preserveSelected(sIdx);
+        globalThis.document.querySelectorAll = qsa;
+        ok('preserve: the default tag names signed forms', UI._docs.evidenceTagFor(sEntry) === 'Field Work Signed Forms');
+        ok('preserve: the default description names the form and the signer',
+            /signed on the phone \(Field Work\): Consent to Search \(Spanish\) — Alex Testperson/.test(UI._docs.presetDescription(sEntry, sEntry.media)));
+        DOM.byId.fwPresTag = Object.assign(fakeEl('fwPresTag'), { value: 'Field Work Signed Forms' });
+        DOM.byId.fwPresDesc = Object.assign(fakeEl('fwPresDesc'), { value: 'Signed consent' });
+        DOM.byId.fwPresLoc = Object.assign(fakeEl('fwPresLoc'), { value: '' });
+        DOM.byId.fwPresDisc = Object.assign(fakeEl('fwPresDisc'), { value: 'yes' });
+        H.evidence = [];
+        UI.confirmPreserve();
+        for (let i = 0; i < 6; i++) await flush();
+        ok('preserve: the signed PDF is copied from Field Work Media into Evidence',
+            evCalls.length === 1 && evCalls[0].fileNames[0] === sm.fileName && evCalls[0].caseNumber === CNUM, evCalls);
+        const ev = H.evidence[0];
+        ok('  — an Evidence item of type document is created from Field Work',
+            ev && ev.type === 'document' && ev.source === 'fieldwork' && ev.fieldWorkEntryId === 'fwsign_signform01' && ev.files.length === 1 && ev.discoverable === true, ev);
+        ok('  — the attachment is marked IN EVIDENCE', sm.evidenceTag === 'Field Work Signed Forms' && sm.evidenceId === ev.id);
+        ['fwPresTag', 'fwPresDesc', 'fwPresLoc', 'fwPresDisc'].forEach(k => { delete DOM.byId[k]; });
+        globalThis.window.electronAPI = api0;
+    }
+
     collects.length = 0;
     await UI.collectSigned('signform01');
     ok('  — a saved form is not collected twice', collects.length === 1 && collects[0].docId === made.docs[1].docId);

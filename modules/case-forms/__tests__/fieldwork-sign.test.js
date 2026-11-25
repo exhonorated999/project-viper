@@ -331,6 +331,29 @@ const fakeRender = async (bytes, step) => {
     ok(!!signed, 'collect: saved in Forms');
     eq((await PDFDocument.load(signed)).getPageCount(), 3, 'collect: signed PDF has the record page');
     eq(audits[audits.length - 1][0], 'CASE_FORM_SIGNED_ON_PHONE', 'collect: audited');
+    eq(r.mediaFile, r.fileName, 'collect: Field Work copy named like the Forms copy');
+    const mediaCopy = caseFiles['TEST-0001/' + S.MEDIA_SUBDIR + '/' + r.mediaFile];
+    ok(!!mediaCopy && mediaCopy.equals(signed), 'collect: same signed PDF in Field Work Media');
+    eq([r.bytes, r.mediaError], [signed.length, ''], 'collect: size reported, no media error');
+
+    // The Field Work copy failing must not fail the collect.
+    {
+      const s2 = await call('fieldwork-sign-send', Object.assign({}, base, { setId: 'sample-pd', formId: 'consent', who: 'Alex Testperson' }));
+      const p2 = JSON.parse(S.open(keyB, relayDocs[s2.docId].blob).toString());
+      const res2 = good();
+      res2.signatures[0] = Object.assign({}, res2.signatures[0], p2.fields.find(x => x.name === 'SubjectSignature').boxes[0]);
+      relayDocs[s2.docId].result = S.seal(keyB, Buffer.from(JSON.stringify(res2)));
+      const realWrite = deps.writeCaseFile;
+      deps.writeCaseFile = (cn, sub, name, bytes) => {
+        if (sub === S.MEDIA_SUBDIR) throw new Error('media disk full');
+        return realWrite(cn, sub, name, bytes);
+      };
+      const c2 = await call('fieldwork-sign-collect', Object.assign({}, collectReq, { docId: s2.docId, keptFile: s2.keptFile, sha256: s2.sha256 }));
+      deps.writeCaseFile = realWrite;
+      ok(c2.success, 'collect (media copy fails): still succeeds — ' + c2.error);
+      ok(!!caseFiles['TEST-0001/Forms/' + c2.fileName], 'collect (media copy fails): Forms copy saved');
+      eq([c2.mediaFile, c2.mediaError], ['', 'media disk full'], 'collect (media copy fails): error reported');
+    }
 
     // Send failures.
     r = await call('fieldwork-sign-send', Object.assign({}, base, { mediaKey: 'short', setId: 'sample-pd', formId: 'consent' }));

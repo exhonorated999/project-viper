@@ -451,6 +451,12 @@
         return (P && P.chipHtml) ? P.chipHtml(entry, { compact: true }) : '';
     }
 
+    function entryTitle(entry, fallback) {
+        if (entry && entry.address) return entry.address;
+        if (entry && entry.signedForms) return 'Signed agency forms';
+        return fallback;
+    }
+
     function entryCard(entry) {
         var i = entries.indexOf(entry);
         var color = SCHEMA ? SCHEMA.markerColor(entry) : '#9ca3af';
@@ -462,7 +468,7 @@
         '<div class="fw-card" style="--fw-accent:' + color + '" onclick="FieldWorkUI.openEntry(' + i + ')">' +
             '<div class="flex items-start justify-between gap-2">' +
                 '<div class="min-w-0">' +
-                    '<p class="fw-card-title">' + esc(entry.address || 'No location recorded') + '</p>' +
+                    '<p class="fw-card-title">' + esc(entryTitle(entry, 'No location recorded')) + '</p>' +
                     '<p class="fw-card-sub">' + esc(when(entry.occurredAt || entry.timestamp)) + '</p>' +
                 '</div>' +
                 '<span class="fw-chip fw-chip-preset">' + esc(entry.presetLabel || 'Field Work') + '</span>' +
@@ -505,7 +511,7 @@
             '<div class="flex flex-wrap items-start justify-between gap-3">' +
                 '<div class="min-w-0">' +
                     '<button onclick="FieldWorkUI.backToList()" class="text-xs text-viper-cyan hover:underline">← All field work</button>' +
-                    '<h2 class="text-2xl font-bold text-white mt-1">' + esc(entry.address || 'Field Work Entry') + '</h2>' +
+                    '<h2 class="text-2xl font-bold text-white mt-1">' + esc(entryTitle(entry, 'Field Work Entry')) + '</h2>' +
                     '<p class="text-sm text-gray-400 mt-1">' +
                         esc(entry.presetLabel || 'Field Work') + ' · ' + esc(when(entry.occurredAt || entry.timestamp)) +
                         (entry.source === 'desk' ? ' · logged at desk' : ' · relayed from the field') +
@@ -843,7 +849,7 @@
     function evidenceTagFor(entry) {
         var base = (entry && entry.address)
             ? ('Field Work ' + entry.address)
-            : 'Field Work Media';
+            : (entry && entry.signedForms ? 'Field Work Signed Forms' : 'Field Work Media');
         return base.replace(/[^a-zA-Z0-9 _.-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
     }
 
@@ -858,6 +864,15 @@
             if (keys[0] === 'document') return 'document';
         }
         return 'digital';
+    }
+
+    function presetDescription(entry, items) {
+        var signed = (items || []).filter(function (m) { return m && m.docId; });
+        if (signed.length && signed.length === (items || []).length) {
+            return 'Agency form' + (signed.length === 1 ? '' : 's') + ' signed on the phone (Field Work): ' +
+                signed.map(function (m) { return (m.formTitle || m.fileName) + (m.who ? ' — ' + m.who : ''); }).join('; ');
+        }
+        return (entry.presetLabel || 'Field work') + ' — ' + (entry.address || '');
     }
 
     function showPreserveModal(entryIndex, items) {
@@ -885,7 +900,7 @@
                     '<div>' +
                         '<label class="block text-xs text-gray-400 mb-1">Description *</label>' +
                         '<textarea id="fwPresDesc" rows="2" class="w-full px-3 py-2 bg-viper-dark border border-gray-600 rounded-lg text-white text-sm focus:border-viper-cyan focus:outline-none" placeholder="What these files show and where they came from">' +
-                            esc((entry.presetLabel || 'Field work') + ' — ' + (entry.address || '')) +
+                            esc(presetDescription(entry, items)) +
                         '</textarea>' +
                     '</div>' +
                     '<div>' +
@@ -1592,11 +1607,55 @@
     }
 
     /**
+     * Put a collected signed form among the field's attachments, so it is
+     * reviewed, marked discoverable and copied to Evidence exactly like a
+     * photo or a video. One "Signed agency forms" entry per field form;
+     * it carries no address, so it never becomes a map pin.
+     * → true when a new attachment was added.
+     */
+    function attachSigned(form, d, r) {
+        if (!r || !r.mediaFile || !SCHEMA) return false;
+        var id = 'fwsign_' + form.formId;
+        var entry = null;
+        entries.forEach(function (e) { if (e && e.id === id) entry = e; });
+        if (!entry) {
+            entry = SCHEMA.makeEntry({
+                id: id, preset: form.preset, presetLabel: form.presetLabel,
+                fieldKeys: [], fields: {}, timestamp: d.savedAt, formId: form.formId, source: 'relay'
+            });
+            entry.signedForms = true;
+            entries.push(entry);
+        }
+        entry.media = Array.isArray(entry.media) ? entry.media : [];
+        if (entry.media.some(function (m) { return m && m.docId === d.docId; })) return false;
+        entry.media.push({
+            id: 'fw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+            kind: 'document',
+            fileName: r.mediaFile,
+            mime: 'application/pdf',
+            bytes: Number(r.bytes) || 0,
+            durationSec: 0,
+            capturedAt: d.savedAt,
+            source: 'field-form',
+            discoverable: true,
+            docId: d.docId,
+            formTitle: d.title || '',
+            who: d.who || ''
+        });
+        entry.notes = 'Agency forms completed and signed on the phone:\n' + entry.media
+            .filter(function (m) { return m && m.docId; })
+            .map(function (m) { return '• ' + (m.formTitle || m.fileName) + (m.who ? ' — ' + m.who : ''); })
+            .join('\n');
+        d.mediaFile = r.mediaFile;
+        return true;
+    }
+
+    /**
      * Bring signed forms into the case. Never rejects.
-     * → { saved, waiting, failed, gone, firstError }
+     * → { saved, waiting, failed, gone, firstError, attached }
      */
     function collectDocs(form) {
-        var out = { saved: 0, waiting: 0, failed: 0, gone: 0, firstError: '' };
+        var out = { saved: 0, waiting: 0, failed: 0, gone: 0, firstError: '', attached: 0 };
         var todo = outstandingDocs(form);
         var a = api();
         if (!todo.length || !a || typeof a.fieldWorkSignCollect !== 'function') return Promise.resolve(out);
@@ -1620,6 +1679,7 @@
                     d.purged = !!r.purged;
                     delete d.error;
                     out.saved++;
+                    if (host.getCaseId() === caseId && attachSigned(form, d, r)) out.attached++;
                 }).catch(function (e) {
                     if (e && e.status === 404) { d.status = 'gone'; out.gone++; return; }
                     d.status = 'error';
@@ -1630,14 +1690,20 @@
             });
         });
         return chain.then(function () {
-            if (host.getCaseId() === caseId) saveForms();
+            if (host.getCaseId() === caseId) {
+                saveForms();
+                if (out.attached) saveEntries();
+            }
             return out;
         });
     }
 
     function collectSummary(r) {
         var parts = [];
-        if (r.saved) parts.push('✓ ' + r.saved + ' signed form' + (r.saved === 1 ? '' : 's') + ' saved to the case\'s Forms folder');
+        if (r.saved) {
+            parts.push('✓ ' + r.saved + ' signed form' + (r.saved === 1 ? '' : 's') + ' saved to the case\'s Forms folder' +
+                (r.attached ? ' and added under "Signed agency forms" — copy to Evidence from there' : ''));
+        }
         if (r.waiting) parts.push(r.waiting + ' still waiting to be signed');
         if (r.gone) parts.push(r.gone + ' no longer on the server');
         if (r.failed) parts.push(r.failed + ' failed — ' + r.firstError);
@@ -1651,7 +1717,8 @@
         if (!outstandingDocs(form).length) { host.toast('Every form on this field form has been collected.', 'info'); return Promise.resolve(); }
         return collectDocs(form).then(function (r) {
             host.toast(collectSummary(r) || 'Nothing to collect yet.', r.failed ? 'error' : (r.saved ? 'success' : 'info'));
-            paintFormsPanel(document.getElementById('fieldWorkFormsSection'));
+            if (r.attached) host.rerender();
+            else paintFormsPanel(document.getElementById('fieldWorkFormsSection'));
         });
     }
 
@@ -2008,7 +2075,8 @@
         // do not depend on the entries below.
         collectDocs(form).then(function (r) {
             docRes = (r.saved || r.waiting || r.failed || r.gone) ? r : null;
-            if (docRes) paintFormsPanel(document.getElementById('fieldWorkFormsSection'));
+            if (docRes && docRes.attached) host.rerender();
+            else if (docRes) paintFormsPanel(document.getElementById('fieldWorkFormsSection'));
             // Anything left over from a previous import goes first. It cannot be
             // re-requested from the server, so it must not be stranded behind an
             // early return when there are no new entries to fetch.
@@ -2638,7 +2706,7 @@
         guardModalFocus: guardModalFocus,
 
         // Exposed for tests — not part of the host contract.
-        _docs: { outstandingDocs: outstandingDocs, docsRoom: docsRoom, applyDocInfo: applyDocInfo, collectSummary: collectSummary, collectDocs: collectDocs, sendDocs: sendDocs },
+        _docs: { outstandingDocs: outstandingDocs, docsRoom: docsRoom, applyDocInfo: applyDocInfo, collectSummary: collectSummary, collectDocs: collectDocs, sendDocs: sendDocs, attachSigned: attachSigned, entryTitle: entryTitle, evidenceTagFor: evidenceTagFor, presetDescription: presetDescription },
         _state: function () { return { entries: entries, forms: forms, filter: filter, draft: draft, viewIndex: viewIndex, fp: fp }; },
         _setState: function (s) {
             if (s.entries) entries = s.entries;

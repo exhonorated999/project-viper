@@ -143,6 +143,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agencyPackDraftPreview: (req) => ipcRenderer.invoke('agency-pack-draft-preview', req),
   agencyPackDraftSave: (id) => ipcRenderer.invoke('agency-pack-draft-save', id),
   agencyPackDraftDiscard: (id) => ipcRenderer.invoke('agency-pack-draft-discard', id),
+  // Agency form sets (modules/case-forms)
+  caseFormsInstalled: () => ipcRenderer.invoke('case-forms-installed'),
+  caseFormsLibrary: (req) => ipcRenderer.invoke('case-forms-library', req),
+  caseFormsEnable: (req) => ipcRenderer.invoke('case-forms-enable', req),
+  caseFormsRemove: (id) => ipcRenderer.invoke('case-forms-remove', id),
+  caseFormsVerify: (id) => ipcRenderer.invoke('case-forms-verify', id),
+  caseFormsChooseFile: () => ipcRenderer.invoke('case-forms-choose-file'),
+  caseFormsInstallFile: (filePath) => ipcRenderer.invoke('case-forms-install-file', filePath),
+  caseFormsGetForm: (req) => ipcRenderer.invoke('case-forms-get-form', req),
+  caseFormsFill: (req) => ipcRenderer.invoke('case-forms-fill', req),
+  caseFormsCaseFiles: (req) => ipcRenderer.invoke('case-forms-case-files', req),
+  caseFormsOpen: (req) => ipcRenderer.invoke('case-forms-open', req),
 
   // Diagnostic Report (diagnostic-edition builds)
   isDiagnosticMode: () => ipcRenderer.invoke('is-diagnostic-mode'),

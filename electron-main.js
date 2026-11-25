@@ -4064,6 +4064,36 @@ const _agencyPacks = (() => {
   return store;
 })();
 
+// --- Agency form sets (modules/case-forms) ---
+// An agency's fillable PDFs plus field mappings, downloaded from the dashboard
+// library when the officer switches a set on in Settings (or imported from a
+// .viperforms file) into userData/case-forms/<id>/ (backed up). Filled forms
+// land in cases/<n>/Forms/ under Field Security; nothing is written while the
+// vault is locked.
+const _caseForms = (() => {
+  const C = require('./modules/case-forms/form-store.js');
+  const store = C.createFormStore({
+    fs, path, crypto,
+    rootDir: path.join(app.getPath('userData'), 'case-forms'),
+  });
+  const caseForms = C.createCaseForms({
+    fs, path,
+    getCasesDir: () => casesDir,
+    getSecurity: () => security,
+    writeCaseFile: (caseNumber, subdir, name, bytes) => _writeCaseMediaFile(caseNumber, subdir, name, bytes),
+    tempDir: path.join(app.getPath('temp'), 'viper-view-case-forms'),
+    shell,
+  });
+  C.registerFormIpc(ipcMain, store, {
+    library: C.createLibraryClient({ fetch: (...a) => fetch(...a) }),
+    caseForms,
+    dialog, getWindow: () => mainWindow, restoreFocus: () => restoreFocus(),
+    defaultDir: () => app.getPath('documents'),
+    audit: () => audit, AUDIT_EVENTS,
+  });
+  return store;
+})();
+
 // --- Report Pop-out Window ---
 ipcMain.handle('open-report-window', async (event, caseNumber) => {
   const reportWin = new BrowserWindow({

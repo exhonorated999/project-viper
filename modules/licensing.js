@@ -266,6 +266,28 @@ async function submitParserSample(opts) {
   return res;
 }
 
+/* ---------- any dashboard call with api-key self-heal ---------- */
+// fn(apiKey) → IPC result. Retried once with a refreshed key when the
+// dashboard calls the stored one invalid/inactive. Results that carry the
+// server's answer in `libraryError` (calls that fall back to local data)
+// count too.
+async function callWithApiKey(fn) {
+  let apiKey = _get("api_key");
+  if (!apiKey) {
+    try { apiKey = await refreshApiKey(); } catch (_) { apiKey = ""; }
+  }
+  let res = await fn(apiKey);
+  const bad = (r) => r && (
+    (r.success === false && _looksLikeBadApiKey(r.error)) ||
+    (r.libraryError && _looksLikeBadApiKey(r.libraryError)));
+  if (bad(res)) {
+    let fresh = "";
+    try { fresh = await refreshApiKey(); } catch (_) { return res; }
+    res = await fn(fresh);
+  }
+  return res;
+}
+
 /* ---------- update checker ---------- */
 async function checkForUpdate() {
   try {
@@ -297,5 +319,6 @@ window.ViperLicensing = {
   validateLicense,
   refreshApiKey,
   submitParserSample,
+  callWithApiKey,
   checkForUpdate,
 };

@@ -19,10 +19,16 @@ class DatapilotUI {
         this.movementState  = { from: null, to: null, mode: 'both', eventPin: null, focusLat: null, focusLng: null };
         this.artifactsState = { search: '', type: null, source: null, hasGps: false, flaggedOnly: false };
         this.subjectState   = { contactSearch: '' };
+        // Paged lists (Artifacts grid, All Contacts): key → { page, size, sig }.
+        this.pages = {};
+        this._thumbCache = new Map();
         this._contactIndexCache = null;
         this._allArtifactsCache = null;
         this._lastImportId = null;
     }
+
+    /** Page sizes offered under a paged list; 0 = show everything. */
+    static get PAGE_SIZES() { return [60, 120, 300, 600, 0]; }
 
     // ────────────────────────── public API ──────────────────────────
 
@@ -79,6 +85,9 @@ class DatapilotUI {
             // Invalidate caches when import changes
             this._contactIndexCache = null;
             this._allArtifactsCache = null;
+            this._thumbCache = new Map();
+            this.pages = {};
+            this.movementState.stripLimit = null;
             this._lastImportId = imp && imp.id;
         }
         if (!imp) {
@@ -102,7 +111,96 @@ class DatapilotUI {
         this._wireHeader(rootEl);
         this._wireViewSwitcher(rootEl);
         this._wireView(rootEl, imp);
+        this._wirePagers(rootEl);
         if (kf) kf.restore(rootEl, snap);
+    }
+
+    // ────────────────────────── paging ──────────────────────────
+
+    /**
+     * One page of `list` for the paged area `key`. `sig` describes the
+     * current filters — when it changes the area goes back to page 1.
+     * Nothing is ever dropped: every item is reachable by paging or by
+     * choosing "All" per page.
+     */
+    _page(key, list, sig, defSize) {
+        const st = this.pages[key] || (this.pages[key] = { page: 1, size: defSize || 300, sig: sig });
+        if (st.sig !== sig) { st.sig = sig; st.page = 1; }
+        const total = list.length;
+        const per = st.size > 0 ? st.size : Math.max(1, total);
+        const pages = Math.max(1, Math.ceil(total / per));
+        if (!(st.page >= 1)) st.page = 1;
+        if (st.page > pages) st.page = pages;
+        const start = Math.min(total, (st.page - 1) * per);
+        const end = Math.min(total, start + per);
+        return { key, items: list.slice(start, end), start, end, total, page: st.page, pages, size: st.size };
+    }
+
+    _pagerHtml(p, noun) {
+        if (!p || p.total <= DatapilotUI.PAGE_SIZES[0]) return '';
+        const n = (v) => this._formatNumber(v);
+        const first = p.page <= 1, last = p.page >= p.pages;
+        const nav = p.pages > 1 ? `
+                <button class="dp-pill-btn" data-dp-page-go="first" ${first ? 'disabled' : ''} title="First page">«</button>
+                <button class="dp-pill-btn" data-dp-page-go="prev" ${first ? 'disabled' : ''}>‹ Prev</button>
+                <span class="dp-pager-pos">Page <input type="number" class="dp-pager-input" data-dp-page-input min="1" max="${p.pages}" value="${p.page}"> of ${n(p.pages)}</span>
+                <button class="dp-pill-btn" data-dp-page-go="next" ${last ? 'disabled' : ''}>Next ›</button>
+                <button class="dp-pill-btn" data-dp-page-go="last" ${last ? 'disabled' : ''} title="Last page">»</button>` : '';
+        const opts = DatapilotUI.PAGE_SIZES.map(s => `<option value="${s}" ${s === p.size ? 'selected' : ''}>${s ? s : 'All'}</option>`).join('');
+        return `
+            <div class="dp-pager" data-dp-pager="${this._esc(p.key)}" data-dp-pages="${p.pages}">
+                <span class="dp-pager-range">Showing <strong>${n(p.start + 1)}–${n(p.end)}</strong> of ${n(p.total)} ${this._esc(noun || 'items')}</span>
+                ${nav}
+                <label class="dp-pager-size">Per page <select data-dp-page-size>${opts}</select></label>
+            </div>`;
+    }
+
+    _wirePagers(root) {
+        // Restore the view's scroll position after a page change re-render.
+        if (this._pagerScroll) {
+            const body = root.querySelector('#dp-view-body');
+            if (body) body.scrollTop = this._pagerScroll.top;
+            const list = root.querySelector(`[data-dp-pager-scroll="${this._pagerScroll.key}"]`);
+            if (list) list.scrollTop = 0;
+            this._pagerScroll = null;
+        }
+        root.querySelectorAll('[data-dp-pager]').forEach(bar => {
+            const key = bar.dataset.dpPager;
+            const st = this.pages[key];
+            if (!st) return;
+            const pages = Number(bar.dataset.dpPages) || 1;
+            const go = (page) => {
+                const body = root.querySelector('#dp-view-body');
+                this._pagerScroll = { key, top: body ? body.scrollTop : 0 };
+                st.page = Math.max(1, Math.min(pages, page));
+                this.module.render();
+            };
+            bar.querySelectorAll('[data-dp-page-go]').forEach(b => {
+                b.onclick = () => {
+                    const g = b.dataset.dpPageGo;
+                    go(g === 'first' ? 1 : g === 'last' ? pages : g === 'prev' ? st.page - 1 : st.page + 1);
+                };
+            });
+            const inp = bar.querySelector('[data-dp-page-input]');
+            if (inp) {
+                inp.onchange = () => { const v = parseInt(inp.value, 10); if (v >= 1) go(v); else inp.value = st.page; };
+                inp.onkeydown = (e) => { if (e.key === 'Enter') inp.onchange(); };
+            }
+            const sel = bar.querySelector('[data-dp-page-size]');
+            if (sel) {
+                sel.onchange = () => {
+                    // Keep the first item that was on screen on screen.
+                    const oldPer = st.size > 0 ? st.size : Infinity;
+                    const firstIdx = isFinite(oldPer) ? (st.page - 1) * oldPer : 0;
+                    st.size = Number(sel.value) || 0;
+                    const page = st.size > 0 ? Math.floor(firstIdx / st.size) + 1 : 1;
+                    const body = root.querySelector('#dp-view-body');
+                    this._pagerScroll = { key, top: body ? body.scrollTop : 0 };
+                    st.page = page;
+                    this.module.render();
+                };
+            }
+        });
     }
 
     // ────────────────────────── empty ──────────────────────────
@@ -444,10 +542,10 @@ class DatapilotUI {
             (c.displayNumber || '').toLowerCase().includes(s) ||
             (c.phones || []).some(p => p.toLowerCase().includes(s))
         );
-        // Cap rendered rows for perf — UFD exports can have thousands of contacts.
-        const RENDER_CAP = 300;
-        const shown = filtered.slice(0, RENDER_CAP);
-        const overflow = filtered.length - shown.length;
+        // Paged — UFD exports can have thousands of contacts; every one stays
+        // reachable (page through, or pick "All" per page).
+        const pg = this._page('contacts', filtered, s, 300);
+        const shown = pg.items;
 
         return `
             <div class="dp-card">
@@ -460,8 +558,9 @@ class DatapilotUI {
                        id="dp-subject-contact-search"
                        placeholder="Search by name or number"
                        value="${this._esc(search)}">
-                <div class="dp-contact-search-meta">${filtered.length} match${filtered.length === 1 ? '' : 'es'}${overflow > 0 ? ` (showing first ${RENDER_CAP})` : ''}</div>
-                <div class="dp-contact-list">
+                <div class="dp-contact-search-meta">${filtered.length} match${filtered.length === 1 ? '' : 'es'}</div>
+                ${this._pagerHtml(pg, 'contacts')}
+                <div class="dp-contact-list" data-dp-pager-scroll="contacts">
                     ${shown.length === 0
                         ? `<div class="dp-empty-inline">No contacts match.</div>`
                         : shown.map(c => {
@@ -1035,6 +1134,10 @@ class DatapilotUI {
         if (this.movementState.to   == null) this.movementState.to   = maxMs;
 
         const inRange = datedPoints.filter(p => p.dateMs >= this.movementState.from && p.dateMs <= this.movementState.to);
+        // The photo strip grows on demand ("Show more" appends in place so the
+        // map is not rebuilt). Kept for the in-place append in _wireMovement.
+        this._mvInRange = inRange;
+        const stripLimit = this.movementState.stripLimit || DatapilotUI.STRIP_STEP;
 
         return `
             <div class="dp-movement">
@@ -1067,18 +1170,9 @@ class DatapilotUI {
                 <div class="dp-mv-bottom">
                     <div class="dp-mv-strip" id="dp-mv-strip">
                         <div class="dp-card-title">Photos in range (${inRange.length})</div>
-                        <div class="dp-mv-strip-list">
-                            ${inRange.slice(0, 40).map(p => `
-                                <div class="dp-mv-strip-card" data-dp-mv-photo="${p.exifHash}">
-                                    <div class="dp-mv-strip-img" data-thumbnail-path="${this._esc(p.photo ? p.photo.previewPath || p.photo.fileSystemPath : '')}">
-                                        <span class="dp-thumb-placeholder">🖼️</span>
-                                    </div>
-                                    <div class="dp-mv-strip-meta">
-                                        <div class="dp-mv-strip-date">${this._esc(this._friendlyDate(p.date.split ? p.date.split('T')[0] : '')) }</div>
-                                        <div class="dp-mono dp-truncate">${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</div>
-                                    </div>
-                                </div>
-                            `).join('')}
+                        <div class="dp-mv-strip-list" id="dp-mv-strip-list">
+                            ${inRange.slice(0, stripLimit).map(p => this._mvStripCard(p)).join('')}
+                            ${this._mvStripMore(inRange.length, Math.min(stripLimit, inRange.length))}
                             ${inRange.length === 0 ? `<div class="dp-empty-inline">No GPS-bearing photos in selected window.</div>` : ''}
                         </div>
                     </div>
@@ -1089,6 +1183,50 @@ class DatapilotUI {
                 </div>
             </div>
         `;
+    }
+
+    static get STRIP_STEP() { return 40; }
+
+    _mvStripCard(p) {
+        return `
+                                <div class="dp-mv-strip-card" data-dp-mv-photo="${this._esc(p.exifHash)}">
+                                    <div class="dp-mv-strip-img" data-thumbnail-path="${this._esc(p.photo ? p.photo.previewPath || p.photo.fileSystemPath : '')}">
+                                        <span class="dp-thumb-placeholder">🖼️</span>
+                                    </div>
+                                    <div class="dp-mv-strip-meta">
+                                        <div class="dp-mv-strip-date">${this._esc(this._friendlyDate(p.date.split ? p.date.split('T')[0] : '')) }</div>
+                                        <div class="dp-mono dp-truncate">${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</div>
+                                    </div>
+                                </div>`;
+    }
+
+    /** "Show more" tile at the end of the photo strip (empty when all are shown). */
+    _mvStripMore(total, shown) {
+        const rest = total - shown;
+        if (rest <= 0) return '';
+        const step = Math.min(DatapilotUI.STRIP_STEP, rest);
+        return `
+                                <div class="dp-mv-strip-more" id="dp-mv-strip-more">
+                                    <div class="dp-card-sub">${this._formatNumber(rest)} more</div>
+                                    <button class="dp-pill-btn" data-dp-mv-more="${step}">Show ${step} more</button>
+                                    ${rest > step ? `<button class="dp-pill-btn" data-dp-mv-more="all">Show all</button>` : ''}
+                                </div>`;
+    }
+
+    /** Append more photo-strip cards in place (no re-render, the map stays put). */
+    _mvShowMore(root, how) {
+        const strip = root.querySelector('#dp-mv-strip-list');
+        const list = this._mvInRange || [];
+        if (!strip) return;
+        const shown = strip.querySelectorAll('[data-dp-mv-photo]').length;
+        const add = how === 'all' ? list.length - shown : (parseInt(how, 10) || DatapilotUI.STRIP_STEP);
+        const next = Math.min(list.length, shown + Math.max(0, add));
+        this.movementState.stripLimit = next;
+        const old = strip.querySelector('#dp-mv-strip-more');
+        const html = list.slice(shown, next).map(p => this._mvStripCard(p)).join('') + this._mvStripMore(list.length, next);
+        if (old) old.insertAdjacentHTML('beforebegin', html); else strip.insertAdjacentHTML('beforeend', html);
+        if (old) old.remove();
+        this._hydrateThumbnails(root, strip);
     }
 
     _renderClusterList(points) {
@@ -1204,25 +1342,30 @@ class DatapilotUI {
             };
         });
 
-        // Photo strip click → lightbox
-        root.querySelectorAll('[data-dp-mv-photo]').forEach(c => {
-            c.onclick = () => {
-                const hash = c.dataset.dpMvPhoto;
-                const photo = (imp.media || []).find(m => {
-                    if (!m) return false;
-                    if (m.exifHash === hash) return true;
-                    if (m.sha256 && m.sha256.toLowerCase() === hash) return true;
-                    if (m.sha3 && m.sha3.toLowerCase() === hash) return true;
-                    return false;
-                });
-                if (photo) this._openMediaLightbox(photo);
-            };
-        });
+        // Photo strip click → lightbox (delegated: "Show more" appends cards)
+        const openStripPhoto = (c) => {
+            const hash = c.dataset.dpMvPhoto;
+            const photo = (imp.media || []).find(m => {
+                if (!m) return false;
+                if (m.exifHash === hash) return true;
+                if (m.sha256 && m.sha256.toLowerCase() === hash) return true;
+                if (m.sha3 && m.sha3.toLowerCase() === hash) return true;
+                return false;
+            });
+            if (photo) this._openMediaLightbox(photo);
+        };
+        const strip = root.querySelector('#dp-mv-strip-list');
+        if (strip) strip.onclick = (e) => {
+            const more = e.target.closest('[data-dp-mv-more]');
+            if (more) { this._mvShowMore(root, more.dataset.dpMvMore); return; }
+            const c = e.target.closest('[data-dp-mv-photo]');
+            if (c) openStripPhoto(c);
+        };
 
         // Build map
         this._buildMovementMap(root, imp);
         // Hydrate strip thumbs
-        this._hydrateThumbnails(root);
+        this._hydrateThumbnails(root, root.querySelector('#dp-mv-strip-list'));
     }
 
     _buildMovementMap(root, imp) {
@@ -1326,6 +1469,8 @@ class DatapilotUI {
         const items = this._allArtifacts(imp);
         const counts = this._facetCounts(items);
         const filtered = this._applyArtifactFilters(items);
+        const s = this.artifactsState;
+        const pg = this._page('artifacts', filtered, JSON.stringify([s.search || '', s.type, s.source, !!s.hasGps, !!s.flaggedOnly]), 300);
 
         return `
             <div class="dp-artifacts">
@@ -1362,11 +1507,11 @@ class DatapilotUI {
                         <strong>${filtered.length}</strong> ${filtered.length === 1 ? 'item' : 'items'}
                         <button class="dp-btn dp-btn-link" id="dp-art-clear">Clear filters</button>
                     </div>
-                    <div class="dp-art-grid" id="dp-art-grid">
+                    ${this._pagerHtml(pg, filtered.length === 1 ? 'item' : 'items')}
+                    <div class="dp-art-grid" id="dp-art-grid" data-dp-pager-scroll="artifacts">
                         ${filtered.length === 0 ? `<div class="dp-empty-inline">No artifacts match these filters.</div>` :
-                            filtered.slice(0, 300).map(it => this._renderArtifactCard(it)).join('')
+                            pg.items.map(it => this._renderArtifactCard(it)).join('')
                         }
-                        ${filtered.length > 300 ? `<div class="dp-card-sub" style="grid-column:1/-1;text-align:center;padding:12px">Showing first 300 of ${filtered.length} — refine filters to narrow.</div>` : ''}
                     </div>
                 </div>
             </div>
@@ -1624,65 +1769,116 @@ class DatapilotUI {
             };
         });
         this._wireFlagButtons(root);
-        this._hydrateThumbnails(root);
-        this._hydrateVideoThumbnails(root);
+        const grid = root.querySelector('#dp-art-grid');
+        this._hydrateThumbnails(root, grid);
+        this._hydrateVideoThumbnails(root, grid);
     }
 
-    // ════════════════════════ THUMBNAIL HYDRATION (fixes prior bug) ════════════════════════
+    // ════════════════════════ THUMBNAIL HYDRATION ════════════════════════
 
     /**
-     * Direct concurrent-pull approach — avoids broken IntersectionObserver
-     * with custom scroll containers. Caps at 120 thumbnails per render
-     * to keep memory in check.
+     * Run `load(card)` for each card as it nears view inside `scroller`, at
+     * most `max` at a time. The first `seed` cards start straight away (all
+     * of them when IntersectionObserver is unavailable), so a page always
+     * fills in even if the observer never reports. Every card on the page
+     * is eligible — there is no per-render cap.
      */
-    async _hydrateThumbnails(root) {
-        const cards = Array.from(root.querySelectorAll('[data-thumbnail-path]'));
-        // Diagnostic: log what we found on the artifact grid so a missing-thumbnail
-        // bug can be triaged without a full page rebuild.
-        try {
-            const totalImageCards = root.querySelectorAll('.dp-art-thumb').length;
-            const imp = this.module.getActiveImport();
-            console.log('[Datapilot] hydrate thumbs:',
-                'cardsWithPath=', cards.length,
-                'totalImageCards=', totalImageCards,
-                'folderPath=', imp ? imp.folderPath : '(no imp)',
-                'sample-paths=', cards.slice(0, 3).map(c => c.dataset.thumbnailPath));
-        } catch (_) {}
-        if (!cards.length) return;
-        const cap = Math.min(cards.length, 120);
-        let i = 0;
-        let okCount = 0;
-        let failCount = 0;
-        const firstFails = [];
-        const next = async () => {
-            while (i < cap) {
-                const idx = i++;
-                const card = cards[idx];
-                const p = card.dataset.thumbnailPath;
-                if (!p) continue;
-                try {
-                    const url = await this.module.readMedia(p);
-                    if (url && card.isConnected) {
-                        // Inline style guarantees the image fills its 180px
-                        // parent thumb regardless of any stale cached CSS.
-                        card.innerHTML = `<img src="${url}" loading="lazy" alt="" style="width:100%;height:100%;object-fit:cover;display:block">`;
-                        okCount++;
-                    } else if (!url) {
-                        failCount++;
-                        if (firstFails.length < 3) firstFails.push(p);
-                    }
-                } catch (e) {
-                    failCount++;
-                    if (firstFails.length < 3) firstFails.push(p + ' (' + e.message + ')');
-                }
+    _lazyRun(name, cards, scroller, max, seed, load) {
+        if (!this._lazyIO) this._lazyIO = {};
+        if (this._lazyIO[name]) { try { this._lazyIO[name].disconnect(); } catch (_) {} this._lazyIO[name] = null; }
+        const mark = 'dpLazy' + name;
+        const fresh = cards.filter(c => !c.dataset[mark]);
+        if (!fresh.length) return;
+        const queue = [];
+        let active = 0;
+        const pump = () => {
+            while (active < max && queue.length) {
+                const card = queue.shift();
+                if (!card.isConnected || card.dataset[mark] === 'done') continue;
+                card.dataset[mark] = 'done';
+                active++;
+                Promise.resolve().then(() => load(card)).catch(() => {}).then(() => { active--; pump(); });
             }
         };
-        // 4-way concurrency
-        await Promise.all([next(), next(), next(), next()]);
-        try {
-            console.log('[Datapilot] hydrate thumbs done:',
-                'ok=', okCount, 'fail=', failCount, 'firstFails=', firstFails);
-        } catch (_) {}
+        const want = (card) => { if (card.dataset[mark]) return; card.dataset[mark] = 'queued'; queue.push(card); };
+        if (typeof IntersectionObserver === 'undefined') { fresh.forEach(want); pump(); return; }
+        fresh.slice(0, seed).forEach(want);
+        const io = new IntersectionObserver((entries) => {
+            for (const ent of entries) {
+                if (!ent.isIntersecting) continue;
+                io.unobserve(ent.target);
+                want(ent.target);
+            }
+            pump();
+        }, { root: scroller || null, rootMargin: '600px' });
+        fresh.slice(seed).forEach(c => io.observe(c));
+        this._lazyIO[name] = io;
+        pump();
+    }
+
+    /** Down-scale a decoded photo to a small JPEG so a page of hundreds stays light. */
+    _shrinkImage(src, minSide) {
+        return new Promise((resolve) => {
+            if (typeof Image === 'undefined' || typeof document === 'undefined') return resolve(src);
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    const w = img.naturalWidth, h = img.naturalHeight;
+                    if (!w || !h) return resolve('');
+                    const scale = Math.min(1, minSide / Math.min(w, h));
+                    if (scale === 1 && src.length < 300000) return resolve(src);
+                    const c = document.createElement('canvas');
+                    c.width = Math.max(1, Math.round(w * scale));
+                    c.height = Math.max(1, Math.round(h * scale));
+                    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+                    resolve(c.toDataURL('image/jpeg', 0.8));
+                } catch (_) { resolve(src); }
+            };
+            img.onerror = () => resolve('');
+            img.src = src;
+        });
+    }
+
+    _cacheThumb(key, url) {
+        if (!this._thumbCache) this._thumbCache = new Map();
+        this._thumbCache.delete(key);
+        this._thumbCache.set(key, url);
+        while (this._thumbCache.size > 4000) this._thumbCache.delete(this._thumbCache.keys().next().value);
+    }
+
+    /**
+     * Fill photo thumbnails for every card on the page as it scrolls near
+     * view (`scroller` = the list that scrolls). Small JPEGs are cached per
+     * path, so paging back and forth is instant.
+     */
+    _hydrateThumbnails(root, scroller) {
+        if (!this._thumbCache) this._thumbCache = new Map();
+        const put = (card, url) => { card.innerHTML = `<img src="${url}" alt="" style="width:100%;height:100%;object-fit:cover;display:block">`; };
+        const todo = [];
+        for (const card of Array.from(root.querySelectorAll('[data-thumbnail-path]'))) {
+            const p = card.dataset.thumbnailPath;
+            if (!p || card.dataset.dpLazyphoto) continue;
+            if (this._thumbCache.has(p)) {
+                card.dataset.dpLazyphoto = 'done';
+                const hit = this._thumbCache.get(p);
+                if (hit) put(card, hit);
+            } else todo.push(card);
+        }
+        if (!todo.length) return;
+        this._lazyRun('photo', todo, scroller, 4, 24, async (card) => {
+            const p = card.dataset.thumbnailPath;
+            let url = '';
+            try {
+                const full = await this.module.readMedia(p);
+                url = full ? await this._shrinkImage(full, 360) : '';
+            } catch (e) { url = ''; }
+            if (!url && !this._thumbFailLogged) {
+                this._thumbFailLogged = true;
+                try { console.warn('[Datapilot] thumbnail could not be read:', p); } catch (_) {}
+            }
+            if (url) this._cacheThumb(p, url);
+            if (url && card.isConnected) put(card, url);
+        });
     }
 
     /**
@@ -1694,7 +1890,7 @@ class DatapilotUI {
      * Results are cached in `_videoThumbCache` (id → dataURL) so
      * re-renders / scrolling back don't regenerate.
      */
-    _hydrateVideoThumbnails(root) {
+    _hydrateVideoThumbnails(root, scroller) {
         if (!this._videoThumbCache) this._videoThumbCache = new Map();
         const cards = Array.from(root.querySelectorAll('[data-dp-video-thumb-path]'));
         if (!cards.length) return;
@@ -1709,11 +1905,9 @@ class DatapilotUI {
             }
         }
 
-        // Concurrency-limited generator
+        // Concurrency-limited, near-view only (video decode is heavy)
         const queue = cards.filter(c => !c.dataset.dpVideoThumbDone);
         if (!queue.length) return;
-        let active = 0;
-        const MAX_ACTIVE = 2;
 
         const tryGenerate = async (card) => {
             const id = card.dataset.dpVideoThumbId;
@@ -1734,34 +1928,7 @@ class DatapilotUI {
             }
         };
 
-        const pump = () => {
-            while (active < MAX_ACTIVE && queue.length) {
-                const card = queue.shift();
-                if (!card.isConnected) continue;
-                active++;
-                tryGenerate(card).finally(() => { active--; pump(); });
-            }
-        };
-
-        if (typeof IntersectionObserver !== 'undefined') {
-            const io = new IntersectionObserver((entries) => {
-                for (const ent of entries) {
-                    if (!ent.isIntersecting) continue;
-                    const card = ent.target;
-                    io.unobserve(card);
-                    // Move this card to front of queue (prioritize visible)
-                    const idx = queue.indexOf(card);
-                    if (idx >= 0) {
-                        queue.splice(idx, 1);
-                        queue.unshift(card);
-                    }
-                    pump();
-                }
-            }, { rootMargin: '600px 0px' });
-            for (const c of queue) io.observe(c);
-        } else {
-            pump();
-        }
+        this._lazyRun('video', queue, scroller, 2, 6, tryGenerate);
     }
 
     /**

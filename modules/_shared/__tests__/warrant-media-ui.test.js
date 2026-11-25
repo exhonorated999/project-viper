@@ -227,7 +227,7 @@ try {
         typingCase('DataPilot ' + id, SRC.dpUi, 'render', 'dp-root', id, (h) => ({
             module: { getActiveImport: () => ({ id: 'imp1' }) }, _lastImportId: 'imp1',
             _renderHeader: () => '', _renderViewSwitcher: () => '', _renderViewContent: () => h,
-            _wireHeader() {}, _wireViewSwitcher() {}, _wireView() {},
+            _wireHeader() {}, _wireViewSwitcher() {}, _wireView() {}, _wirePagers() {},
             __args: (c) => [c],
         }));
     }

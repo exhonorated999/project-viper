@@ -463,7 +463,20 @@ function createCaseForms(deps) {
         return { opened: true };
     }
 
-    return { save, listFiles, open, locked };
+    // A filled form that is not saved anywhere yet: a temp copy for the PDF viewer
+    // (same temp folder decrypted case copies use).
+    async function openTemp(fileName, bytes) {
+        if (!deps.shell || !deps.tempDir) fail('Opening files is not available');
+        const name = typeof fileName === 'string' && fileName === nodePath.basename(fileName) && /\.pdf$/i.test(fileName) ? fileName : 'Form.pdf';
+        fs.mkdirSync(deps.tempDir, { recursive: true });
+        const target = path.join(deps.tempDir, `${now()}_${name}`);
+        fs.writeFileSync(target, bytes);
+        const err = await deps.shell.openPath(target);
+        if (err) fail('Could not open the form: ' + err);
+        return { opened: true };
+    }
+
+    return { save, listFiles, open, openTemp, locked };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -508,6 +521,7 @@ function mergeLibrary(catalogue, installed) {
             installed: !!inst,
             installedVersion: ok ? inst.version : null,
             installedSource: ok ? inst.source : null,
+            installedAt: ok ? (inst.installedAt || null) : null,
             installError: inst && inst.error ? inst.error : null,
             updateAvailable,
         }));
@@ -627,11 +641,12 @@ function registerFormIpc(ipcMain, store, deps) {
      *   mode 'case'    → cases/<n>/Forms/ (encrypted under Field Security)
      *   mode 'saveAs'  → wherever the officer picks
      *   mode 'preview' → the filled bytes back to the renderer, nothing written
+     *   mode 'open'    → an unsaved temp copy opened in the PDF viewer (to check / print)
      */
     ipcMain.handle('case-forms-fill', wrap(async (_e, r) => {
         r = req(r);
         const mode = r.mode;
-        if (!['case', 'saveAs', 'preview'].includes(mode)) fail('Unknown save option');
+        if (!['case', 'saveAs', 'preview', 'open'].includes(mode)) fail('Unknown save option');
         const values = checkValues(r.values);
         const caseNumber = mode === 'case' ? safeCaseNumber(r.caseNumber) : (safeCaseNumber(r.caseNumber) || null);
         if (mode === 'case' && !caseNumber) fail('Open a case first');
@@ -645,6 +660,11 @@ function registerFormIpc(ipcMain, store, deps) {
             return { dataBase64: out.bytes.toString('base64'), filled: out.filled.length, warnings };
         }
         const fileName = outputFileName(form.title, r.nameHint, new Date());
+        if (mode === 'open') {
+            if (cases().locked()) fail('Unlock Field Security first');
+            await cases().openTemp(fileName, out.bytes);
+            return { opened: true, filled: out.filled.length, warnings };
+        }
         const auditBase = { case_number: caseNumber, set_id: manifest.id, version: manifest.version, form_id: form.id, filled: out.filled.length, warnings: warnings.length };
         if (mode === 'case') {
             const saved = cases().save(caseNumber, fileName, out.bytes);

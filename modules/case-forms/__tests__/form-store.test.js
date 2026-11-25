@@ -226,7 +226,7 @@ function mockResponse(body, { status = 200, headers = {} } = {}) {
 
   // ---------------------------------------------------------------- merge
   const installedRows = [
-    { id: 'a-set', version: '1.0.0', source: 'library', sha256: 'a'.repeat(64) },
+    { id: 'a-set', version: '1.0.0', source: 'library', sha256: 'a'.repeat(64), installedAt: '2026-11-20T00:00:00.000Z' },
     { id: 'b-set', version: '1.0.0', source: 'file', sha256: 'b'.repeat(64) },
     { id: 'c-set', version: '2.0.0', source: 'library', sha256: 'c'.repeat(64) },
     { id: 'local-only', version: '0.1', source: 'file' },
@@ -246,6 +246,7 @@ function mockResponse(body, { status = 200, headers = {} } = {}) {
   ], 'merge rows');
   eq(merged[4].installError, 'manifest.json is missing', 'broken install surfaces its error');
   eq(merged[0].installedVersion, '1.0.0', 'installedVersion carried');
+  eq([merged[0].installedAt, merged[3].installedAt], ['2026-11-20T00:00:00.000Z', null], 'installedAt carried for installed rows only');
 
   // ---------------------------------------------------------------- helpers
   eq(F.checkValues({ a: 'x', b: true, c: null }), { a: 'x', b: true }, 'checkValues keeps text/bools, drops null');
@@ -368,6 +369,23 @@ function mockResponse(body, { status = 200, headers = {} } = {}) {
   const doc = await PDFDocument.load(Buffer.from(r.dataBase64, 'base64'));
   eq([doc.getForm().getTextField('Last Name').getText(), doc.getForm().getCheckBox('Waived').isChecked()], ['SAMPLE', true], 'preview bytes carry the values');
   const auditsBeforePreview = audits.length;
+
+  // open: unsaved temp copy in the viewer, not audited, nothing in the case
+  const openedBefore = opened.length;
+  secState.enabled = true; secState.unlocked = false;
+  r = await call('case-forms-fill', { setId: 'sample-pd', formId: 'advisement', mode: 'open', values: {} });
+  ok(!r.success && /Unlock Field Security/.test(r.error) && opened.length === openedBefore, 'open mode refused while locked');
+  secState.enabled = false;
+  r = await call('case-forms-fill', { setId: 'sample-pd', formId: 'advisement', mode: 'open', caseNumber: '26-009', nameHint: 'SAMPLE, Pat', values: { 'Last Name': 'SAMPLE' } });
+  eq([r.success, r.opened, r.filled], [true, true, 1], 'open mode — ' + r.error);
+  eq(opened.length, openedBefore + 1, 'open mode hands one file to the viewer');
+  const tmpOpened = opened[opened.length - 1];
+  ok(tmpOpened.startsWith(path.join(TMP, 'view')) && /_Advisement \(adult\) - SAMPLE, Pat - \d{4}-\d{2}-\d{2}\.pdf$/.test(tmpOpened), 'open mode temp name');
+  eq((await PDFDocument.load(fs.readFileSync(tmpOpened))).getForm().getTextField('Last Name').getText(), 'SAMPLE', 'open mode bytes filled');
+  ok(!fs.existsSync(path.join(CASES, '26-009')), 'open mode writes nothing to the case');
+  eq(audits.length, auditsBeforePreview, 'open mode not audited');
+  await caseForms.openTemp('..\\evil.pdf', Buffer.from('%PDF-1.4'));
+  ok(path.basename(opened[opened.length - 1]).endsWith('_Form.pdf') && path.dirname(opened[opened.length - 1]) === path.join(TMP, 'view'), 'openTemp ignores path-like names');
 
   // case save
   secState.enabled = false;

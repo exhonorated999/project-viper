@@ -23,6 +23,7 @@
     <script src="modules/warrant-author/boilerplate-library.js"></script>
     <script src="modules/agency-packs/pack-editor-ui.js"></script>
     <script src="modules/agency-packs/agency-packs-settings.js"></script>
+    <script src="modules/case-forms/case-forms-settings.js"></script>
     <!-- Dashboard layouts: reset / export / import (Display & Accessibility). -->
     <script src="modules/dashboard/dash-layout.js"></script>
     <!-- The one authoritative list of where a case's data lives. Must load
@@ -3069,6 +3070,25 @@
                             <button onclick="dismissWarrantAuthorCompliance(true)"
                                 class="px-4 py-2 rounded-lg text-sm bg-viper-cyan/20 text-viper-cyan border border-viper-cyan/40 hover:bg-viper-cyan/30 transition font-medium">I understand — Enable</button>
                         </div>
+                    </div>
+                </div>
+
+                <!-- ═══ Agency Forms Section (case-forms-settings.js) ═══ -->
+                <div class="glass-card rounded-xl p-6" id="caseFormsSection">
+                    <div class="flex justify-between items-center cursor-pointer" onclick="toggleCaseFormsSection()">
+                        <h3 class="text-xl font-bold flex items-center gap-2">
+                            <svg class="w-6 h-6 text-viper-cyan" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                            </svg>
+                            Agency Forms
+                        </h3>
+                        <svg id="caseFormsChevron" class="w-5 h-5 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </div>
+                    <p class="text-gray-400 text-sm mb-5">Fill your agency's PDF forms (advisements, consents, checklists) from case data.</p>
+                    <div id="caseFormsBody" class="hidden mt-5">
+                        <div id="caseFormsMount"></div>
                     </div>
                 </div>
 
@@ -9010,6 +9030,17 @@
             body.classList.add('hidden');
             chevron.style.transform = '';
         }
+    }
+
+    // ─── Agency Forms (case-forms-settings.js) ─────────────────────────
+    function toggleCaseFormsSection() {
+        const body = document.getElementById('caseFormsBody');
+        const chevron = document.getElementById('caseFormsChevron');
+        if (!body || !chevron) return;
+        const isHidden = body.classList.contains('hidden');
+        body.classList.toggle('hidden', !isHidden);
+        chevron.style.transform = isHidden ? 'rotate(180deg)' : '';
+        if (isHidden && window.ViperCaseFormsSettings) window.ViperCaseFormsSettings.show();
     }
 
     // ─── Document Authoring (Warrant Author) ─────────────────────────

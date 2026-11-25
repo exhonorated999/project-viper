@@ -70,6 +70,10 @@ async function pdfWith(fieldNames) {
 
   const sum = S.summarize(read.manifest, { enabled: true });
   eq([sum.id, sum.formCount, sum.languages, sum.categories, sum.enabled], ['sample-pd', 2, ['en'], { Interview: 1, Property: 1 }, true], 'summarize');
+  eq(sum.forms.map(f => [f.id, f.slots, f.vehicleSlots]), [
+    ['advisement-adult', [{ id: 'subject', label: 'Subject', roles: ['suspect'] }], []],
+    ['vehicle-hold', [], [{ id: 'vehicle', label: 'Vehicle' }]],
+  ], 'summarize: slots for the person-page picker');
   eq(S.compareVersions('1.0.10', '1.0.9'), 1, 'compareVersions re-exported');
 
   // ---- damaged / hostile files ---------------------------------------------------------------

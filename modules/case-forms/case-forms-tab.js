@@ -630,5 +630,5 @@
             </div>`;
     }
 
-    return Object.assign({}, helpers, { mount });
+    return Object.assign({}, helpers, { mount, officerProfile });
 }));

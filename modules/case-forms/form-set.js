@@ -275,7 +275,12 @@ function summarize(manifest, extra) {
         version: manifest.version,
         createdAt: manifest.createdAt || null,
         formCount: manifest.forms.length,
-        forms: manifest.forms.map(f => ({ id: f.id, title: f.title, category: f.category || '', language: f.language || '', group: f.group || '' })),
+        forms: manifest.forms.map(f => ({
+            id: f.id, title: f.title, category: f.category || '', language: f.language || '', group: f.group || '',
+            // Who goes on the form — the person page's Forms button ranks forms by these.
+            slots: (f.slots || []).map(s => ({ id: s.id, label: s.label, roles: Array.isArray(s.roles) ? s.roles.slice() : [] })),
+            vehicleSlots: (f.vehicleSlots || []).map(s => ({ id: s.id, label: s.label })),
+        })),
         languages: [...languages].sort(),
         categories,
     }, extra || {});

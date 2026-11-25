@@ -907,6 +907,7 @@
     <script src="modules/agency-packs/case-facts.js"></script>
     <script src="modules/case-forms/form-sources.js"></script>
     <script src="modules/case-forms/case-forms-tab.js"></script>
+    <script src="modules/case-forms/case-forms-person.js"></script>
     <script src="modules/agency-packs/warrant-list.js"></script>
     <script src="modules/agency-packs/agency-builder-ui.js"></script>
 </head>
@@ -16088,15 +16089,10 @@
         function _caseFormsAvailable() {
             try { return localStorage.getItem('viperCaseFormsAvailable') === 'true'; } catch (_) { return false; }
         }
-        function _mountCaseFormsTab(el) {
-            if (!el || !currentCase) return;
-            if (!window.ViperCaseFormsTab || !window.ViperCaseFormSources) {
-                el.innerHTML = '<div class="text-rose-300 text-sm">Forms module not loaded.</div>';
-                return;
-            }
+        function _caseFormsCtx() {
             const caseId = currentCase.id;
             const pcs = window.WarrantAuthorCasePcStore;
-            window.ViperCaseFormsTab.mount(el, {
+            return {
                 caseId,
                 caseNumber: currentCase.caseNumber || '',
                 currentCase,
@@ -16109,7 +16105,31 @@
                 }),
                 offenseDescription: (() => { try { return pcs ? pcs.getOffenseDescription(caseId) : ''; } catch (_) { return ''; } })(),
                 toast: (msg, kind) => showToast(msg, kind),
-            });
+            };
+        }
+        function _mountCaseFormsTab(el) {
+            if (!el || !currentCase) return;
+            if (!window.ViperCaseFormsTab || !window.ViperCaseFormSources) {
+                el.innerHTML = '<div class="text-rose-300 text-sm">Forms module not loaded.</div>';
+                return;
+            }
+            window.ViperCaseFormsTab.mount(el, _caseFormsCtx());
+        }
+        // The Forms button on a suspect / victim / witness / involved person page.
+        function _personFormsButton(listKey, index) {
+            if (!_caseFormsAvailable()) return '';
+            return `<button onclick="openPersonForms('${listKey}', ${index})" class="px-4 py-2 bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500 rounded-lg text-sky-300 transition flex items-center gap-2" title="Fill agency forms for this person">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+                                    Forms
+                                </button>`;
+        }
+        function openPersonForms(listKey, index) {
+            if (!currentCase) return;
+            if (!window.ViperCaseFormsPerson || !window.ViperCaseFormsTab || !window.ViperCaseFormSources) {
+                showToast('Forms module not loaded', 'error');
+                return;
+            }
+            window.ViperCaseFormsPerson.open({ listKey, index, ctx: _caseFormsCtx() });
         }
 
         function _waMountAgencyBuilder() {
@@ -19480,6 +19500,7 @@
                                     </svg>
                                     Move to…
                                 </button>
+                                ${_personFormsButton('suspects', index)}
                                 <button onclick="exportSingleSuspectPDF(${index})" class="px-4 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -23224,6 +23245,7 @@
                                     </svg>
                                     Move to…
                                 </button>
+                                ${_personFormsButton('victims', index)}
                                 <button onclick="exportSingleVictimPDF(${index})" class="px-4 py-2 bg-viper-green/20 hover:bg-viper-green/30 border border-viper-green rounded-lg text-viper-green transition flex items-center gap-2">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -25792,6 +25814,7 @@
                                     </svg>
                                     Move to…
                                 </button>
+                                ${_personFormsButton('witnesses', index)}
                                 <button onclick="exportSingleWitnessPDF(${index})" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -26868,6 +26891,7 @@
                                     </svg>
                                     Move to…
                                 </button>
+                                ${_personFormsButton('involvedPersons', index)}
                                 <button onclick="exportSingleInvolvedPersonPDF(${index})" class="px-4 py-2 bg-viper-cyan/20 hover:bg-viper-cyan/30 border border-viper-cyan rounded-lg text-viper-cyan transition flex items-center gap-2">
                                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>

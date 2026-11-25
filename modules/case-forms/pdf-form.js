@@ -23,9 +23,13 @@
 const {
     PDFDocument, StandardFonts, PDFName, PDFRef, PDFDict, PDFArray,
     PDFTextField, PDFCheckBox, PDFDropdown, PDFOptionList, PDFRadioGroup, PDFButton, PDFSignature,
+    layoutSinglelineText, layoutMultilineText,
 } = require('pdf-lib');
 
 const MAX_PDF_BYTES = 40 * 1024 * 1024;
+// "Auto" font size boxes: pdf-lib grows the text to fill the box (a 26pt
+// date in a tall cell). Viewers cap auto text near 12pt; so do we.
+const AUTO_FONT_MAX = 11;
 
 function typeOf(field) {
     if (field instanceof PDFTextField) return 'text';
@@ -54,7 +58,7 @@ const MAX_TREE_DEPTH = 32;
 // stale copies prints nothing. When that happens, rebuild /Fields from what
 // is actually on the pages: drop top-level fields with no widget on any
 // page, add the roots of on-page widgets that /Fields does not reach.
-// Returns how many entries were dropped + added (0 = form was consistent).
+// Returns how many entries were dropped + added + re-pointed (0 = consistent).
 function repairFieldTree(doc) {
     const ctx = doc.context;
     let acro;
@@ -102,6 +106,31 @@ function repairFieldTree(doc) {
         return false;
     };
 
+    // A field whose /Kids still lists stale widget copies while the page
+    // draws OTHER widgets that point back at it via /Parent: re-point /Kids
+    // at what the page shows (otherwise checking the box changes nothing
+    // visible and the field is reported on the wrong page).
+    let kidsFixed = 0;
+    const byParent = new Map();
+    for (const w of pageWidgets) {
+        const p = ctx.lookup(w).get(PDFName.of('Parent'));
+        if (!(p instanceof PDFRef)) continue;
+        if (!byParent.has(p.toString())) byParent.set(p.toString(), { ref: p, drawn: [] });
+        byParent.get(p.toString()).drawn.push(w);
+    }
+    for (const { ref, drawn } of byParent.values()) {
+        const pd = ctx.lookup(ref);
+        if (!(pd instanceof PDFDict)) continue;
+        const cur = pd.lookup(PDFName.of('Kids'));
+        const curRefs = cur instanceof PDFArray ? cur.asArray().filter(r => r instanceof PDFRef) : [];
+        const curSet = new Set(curRefs.map(String));
+        const missing = drawn.filter(r => !curSet.has(r.toString()));
+        if (!missing.length) continue;
+        const keep = curRefs.filter(r => reachesPage(r, 0));
+        pd.set(PDFName.of('Kids'), ctx.obj(keep.concat(missing)));
+        kidsFixed += (curRefs.length - keep.length) + missing.length;
+    }
+
     const fieldsArr = acro.lookup(PDFName.of('Fields'));
     const current = [];
     if (fieldsArr instanceof PDFArray) {
@@ -123,9 +152,9 @@ function repairFieldTree(doc) {
         added.push(root);
     }
     const dropped = current.length - kept.length;
-    if (!dropped && !added.length) return 0;
+    if (!dropped && !added.length) return kidsFixed;
     acro.set(PDFName.of('Fields'), ctx.obj(kept.concat(added)));
-    return dropped + added.length;
+    return dropped + added.length + kidsFixed;
 }
 
 // Page index for a widget: its /P entry when present, else whichever page
@@ -191,6 +220,14 @@ async function inspect(bytes) {
             try { out.options = field.getOptions(); } catch (_) { out.options = []; }
         }
         if (type === 'dropdown') { try { out.editable = field.isEditable(); } catch (_) { out.editable = false; } }
+        // What the blank form already holds (a dropdown preset to "N/A", a
+        // box printed checked) — the Forms tab starts from it.
+        try {
+            if (type === 'text') { const t = field.getText(); if (t) out.value = t; }
+            else if (type === 'checkbox') { if (field.isChecked()) out.value = true; }
+            else if (type === 'dropdown' || type === 'list') { const s = field.getSelected(); if (s && s.length && s[0]) out.value = s[0]; }
+            else if (type === 'radio') { const s = field.getSelected(); if (s) out.value = s; }
+        } catch (_) { /* unreadable value: treat as blank */ }
         return out;
     });
 
@@ -272,6 +309,56 @@ function truthy(v) {
     return !!s && !['0', 'false', 'no', 'off', 'n'].includes(s);
 }
 
+const TF_RE = /\/([^\0\t\n\f\r ]+)[\0\t\n\f\r ]+(\d*\.\d+|\d+)[\0\t\n\f\r ]+Tf/g;
+function daSize(da) {
+    if (typeof da !== 'string') return undefined;
+    let m, last = null;
+    TF_RE.lastIndex = 0;
+    while ((m = TF_RE.exec(da))) last = m;
+    return last ? Number(last[2]) : undefined;
+}
+
+// For each box of an auto-size text field, work out the size pdf-lib would
+// pick (same layout code) and, when it is above AUTO_FONT_MAX, pin the box to
+// AUTO_FONT_MAX. Text that only fits smaller keeps its smaller size.
+function capAutoSize(field, font) {
+    if (field.isCombed()) return;
+    const text = field.getText() || '';
+    if (!text) return;
+    let fieldDa;
+    try { fieldDa = field.acroField.getDefaultAppearance(); } catch (_) { fieldDa = undefined; }
+    for (const w of field.acroField.getWidgets()) {
+        let widgetDa;
+        try { widgetDa = w.getDefaultAppearance(); } catch (_) { widgetDa = undefined; }
+        const ws = daSize(widgetDa), fs = daSize(fieldDa);
+        const size = ws !== undefined ? ws : fs;
+        if (size !== undefined && size !== 0) continue;           // fixed size: leave it
+        const r = w.getRectangle();
+        let rot = 0;
+        try { const ap = w.getAppearanceCharacteristics(); rot = ap ? (((ap.getRotation() || 0) % 360) + 360) % 360 : 0; } catch (_) { rot = 0; }
+        const sideways = rot === 90 || rot === 270;
+        let bw = 0;
+        try { const bs = w.getBorderStyle(); bw = bs ? bs.getWidth() || 0 : 0; } catch (_) { bw = 0; }
+        const inset = bw + 1;
+        const bounds = {
+            x: inset, y: inset,
+            width: (sideways ? r.height : r.width) - inset * 2,
+            height: (sideways ? r.width : r.height) - inset * 2,
+        };
+        let fit;
+        try {
+            const opts = { alignment: field.getAlignment(), fontSize: undefined, font, bounds };
+            fit = (field.isMultiline() ? layoutMultilineText(text, opts) : layoutSinglelineText(text, opts)).fontSize;
+        } catch (_) { continue; }
+        if (!(fit > AUTO_FONT_MAX)) continue;
+        const base = widgetDa || fieldDa || '/Helv 0 Tf 0 g';
+        const pinned = daSize(base) === undefined
+            ? base + ' /Helv ' + AUTO_FONT_MAX + ' Tf'
+            : base.replace(/(\d*\.\d+|\d+)([\0\t\n\f\r ]+Tf)(?![\s\S]*Tf)/, AUTO_FONT_MAX + '$2');
+        w.setDefaultAppearance(pinned);
+    }
+}
+
 // Write one value into one field. Returns true when the field took a value.
 function setOne(field, v, sanitize, warn) {
     const type = typeOf(field);
@@ -340,7 +427,12 @@ async function fill(bytes, values, opts) {
             warnings.push({ field: name, code, message });
         };
         let any = false;
-        for (const field of targets) if (setOne(field, v, sanitize, warn)) any = true;
+        for (const field of targets) if (setOne(field, v, sanitize, warn)) {
+            any = true;
+            if (field instanceof PDFTextField) {
+                try { capAutoSize(field, font); } catch (_) { /* keep pdf-lib's own sizing */ }
+            }
+        }
         if (any) filled.push(name);
     });
 

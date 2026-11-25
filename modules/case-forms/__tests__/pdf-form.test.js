@@ -172,6 +172,81 @@ const vOf = (dict) => { const v = dict.lookup(PDFName.of('V')); return v && v.de
     eq(back.getForm().getTextField('Case Number').getText(), 'NEW', 'repair: saved form reads back the value');
   }
 
+  // ---- current values of the blank form ---------------------------------------------------------
+  {
+    const doc = await makeForm();
+    const f = doc.getForm();
+    f.getDropdown('Choice').select('No');
+    f.getCheckBox('Agree').check();
+    f.getTextField('Short').setText('AB');
+    f.getRadioGroup('Pick').select('beta');
+    const vi = await PF.inspect(Buffer.from(await doc.save()));
+    const vb = Object.fromEntries(vi.fields.map(x => [x.name, x]));
+    eq([vb.Choice.value, vb.Agree.value, vb.Short.value, vb.Pick.value], ['No', true, 'AB', 'beta'], 'inspect: current values');
+    ok(!('value' in vb['Case Number']) && !('value' in by.Agree), 'inspect: blank text / unchecked box carry no value');
+  }
+
+  // ---- auto-size text is capped -----------------------------------------------------------------
+  {
+    const doc = await PDFDocument.create();
+    const pg = doc.addPage([612, 792]);
+    const form = doc.getForm();
+    const mk = (name, x, y, w, h, size, multi) => {
+      const f = form.createTextField(name);
+      if (multi) f.enableMultiline();
+      f.addToPage(pg, { x, y, width: w, height: h });
+      f.acroField.setDefaultAppearance('/Helv ' + size + ' Tf 0 g');
+      return f;
+    };
+    mk('Tall Auto', 50, 700, 200, 40, 0);
+    mk('Fixed Eight', 50, 640, 200, 40, 8);
+    mk('Narrow Auto', 50, 600, 40, 30, 0);
+    mk('Tall Multi', 50, 500, 300, 80, 0, true);
+    const ab = Buffer.from(await doc.save({ updateFieldAppearances: false }));   // keep the 0 (auto) sizes
+    const af = await PF.fill(ab, { 'Tall Auto': 'Sample', 'Fixed Eight': 'Sample', 'Narrow Auto': 'A much longer value', 'Tall Multi': 'Short note' });
+    const back = await PDFDocument.load(af.bytes);
+    const sizeOf = (n) => {
+      const f = back.getForm().getTextField(n);
+      const da = f.acroField.getWidgets()[0].getDefaultAppearance() || f.acroField.getDefaultAppearance() || '';
+      const m = /([\d.]+)\s+Tf(?![\s\S]*Tf)/.exec(da);
+      return m ? Number(m[1]) : null;
+    };
+    eq(sizeOf('Tall Auto'), 11, 'autosize: tall single-line box capped at 11pt');
+    eq(sizeOf('Fixed Eight'), 8, 'autosize: fixed size untouched');
+    const narrow = sizeOf('Narrow Auto');
+    ok(narrow !== null && narrow < 11 && narrow >= 4, 'autosize: long text in a narrow box keeps its smaller fit — got ' + narrow);
+    eq(sizeOf('Tall Multi'), 11, 'autosize: multiline capped too');
+    eq(af.warnings, [], 'autosize: no warnings');
+  }
+
+  // ---- field /Kids lists stale widget copies, the page draws others that point back ------------
+  {
+    const doc = await PDFDocument.create();
+    doc.addPage([612, 792]);
+    const p2 = doc.addPage([612, 792]);
+    const cb = doc.getForm().createCheckBox('Consent Yes');
+    cb.addToPage(p2, { x: 60, y: 620, width: 12, height: 12 });
+    const w = cb.acroField.getWidgets()[0];
+    w.dict.delete(PDFName.of('P'));
+    const wRef = doc.context.getObjectRef(w.dict);
+    const drawnDict = w.dict.clone(doc.context);           // keeps /Parent → the field
+    const drawnRef = doc.context.register(drawnDict);
+    const annots = p2.node.lookup(PDFName.of('Annots'));
+    for (let i = 0; i < annots.size(); i++) if (String(annots.get(i)) === String(wRef)) annots.set(i, drawnRef);
+    const kb = Buffer.from(await doc.save());
+    const ki = await PF.inspect(kb);
+    eq(ki.repaired, 2, 'stale kids: stale widget dropped, drawn widget added');
+    const kf = ki.fields.find(f => f.name === 'Consent Yes');
+    eq(kf && kf.page, 1, 'stale kids: reported on the page that draws it');
+    eq(kf && kf.widgets.length, 1, 'stale kids: one box');
+    const kfill = await PF.fill(kb, { 'Consent Yes': true });
+    eq(kfill.filled, ['Consent Yes'], 'stale kids: fill reports the box');
+    const back = await PDFDocument.load(kfill.bytes);
+    const as = back.context.lookup(drawnRef).get(PDFName.of('AS'));
+    ok(as && String(as) !== '/Off', 'stale kids: the drawn box is checked — got ' + String(as));
+    eq(back.getForm().getCheckBox('Consent Yes').isChecked(), true, 'stale kids: saved form reads back checked');
+  }
+
   // ---- two separate fields sharing one name ----------------------------------------------------
   {
     const doc = await makeForm();

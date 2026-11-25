@@ -49,8 +49,11 @@ ok(people.length === 5, 'fixture: five people');
 let picks = T.defaultPicks(
   [{ id: 'subject', label: 'Subject' }, { id: 'guardian', label: 'Parent', roles: ['involved', 'witness'] }],
   people, [{ id: 'vehicle', label: 'Vehicle' }], vehicles);
-eq(picks.people, { subject: 'suspects:0', guardian: 'witnesses:0' }, 'picks: first slot → suspect, role slot → first matching role in case order');
+eq(picks.people, { subject: 'suspects:0', guardian: 'involvedPersons:0' }, 'picks: first slot → suspect, role slot → its first listed role wins');
 eq(picks.vehicles, { vehicle: 'recoveredVehicles:0' }, 'picks: vehicle by index');
+
+picks = T.defaultPicks([{ id: 'w', roles: ['witness', 'victim'] }, { id: 'w2', roles: ['witness', 'victim'] }], people, [], []);
+eq(picks.people, { w: 'witnesses:0', w2: 'victims:0' }, 'picks: role order is a preference, next role when the first runs out');
 
 picks = T.defaultPicks([{ id: 'a', roles: ['suspect'] }, { id: 'b', roles: ['suspect'] }, { id: 'c', roles: ['suspect'] }], people, [], []);
 eq(picks.people, { a: 'suspects:0', b: 'suspects:1' }, 'picks: no person used twice, slot left empty when none left');
@@ -132,10 +135,37 @@ eq(noPdf, { rows: [], skipped: 0 }, 'rows: no pdf fields');
 
 // ---- collectValues ---------------------------------------------------------------------------
 const vals = T.collectValues(r.rows);
-eq(vals, { 'Case Number': '26-0001', 'Last Name': 'Typed', 'Location': '', 'Understood': false, 'Waived': true },
-  'collect: non-empty text, edited empties, true boxes, cleared const box; untouched false box and blanks omitted');
+eq(vals, { 'Case Number': '26-0001', 'Last Name': 'Typed', 'Location': '', 'Understood': false, 'Waived': true, 'Nope': false },
+  'collect: non-empty text, edited empties, true boxes, cleared const box, bound false box (clears a box printed checked); blanks omitted');
 eq(T.collectValues(null), {}, 'collect: null');
 eq(T.collectValues([{ name: 'n', type: 'text', value: 0, edited: false, auto: '' }]), { n: '0' }, 'collect: numbers stringified');
+eq(T.collectValues([{ name: 'c', type: 'checkbox', value: false, edited: false, auto: false, bound: false }]), {}, 'collect: unbound untouched false box omitted');
+
+// ---- form defaults (what the blank PDF already holds) ------------------------------------------
+{
+  const pspec = {
+    form: { bindings: { 'Bound Box': { src: 'const', value: false }, 'Typed': { src: 'case.number' } } },
+    pdf: { fields: [
+      { name: 'Status', type: 'dropdown', page: 0, options: ['N/A', 'In File'], value: 'N/A' },
+      { name: 'Printed Checked', type: 'checkbox', page: 0, value: true },
+      { name: 'Bound Box', type: 'checkbox', page: 0, value: true },
+      { name: 'Typed', type: 'text', page: 0, value: 'OLD' },
+      { name: 'Plain', type: 'text', page: 0 },
+    ] },
+  };
+  const pr = T.computeRows(pspec, { currentCase: { caseNumber: '26-0009' } }, {});
+  const st = byName(pr.rows, 'Status');
+  eq([st.value, st.preset, st.blank, st.how.text], ['N/A', true, false, 'Form default'], 'preset: dropdown starts at its form default');
+  eq([byName(pr.rows, 'Printed Checked').value, byName(pr.rows, 'Printed Checked').preset], [true, true], 'preset: box printed checked shows checked');
+  eq([byName(pr.rows, 'Bound Box').value, byName(pr.rows, 'Bound Box').preset, byName(pr.rows, 'Bound Box').bound], [false, false, true], 'preset: a binding beats the form default');
+  eq(byName(pr.rows, 'Typed').value, '26-0009', 'preset: bound text ignores the old text');
+  eq([byName(pr.rows, 'Plain').value, byName(pr.rows, 'Plain').preset, byName(pr.rows, 'Plain').blank], ['', false, true], 'preset: no default → blank');
+  const pv = T.collectValues(pr.rows);
+  eq(pv, { 'Status': 'N/A', 'Printed Checked': true, 'Bound Box': false, 'Typed': '26-0009' }, 'preset: collect keeps defaults, clears the bound box');
+  const pe = T.computeRows(pspec, {}, { 'Status': 'In File', 'Printed Checked': false });
+  eq([byName(pe.rows, 'Status').value, byName(pe.rows, 'Printed Checked').value], ['In File', false], 'preset: officer edits win');
+  eq(T.collectValues(pe.rows)['Printed Checked'], false, 'preset: unchecking a printed box is sent');
+}
 
 // ---- nameHint --------------------------------------------------------------------------------
 eq(T.nameHint(spec, input), 'DOE, John', 'hint: LAST, First');

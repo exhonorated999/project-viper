@@ -55,7 +55,8 @@
 
     /**
      * Who fills each slot when the form is first opened: the first person
-     * whose role the slot accepts and who is not already on another slot.
+     * not already on another slot, trying the slot's roles in the order the
+     * form lists them (['witness', 'victim'] prefers a witness).
      * A slot with no roles takes a suspect only when it is the form's first slot.
      */
     function defaultPicks(slots, people, vehicleSlots, vehicles) {
@@ -63,7 +64,11 @@
         (slots || []).forEach((s, i) => {
             const roles = Array.isArray(s.roles) && s.roles.length ? s.roles : (i === 0 ? ['suspect'] : null);
             if (!roles) return;
-            const hit = (people || []).find(p => roles.includes(p.role) && !used.has(p.key));
+            let hit = null;
+            for (const role of roles) {
+                hit = (people || []).find(p => p.role === role && !used.has(p.key));
+                if (hit) break;
+            }
             if (hit) { picks[s.id] = hit.key; used.add(hit.key); }
         });
         const vpicks = {};
@@ -98,26 +103,30 @@
         fields.forEach(f => {
             if (!FILLABLE.has(f.type) || f.readOnly) { skipped++; return; }
             const b = bindings[f.name];
-            const how = describeBinding(b, form.slots, form.vehicleSlots);
-            let auto = (b && b.src && b.src !== 'ask') ? S.resolve(b, ctx) : '';
+            let how = describeBinding(b, form.slots, form.vehicleSlots);
+            const bound = !!(b && b.src && b.src !== 'ask');
+            let auto = bound ? S.resolve(b, ctx) : '';
+            // Unbound field: start from what the blank form already holds.
+            const preset = !bound && f.value != null && f.value !== '';
+            if (preset) { auto = f.value; how = { kind: 'const', text: 'Form default' }; }
             if (f.type === 'checkbox') auto = auto === true || (typeof auto === 'string' && /^(true|yes|on|x|1)$/i.test(auto));
             const has = Object.prototype.hasOwnProperty.call(edited || {}, f.name);
             const value = has ? edited[f.name] : auto;
             rows.push({
                 name: f.name, type: f.type, page: f.page, multiline: !!f.multiline, maxLength: f.maxLength || 0,
                 options: Array.isArray(f.options) ? f.options : [], required: !!f.required,
-                how, auto, value, edited: has,
+                how, auto, value, edited: has, bound, preset,
                 blank: f.type === 'checkbox' ? false : str(value) === '',
             });
         });
         return { rows, skipped };
     }
 
-    /** What goes to the fill call: every value that says something, and every box the officer cleared. */
+    /** What goes to the fill call: every value that says something, every bound box, and every box the officer changed. */
     function collectValues(rows) {
         const out = {};
         (rows || []).forEach(r => {
-            if (r.type === 'checkbox') { if (r.value === true || r.edited || r.auto === true) out[r.name] = !!r.value; return; }
+            if (r.type === 'checkbox') { if (r.value === true || r.edited || r.auto === true || r.bound) out[r.name] = !!r.value; return; }
             const v = r.value == null ? '' : String(r.value);
             if (v !== '' || r.edited) out[r.name] = v;
         });

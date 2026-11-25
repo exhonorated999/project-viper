@@ -398,7 +398,7 @@
                     </div>
                 </div>
                 ${problem ? `<div class="p-2 rounded border border-amber-500/40 bg-amber-500/10 text-[11px] text-amber-200" data-cf-offline>
-                    <span class="font-semibold">Form library unavailable.</span> ${esc(problem)} Sets already on this computer still work.</div>` : ''}
+                    <span class="font-semibold">Form library unavailable.</span> ${esc(/[.!?]$/.test(problem) ? problem : problem + '.')} Sets already on this computer still work — use <span class="font-semibold">Import file…</span> to add a .viperforms file.</div>` : ''}
                 ${renderPending()}
                 ${showFilter ? `<input type="search" data-cf-filter value="${esc(state.filter)}" placeholder="Search by agency or form name"
                     class="w-full px-2.5 py-1.5 text-sm rounded-lg bg-viper-dark border border-gray-600 text-white focus:border-viper-cyan focus:outline-none">` : ''}

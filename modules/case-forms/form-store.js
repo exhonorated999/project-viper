@@ -276,7 +276,7 @@ function createLibraryClient(deps) {
     const downloadTimeoutMs = deps.downloadTimeoutMs || 15 * 60 * 1000;
     const crypto = deps.crypto || require('crypto');
 
-    async function request(url, apiKey, ms) {
+    async function request(url, apiKey, ms, notFoundMsg) {
         if (!doFetch) throw new LibraryError('The form library is not available in this build');
         if (typeof apiKey !== 'string' || !apiKey) throw new LibraryError('Missing API key — register VIPER first', 401);
         const ctl = typeof AbortController === 'function' ? new AbortController() : null;
@@ -299,7 +299,7 @@ function createLibraryClient(deps) {
             } catch (_) { /* ignore */ }
             if (typeof detail !== 'string') detail = '';
             detail = detail.slice(0, 300);
-            if (resp.status === 404) throw new LibraryError(detail && !/^not found$/i.test(detail) ? detail : 'That form set is no longer in the library', 404);
+            if (resp.status === 404) throw new LibraryError(detail && !/^not found$/i.test(detail) ? detail : (notFoundMsg || 'That form set is no longer in the library'), 404);
             throw new LibraryError(detail || `The form library answered HTTP ${resp.status}`, resp.status);
         }
         return { resp, done: () => { if (timer) clearTimeout(timer); } };
@@ -329,7 +329,8 @@ function createLibraryClient(deps) {
     }
 
     async function catalogue(apiKey) {
-        const { resp, done } = await request(base + '/api/form-sets', apiKey, timeoutMs);
+        const { resp, done } = await request(base + '/api/form-sets', apiKey, timeoutMs,
+            'The VIPER form library is not online yet.');
         let json;
         try {
             const buf = await readCapped(resp, MAX_CATALOGUE_BYTES, 'The form library list is too large');

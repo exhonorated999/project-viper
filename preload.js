@@ -155,6 +155,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   caseFormsFill: (req) => ipcRenderer.invoke('case-forms-fill', req),
   caseFormsCaseFiles: (req) => ipcRenderer.invoke('case-forms-case-files', req),
   caseFormsOpen: (req) => ipcRenderer.invoke('case-forms-open', req),
+  prosecutionIntakePdf: (req) => ipcRenderer.invoke('prosecution-intake-pdf', req),
   fieldWorkSignSend: (req) => ipcRenderer.invoke('fieldwork-sign-send', req),
   fieldWorkSignCollect: (req) => ipcRenderer.invoke('fieldwork-sign-collect', req),
 

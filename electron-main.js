@@ -4108,6 +4108,13 @@ const _caseForms = (() => {
     locked: () => caseForms.locked(),
     audit: (ev, data) => { if (AUDIT_EVENTS[ev]) audit.write(AUDIT_EVENTS[ev], data); },
   });
+  // Prosecution tab → Intake / Discovery Checklist, printed into the same Forms folder.
+  require('./modules/prosecution/intake-pdf.js').registerIntakeIpc(ipcMain, {
+    caseForms, outputFileName: C.outputFileName, safeCaseNumber: C.safeCaseNumber,
+    dialog, getWindow: () => mainWindow, restoreFocus: () => restoreFocus(),
+    defaultDir: () => app.getPath('documents'),
+    audit: (ev, data) => { if (AUDIT_EVENTS[ev]) audit.write(AUDIT_EVENTS[ev], data); },
+  });
   return store;
 })();
 

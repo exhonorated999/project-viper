@@ -908,6 +908,8 @@
     <script src="modules/case-forms/form-sources.js"></script>
     <script src="modules/case-forms/case-forms-tab.js"></script>
     <script src="modules/case-forms/case-forms-person.js"></script>
+    <script src="modules/prosecution/intake-checklist.js"></script>
+    <script src="modules/prosecution/intake-checklist-ui.js"></script>
     <script src="modules/agency-packs/warrant-list.js"></script>
     <script src="modules/agency-packs/agency-builder-ui.js"></script>
 </head>
@@ -6675,6 +6677,7 @@
                 }
             } else if (tabId === 'prosecution') {
                 contentDiv.innerHTML = renderProsecutionTab();
+                _mountIntakeChecklist(contentDiv);
             } else if (tabId === 'narcotics') {
                 contentDiv.innerHTML = renderNarcoticsTab();
             } else if (tabId === 'firearms') {
@@ -33680,6 +33683,8 @@
                         </div>
                     </div>
 
+                    <div id="prosIntakeCard"></div>
+
                     ${renderProsecutionSubmissionsCard()}
 
                     <!-- Upcoming Court Dates -->
@@ -33808,6 +33813,60 @@
             if (y) parts.push(`${y} year${y === 1 ? '' : 's'}`);
             if (m) parts.push(`${m} month${m === 1 ? '' : 's'}`);
             return parts.length ? parts.join(' ') : '<span class="text-gray-500">—</span>';
+        }
+
+        // ── Intake / Discovery Checklist (optional, per case) ───────────
+        // Only on cases where someone clicked "Add Intake Checklist"; kept in
+        // prosecutionData.intakeChecklist. See modules/prosecution/.
+        function _intakeChecklistCtx() {
+            const caseId = currentCase.id;
+            const IC = window.ViperIntakeChecklist;
+            return {
+                caseNumber: currentCase.caseNumber || '',
+                get: () => {
+                    if (!currentCase || currentCase.id !== caseId || !prosecutionData) return null;
+                    const raw = prosecutionData.intakeChecklist;
+                    return raw && typeof raw === 'object' ? IC.normalize(raw) : null;
+                },
+                commit: (next) => {
+                    if (!currentCase || currentCase.id !== caseId || !prosecutionData) return false;
+                    const had = Object.prototype.hasOwnProperty.call(prosecutionData, 'intakeChecklist');
+                    const prev = prosecutionData.intakeChecklist;
+                    if (next) prosecutionData.intakeChecklist = next; else delete prosecutionData.intakeChecklist;
+                    try {
+                        saveProsecutionData();
+                        return true;
+                    } catch (e) {
+                        if (had) prosecutionData.intakeChecklist = prev; else delete prosecutionData.intakeChecklist;
+                        console.error('[prosecution] intake checklist save failed', e);
+                        showToast('Could not save the checklist — nothing was changed. ' + ((e && e.message) || ''), 'error');
+                        return false;
+                    }
+                },
+                prefill: () => {
+                    let ag = {};
+                    try { ag = JSON.parse(localStorage.getItem('viperAgencyProfile')) || {}; } catch (_) { ag = {}; }
+                    return {
+                        defendants: IC.defendantNames(_lsParse(`suspects_${caseId}`, [])),
+                        agency: String(ag.agencyName || '').trim(),
+                        agencyCaseNumber: currentCase.caseNumber || '',
+                        caseNumbers: prosecutionData.courtCaseNumber || '',
+                    };
+                },
+                toast: (msg, kind) => showToast(msg, kind),
+                confirm: (msg, opts) => viperConfirm(msg, opts),
+                api: window.electronAPI || null,
+            };
+        }
+        function _mountIntakeChecklist(contentDiv) {
+            const el = contentDiv && contentDiv.querySelector('#prosIntakeCard');
+            if (!el || !currentCase) return;
+            if (!window.ViperIntakeChecklistUI || !window.ViperIntakeChecklist) {
+                el.innerHTML = '<div class="glass-card rounded-xl p-6 text-gray-400 text-sm">Intake checklist could not load.</div>';
+                return;
+            }
+            try { window.ViperIntakeChecklistUI.mount(el, _intakeChecklistCtx()); }
+            catch (e) { console.error('[prosecution] intake checklist mount failed', e); }
         }
 
         // ── Submitted for prosecution (ICAC / IDS reporting) ─────────────

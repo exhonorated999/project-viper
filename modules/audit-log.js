@@ -108,6 +108,7 @@ const EVENT_TYPES = Object.freeze({
   CASE_FORM_FILLED:     'case_form_filled',
   CASE_FORM_SENT_TO_PHONE: 'case_form_sent_to_phone',
   CASE_FORM_SIGNED_ON_PHONE: 'case_form_signed_on_phone',
+  PROSECUTION_INTAKE_EXPORTED: 'prosecution_intake_exported',
 
   // Update
   UPDATE_CHECKED:       'update_checked',

@@ -358,6 +358,7 @@ class MetaWarrantUI {
                             </tbody>
                         </table>
                         ${(ov.skippedPages || []).length ? `<p class="mwp-warn mwp-small">Not read: ${(ov.skippedPages || []).map(s => this._esc(s.name || s)).join(', ')}</p>` : ''}
+                        ${(ov.pages || []).some(pg => /-text$/.test(pg.layout || '')) ? `<p class="mwp-warn mwp-small">Layout not recognised — shown as plain text: ${(ov.pages || []).filter(pg => /-text$/.test(pg.layout || '')).map(pg => this._esc(pg.name)).join(', ')}. Please submit this return format (Report a bug → Submit unsupported format).</p>` : ''}
                         <div class="mwp-kv-list mwp-top-gap">
                             ${this._kvRow('Source', imp.fileName)}
                             ${this._kvRow('Imported', imp.importedAt ? new Date(imp.importedAt).toLocaleString() : '')}

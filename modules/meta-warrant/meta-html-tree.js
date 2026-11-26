@@ -55,14 +55,59 @@ function hasClass(el, c) {
     const v = el.getAttribute && el.getAttribute('class');
     return !!v && (' ' + String(v).replace(/\s+/g, ' ') + ' ').indexOf(' ' + c + ' ') >= 0;
 }
+// Class names the page's own <style> block lays out as a table row / cell.
+// Set by parsePage for the duration of one (synchronous) parse.  Lets a
+// layout that moved `display:table` from inline styles into CSS classes
+// (Scout submission #31: records.html + preservation-1.html not recognised)
+// parse exactly like the inline one.
+let CSS = { row: new Set(), cell: new Set() };
+
+function classesOf(el) {
+    const v = el.getAttribute && el.getAttribute('class');
+    return v ? String(v).trim().split(/\s+/) : [];
+}
+function hasCssClass(el, set) {
+    if (!set.size) return false;
+    for (const c of classesOf(el)) if (set.has(c)) return true;
+    return false;
+}
+
+/**
+ * Classes a stylesheet displays as table / table-row (rows) or table-cell (cells).
+ * Only the LAST compound of each selector counts (`.wrap .kv` -> kv).
+ */
+function cssTableClasses(cssText) {
+    const out = { row: new Set(), cell: new Set() };
+    const css = String(cssText || '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const re = /([^{}]+)\{([^{}]*)\}/g;
+    let m;
+    while ((m = re.exec(css))) {
+        const decl = m[2].toLowerCase().replace(/\s+/g, '');
+        let kind = null;
+        if (/(^|;)display:table-cell(;|!|$)/.test(decl)) kind = 'cell';
+        else if (/(^|;)display:table(-row)?(;|!|$)/.test(decl)) kind = 'row';
+        if (!kind) continue;
+        for (const sel of m[1].split(',')) {
+            const last = sel.trim().split(/[\s>+~]+/).pop() || '';
+            if (/:/.test(last)) continue;   // :hover, ::before … are not the element itself
+            const cm = last.match(/\.([A-Za-z_-][\w-]*)/g);
+            if (cm) for (const c of cm) out[kind].add(c.slice(1));
+        }
+    }
+    // A class that is both (unlikely) is treated as a cell, never a row.
+    for (const c of out.cell) out.row.delete(c);
+    return out;
+}
+
 function isCell(el) {
-    return el.nodeType === 1 && /display:table-cell/.test(styleOf(el));
+    return el.nodeType === 1 && (/display:table-cell/.test(styleOf(el)) || hasCssClass(el, CSS.cell));
 }
 /** A key/value row: display:table (not -cell / -row), or a div_table that directly holds a cell. */
 function isRow(el) {
     if (el.nodeType !== 1) return false;
     const s = styleOf(el);
     if (/display:table(;|$|!)/.test(s)) return true;
+    if (hasCssClass(el, CSS.row) && !isCell(el)) return el.childNodes.some(isCell);
     if (hasClass(el, 'div_table')) return el.childNodes.some(isCell);
     return false;
 }
@@ -116,7 +161,7 @@ function collectParts(el, out, depth) {
                 if (tag === 'div' || tag === 'p') out.push({ p: 'br' });   // empty block = separator
                 continue;
             }
-            if (rows >= 2 && tag === 'div' && !hasClass(c, 'div_table')) {
+            if (rows >= 2 && tag === 'div' && !hasClass(c, 'div_table') && !hasCssClass(c, CSS.row)) {
                 out.push({ p: 'group', v: buildValue(inner) });
                 continue;
             }
@@ -136,13 +181,29 @@ function collectParts(el, out, depth) {
 function parseRow(el, depth) {
     let keyBits = [];
     let cell = null;
+    const cells = [];
     for (const c of el.childNodes) {
         if (c.nodeType === 3) { const t = cleanText(c.text); if (t) keyBits.push(t); continue; }
         if (c.nodeType !== 1) continue;
-        if (!cell && isCell(c)) { cell = c; continue; }
+        if (isCell(c)) { if (!cell) cell = c; cells.push(c); continue; }
         const tag = tagOf(c);
         if (SKIP_TAGS.has(tag) || tag === 'br') continue;
         if (!cell) { const t = cleanText(c.text); if (t) keyBits.push(t); }
+    }
+    // Two-cell row (key cell + value cell) with no key text in front:
+    // the first cell is the key, the rest is the value.
+    if (!keyBits.length && cells.length >= 2) {
+        const kp = [];
+        collectParts(cells[0], kp, depth + 1);
+        const key = kp.filter(x => x.p === 'text').map(x => x.s).join(' ');
+        if (key && !kp.some(x => x.p === 'row' || x.p === 'group' || x.p === 'media')) {
+            const parts = [];
+            for (let i = 1; i < cells.length; i++) {
+                if (i > 1) parts.push({ p: 'brk' });
+                collectParts(cells[i], parts, depth + 1);
+            }
+            return { k: key, v: buildValue(parts) };
+        }
     }
     const parts = [];
     if (cell) collectParts(cell, parts, depth + 1);
@@ -322,10 +383,29 @@ function parseCategory(pane, nameMap, forced) {
 
 /**
  * @param {string} html
- * @param {{ onlyIds?: string[] }} [opts]
+ * @param {{ onlyIds?: string[], textFallback?: boolean }} [opts]
+ *   textFallback: when no key/value rows are found at all, keep the page's
+ *   text (per TOC-linked section, else the whole body) instead of returning
+ *   no categories.  The importer turns it on only for files carrying Meta's
+ *   own page names, so an unknown future layout still shows its content.
  */
 function parsePage(html, opts) {
-    const root = parse(String(html || ''), {
+    const src = String(html || '');
+    let cssText = '';
+    const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+    let sm;
+    while ((sm = styleRe.exec(src)) && cssText.length < 2000000) cssText += sm[1] + '\n';
+    const prevCss = CSS;
+    CSS = cssTableClasses(cssText);
+    try {
+        return parsePageInner(src, opts);
+    } finally {
+        CSS = prevCss;
+    }
+}
+
+function parsePageInner(html, opts) {
+    const root = parse(html, {
         lowerCaseTagName: false,
         comment: false,
         blockTextElements: { script: false, noscript: false, style: false, pre: true }
@@ -378,6 +458,22 @@ function parsePage(html, opts) {
             categories.push(parseCategory(body, null, { id: 'page_records', name: 'Page Records' }));
         }
     }
+    if (!categories.length && opts && opts.textFallback && !only) {
+        // No rows anywhere: keep the text so the investigator still sees it.
+        const ids = new Set(Object.keys(hrefNames));
+        const secs = ids.size ? findCategoryPanes(root, (id) => ids.has(id)) : [];
+        for (const sec of secs) {
+            const rawId = String(sec.getAttribute('id'));
+            const cat = parseCategory(sec, null, { id: rawId.replace(/[^A-Za-z0-9_]+/g, '_').toLowerCase(), name: hrefNames[rawId] });
+            if ((cat.v.t && cat.v.t.length) || (cat.v.m && cat.v.m.length)) categories.push(cat);
+        }
+        if (categories.length) layout = 'toc-text';
+        else {
+            const body = root.querySelector('body') || root;
+            const cat = parseCategory(body, null, { id: 'page_text', name: 'Page Text' });
+            if ((cat.v.t && cat.v.t.length) || (cat.v.m && cat.v.m.length)) { layout = 'page-text'; categories.push(cat); }
+        }
+    }
     const page = { title, service, categories, layout, toc: order.map(id => ({ id, name: nameMap[id] })) };
     // Detach: the parser's strings are V8 slices of the whole page source,
     // so keeping even one small value (a request parameter, a record) would
@@ -390,14 +486,21 @@ function parsePage(html, opts) {
 /** Cheap check used by detection and Scout: does this text look like a Meta return page? */
 function looksLikeMetaPage(head) {
     const s = String(head || '');
-    return /(Facebook|Instagram|Meta|WhatsApp|Threads) Legal Request/i.test(s) ||
-        (/id=["']?property-/i.test(s) && /div_table/i.test(s)) ||
-        (/div_table/i.test(s) && /display:\s*table/i.test(s) && /(instagram|facebook|meta platforms|whatsapp)/i.test(s));
+    const brand = /(instagram|facebook|meta platforms|whatsapp)/i;
+    if (/(Facebook|Instagram|Meta|WhatsApp|Threads) Legal Request/i.test(s)) return true;
+    if (/id=["']?property-/i.test(s) && /div_table/i.test(s)) return true;
+    if (/div_table/i.test(s) && /display:\s*table/i.test(s) && brand.test(s)) return true;
+    // Meta's page template (sidebar TOC, print checkboxes, content panes)
+    // with the table layout moved into CSS classes.
+    const template = /printOptionChange|class=["'][^"']*\b(content-pane|records_output|sticky_side_bar)\b|<a[^>]+\bproperty=["']|href=["']#property-/i;
+    if (template.test(s) && brand.test(s)) return true;
+    if (/Request Parameters/i.test(s) && brand.test(s) && /display:\s*table/i.test(s)) return true;
+    return false;
 }
 
 module.exports = {
     parsePage,
     looksLikeMetaPage,
     // exposed for tests
-    _internal: { buildValue, splitRecords, collectParts, parseRow, isRow, isCell, cleanText, titleCaseId, normName }
+    _internal: { buildValue, splitRecords, collectParts, parseRow, isRow, isCell, cleanText, titleCaseId, normName, cssTableClasses }
 };

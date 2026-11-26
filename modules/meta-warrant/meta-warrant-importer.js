@@ -162,6 +162,33 @@ function readHead(file, n) {
 
 const tick = () => new Promise(r => setImmediate(r));
 
+/** records.html / preservation-N.html — the names Meta gives its pages. */
+function isMetaPageName(name) {
+    return /(^|\/)(records|preservation[-_ ]?\d+)\.html?$/i.test(String(name || ''));
+}
+// Some sign that a Meta-named page really came from Meta (plain-text fallback only).
+const META_BRAND = /\b(instagram|facebook|meta platforms|whatsapp|messenger|threads)\b/i;
+
+function fmtSize(n) {
+    return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n < 1024 ? n + ' bytes' : Math.round(n / 1024) + ' KB';
+}
+
+/** Error text when nothing could be read: say what WAS found and why it was not used. */
+function noPagesMessage(entries, why) {
+    let msg = 'No Meta pages found (expected records.html and/or preservation-N.html).';
+    const zips = entries.filter(e => /\.zip$/i.test(e.name)).map(e => e.name.split('/').pop());
+    if (why.length) {
+        msg += ' Checked: ' + why.slice(0, 6).join('; ') + (why.length > 6 ? '; +' + (why.length - 6) + ' more' : '') + '.';
+    } else {
+        msg += ' This return holds no HTML pages.';
+    }
+    if (zips.length) msg += ' It contains another ZIP (' + zips.slice(0, 3).join(', ') + ') — extract that ZIP and import it instead.';
+    if (why.some(w => /no Meta sections recognised/.test(w))) {
+        msg += ' This looks like a Meta page layout VIPER does not know yet — please send it with Report a bug → Submit unsupported format.';
+    }
+    return msg;
+}
+
 /**
  * @param {object} o
  * @param {string} o.sourcePath   ZIP file or extracted folder
@@ -193,21 +220,35 @@ async function importReturn(o) {
         // 2. parse + merge one page at a time
         const merger = new MetaMerger();
         const skipped = [];
+        const why = [];          // per-file reason, for the error / log
         let n = 0;
         for (const name of ordered) {
             const e = byName.get(name);
+            const base = name.split('/').pop();
             let html = src.readText(e);
-            if (!looksLikeMetaPage(html.slice(0, 300000))) { skipped.push(name); html = null; n++; continue; }
-            const page = parsePage(html);
+            // Meta's own page names are trusted: parse even when the markup
+            // is not recognised up front (Scout submission #31).
+            const named = isMetaPageName(name);
+            if (!named && !looksLikeMetaPage(html.slice(0, 300000))) {
+                skipped.push(name); why.push(base + ' — not a Meta page'); html = null; n++; continue;
+            }
+            const page = parsePage(html, { textFallback: named && META_BRAND.test(html) });
+            const size = html.length;
+            const blank = !html.trim();
             html = null;
+            if (!page.categories.length) {
+                skipped.push(name);
+                why.push(base + (blank ? ' — empty file' : ' — no Meta sections recognised (' + fmtSize(size) + ')'));
+                n++; continue;
+            }
             const slash = name.lastIndexOf('/');
             merger.addPage(name, page, { pageDir: slash >= 0 ? name.slice(0, slash) : '' });
             n++;
-            progress({ phase: 'pages', done: n, total: ordered.length, label: name.split('/').pop() });
+            progress({ phase: 'pages', done: n, total: ordered.length, label: base });
             await tick();
         }
         if (!merger.pages.length) {
-            throw new Error('No Meta pages found (expected records.html and/or preservation-N.html).');
+            throw new Error(noPagesMessage(src.entries, why));
         }
         progress({ phase: 'merge', done: 0, total: 1, label: 'Combining pages' });
         await tick();
@@ -310,7 +351,7 @@ async function isMetaReturn(sourcePath, security) {
         src = await openSource(sourcePath, security);
         const htmls = src.entries.filter(e => /\.html?$/i.test(e.name) && !/(^|\/)linked_media\//i.test(e.name));
         if (!htmls.length) return false;
-        const named = htmls.filter(e => /(^|\/)(records|preservation[-_ ]?\d+)\.html?$/i.test(e.name));
+        const named = htmls.filter(e => isMetaPageName(e.name));
         if (named.length && (htmls.length > 1 || src.entries.some(e => /(^|\/)linked_media\//i.test(e.name)))) return true;
         const probe = named[0] || htmls.sort((a, b) => a.size - b.size)[0];
         if (probe.size > 64 * 1024 * 1024) return false;

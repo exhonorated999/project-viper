@@ -30,6 +30,10 @@
  *     tree: [ { path, size, ext, format, structure }, ... ]
  *   }
  *
+ * HTML `structure` (5.6.7) additionally carries `skeleton` — tag/id/class
+ * outline with text reduced to character counts, scrubbed CSS, and
+ * template markers (first HTML_SKELETON_MAX_FILES pages only).
+ *
  * PDF `structure` (schema v3) additionally carries: extraction_method
  * ('pdf-parse'|'mupdf'|'ocr'), extraction_quality, pdfparse_garble (0-1),
  * and structure_skeleton_redacted — the full multi-page form layout with
@@ -553,8 +557,9 @@ function parseCsvLine(line, delim) {
 
 /**
  * HTML: tag-name frequency.  No text content captured.
+ * `opts.skeleton` adds the structure-only skeleton (see htmlSkeleton).
  */
-function inspectHtml(text) {
+function inspectHtml(text, opts) {
     const tagCounts = new Map();
     const re = /<\/?([a-zA-Z][a-zA-Z0-9-]*)/g;
     let m;
@@ -569,11 +574,255 @@ function inspectHtml(text) {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 100)
         .map(([name, count]) => ({ name, count }));
-    return {
+    const out = {
         type: 'html',
         total_tags: totalTags,
         unique_tags: tagCounts.size,
         tags,
+    };
+    if (opts && opts.skeleton && _htmlSkeletonsLeft > 0) {
+        try { out.skeleton = htmlSkeleton(text); _htmlSkeletonsLeft--; }
+        catch (e) { out.skeleton = { error: String(e && e.message || e).slice(0, 120) }; }
+    }
+    return out;
+}
+
+// ─── HTML structure skeleton ───────────────────────────────────────────────
+// Tag counts alone could not show WHY a Meta return failed to import
+// (submission #31): the tags matched the known template, the markup did
+// not.  The skeleton carries the markup's SHAPE and nothing else:
+//   - tag names, ids and class names (digits → '#', anything holding '@'
+//     → '?', each capped), attribute NAMES, the `display` keyword from
+//     inline styles, and the shape of links ('#frag', 'linked_media/*',
+//     'url', 'mailto', 'rel') — never a URL, never a file name;
+//   - text nodes as a character count only;
+//   - the page CSS with comments, quoted strings and url() removed;
+//   - the <title> with every word outside a short product/legal word list
+//     replaced by '*'.
+// No text content and no attribute values beyond the above leave the file.
+
+const HTML_SKELETON_MAX_FILES = 12;          // per envelope
+const HTML_SKELETON_WINDOWS = [0, 0.2, 0.5, 0.8];
+const HTML_SKELETON_LINES_PER_WINDOW = 120;
+const HTML_SKELETON_LINE_CHARS = 160;
+const HTML_SKELETON_CSS_CHARS = 6000;
+const HTML_SKELETON_TOKEN_CHARS = 40;
+let _htmlSkeletonsLeft = HTML_SKELETON_MAX_FILES;
+
+const _HTML_TITLE_WORDS = new Set(['facebook', 'instagram', 'meta', 'whatsapp', 'threads', 'messenger',
+    'legal', 'request', 'requests', 'records', 'record', 'response', 'preservation', 'production',
+    'business', 'platforms', 'platform', 'inc', 'llc', 'data', 'report', 'account', 'accounts',
+    'google', 'snapchat', 'discord', 'twitter', 'x', 'tiktok', 'microsoft', 'apple', 'kik',
+    'export', 'download', 'your', 'information', 'subscriber', 'content', 'index', 'page',
+    'messages', 'message', 'and', 'of', 'for', 'the', 'to', 'a', 'html']);
+const _HTML_VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
+    'param', 'source', 'track', 'wbr']);
+const _HTML_KEEP_TYPE = /^[a-z][a-z-]{0,15}$/i;
+
+function _skelToken(s) {
+    s = String(s || '');
+    if (s.indexOf('@') >= 0) return '?';
+    s = s.replace(/\d+/g, '#').replace(/[^\w#:.-]/g, '_');
+    return s.length > HTML_SKELETON_TOKEN_CHARS ? s.slice(0, HTML_SKELETON_TOKEN_CHARS) + '~' : s;
+}
+
+function _skelLinkShape(v) {
+    v = String(v || '').trim();
+    if (!v) return 'empty';
+    if (v[0] === '#') return '#' + _skelToken(v.slice(1));
+    if (/^mailto:/i.test(v)) return 'mailto';
+    if (/^tel:/i.test(v)) return 'tel';
+    if (/^data:/i.test(v)) return 'data';
+    if (/^javascript:/i.test(v)) return 'js';
+    if (/^[a-z][a-z0-9+.-]*:/i.test(v) || /^\/\//.test(v)) return 'url';
+    if (/(^|[\\/])linked_media[\\/]/i.test(v)) return 'linked_media/*';
+    return 'rel';
+}
+
+function _skelTitle(t) {
+    t = String(t || '').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (!t) return '';
+    const out = t.split(/([^A-Za-z0-9]+)/).map(p => {
+        if (!p) return '';
+        if (/^\d+$/.test(p)) return '#';
+        if (/^[A-Za-z0-9]+$/.test(p)) return _HTML_TITLE_WORDS.has(p.toLowerCase()) ? p : '*';
+        return /^[\s\-–—:|,()]+$/.test(p) ? p : ' ';
+    }).join('');
+    return out.replace(/\*(?:\s*\*)+/g, '*').slice(0, 120);
+}
+
+function _skelCss(text) {
+    const parts = [];
+    const re = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+    const head = text.length > 4 * 1024 * 1024 ? text.slice(0, 4 * 1024 * 1024) : text;
+    let m, total = 0;
+    while ((m = re.exec(head)) !== null && total < HTML_SKELETON_CSS_CHARS * 2) {
+        parts.push(m[1]); total += m[1].length;
+    }
+    let css = parts.join('\n')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/url\([^)]*\)/gi, 'url()')
+        .replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""')
+        .replace(/@/g, (s, i, all) => /^@[a-z-]+/i.test(all.slice(i)) ? '@' : '?')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const truncated = css.length > HTML_SKELETON_CSS_CHARS;
+    if (truncated) css = css.slice(0, HTML_SKELETON_CSS_CHARS);
+    return { css, css_chars: total, css_truncated: truncated };
+}
+
+function _skelAttrs(tag, attrSrc) {
+    let id = '', cls = '', display = '';
+    const names = [];
+    const are = /([^\s=\/"'>]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'>]+))?/g;
+    let a;
+    while ((a = are.exec(attrSrc)) !== null) {
+        const name = a[1].toLowerCase();
+        let v = a[2] == null ? null : a[2];
+        if (v != null && (v[0] === '"' || v[0] === "'")) v = v.slice(1, -1);
+        if (name === 'id') { id = '#' + _skelToken(v); continue; }
+        if (name === 'class') {
+            cls = String(v || '').split(/\s+/).filter(Boolean).slice(0, 6).map(c => '.' + _skelToken(c)).join('');
+            continue;
+        }
+        if (name === 'style') {
+            const d = /(?:^|;)\s*display\s*:\s*([a-z-]+)/i.exec(v || '');
+            if (d) display = d[1].toLowerCase();
+            names.push(d ? 'style{display:' + display + '}' : 'style');
+            continue;
+        }
+        if (name === 'href' || name === 'src') { names.push(name + '=' + _skelLinkShape(v)); continue; }
+        if (name === 'type' && v != null && _HTML_KEEP_TYPE.test(v)) { names.push('type=' + v.toLowerCase()); continue; }
+        if (name === 'property' || name === 'for' || name === 'name') {
+            names.push(name + '=' + (v == null ? '' : _skelToken(v)));
+            continue;
+        }
+        if (/^on[a-z]+$/.test(name)) {
+            const fn = /^\s*([A-Za-z_$][\w$]*)\s*\(/.exec(v || '');
+            names.push(name + (fn ? '=' + _skelToken(fn[1]) + '()' : ''));
+            continue;
+        }
+        names.push(_skelToken(name));
+    }
+    return { id, cls, display, attrs: names.slice(0, 10) };
+}
+
+/** One window of skeleton lines starting at `from`. Returns { lines, end }. */
+function _skelWindow(text, from, maxLines) {
+    const lines = [];
+    let depth = 0, last = null, repeat = 0;
+    const push = (line) => {
+        if (line === last) { repeat++; return; }
+        flush();
+        last = line; repeat = 1;
+    };
+    const flush = () => {
+        if (last === null) return;
+        lines.push(repeat > 1 ? last + '  ×' + repeat : last);
+        last = null; repeat = 0;
+    };
+    const re = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<!(?:doctype|DOCTYPE)[^>]*>|<(\/?)([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+    // Start at a tag boundary.
+    let start = from > 0 ? text.indexOf('<', from) : 0;
+    if (start < 0) return { lines, end: text.length };
+    re.lastIndex = start;
+    let prevEnd = start, m;
+    while (lines.length < maxLines && (m = re.exec(text)) !== null) {
+        const gap = text.slice(prevEnd, m.index);
+        const chars = gap.replace(/&[a-z#0-9]+;/gi, 'x').replace(/\s+/g, ' ').trim().length;
+        if (chars) push('  '.repeat(Math.min(depth, 30)) + '~text ' + (chars > 200 ? '200+' : chars));
+        prevEnd = re.lastIndex;
+        if (!m[2]) continue;                               // comment / doctype / cdata
+        const tag = m[2].toLowerCase();
+        const closing = m[1] === '/';
+        if (closing) { depth = Math.max(0, depth - 1); continue; }
+        const a = _skelAttrs(tag, m[3] || '');
+        let line = '  '.repeat(Math.min(depth, 30)) + tag + a.id + a.cls + (a.attrs.length ? ' [' + a.attrs.join(' ') + ']' : '');
+        if (line.length > HTML_SKELETON_LINE_CHARS) line = line.slice(0, HTML_SKELETON_LINE_CHARS) + '~';
+        push(line);
+        const selfClosing = /\/\s*$/.test(m[3] || '');
+        if (tag === 'script' || tag === 'style' || tag === 'textarea' || tag === 'title') {
+            const closeRe = new RegExp('</' + tag + '\\b[^>]*>', 'ig');
+            closeRe.lastIndex = re.lastIndex;
+            const cm = closeRe.exec(text);
+            const stop = cm ? cm.index : text.length;
+            if (tag !== 'script' && tag !== 'style') {
+                const n = text.slice(re.lastIndex, stop).replace(/\s+/g, ' ').trim().length;
+                if (n) push('  '.repeat(Math.min(depth + 1, 30)) + '~text ' + (n > 200 ? '200+' : n));
+            }
+            re.lastIndex = cm ? closeRe.lastIndex : text.length;
+            prevEnd = re.lastIndex;
+            continue;
+        }
+        if (!_HTML_VOID.has(tag) && !selfClosing) depth++;
+    }
+    flush();
+    return { lines, end: prevEnd };
+}
+
+function htmlSkeleton(text) {
+    text = String(text || '');
+    const len = text.length;
+    const titleM = /<title\b[^>]*>([\s\S]{0,400}?)<\/title>/i.exec(text.slice(0, 200000));
+    const has = (re) => re.test(text);
+    const css = _skelCss(text);
+    const markers = {
+        legal_request_title: !!titleM && /legal\s+request/i.test(titleM[1]),
+        property_ids: has(/\bid=["']property-/i),
+        property_toc_links: has(/<a\b[^>]*\bproperty=["']/i) || has(/href=["']#property-/i),
+        div_table_class: has(/class=["'][^"']*\bdiv_table\b/i),
+        inline_display_table: has(/style=["'][^"']*display\s*:\s*table/i),
+        css_display_table: /display\s*:\s*table/i.test(css.css),
+        content_pane: has(/class=["'][^"']*\bcontent-pane\b/i),
+        print_option: has(/printOptionChange/),
+        linked_media_refs: has(/(?:src|href)=["'][^"']*linked_media[\\/]/i),
+        html_tables: has(/<table\b/i),
+        scripts: has(/<script\b/i),
+    };
+    // Distinct ids and class frequencies over the whole file (capped).
+    const ids = [];
+    const idSeen = new Set();
+    const classCounts = new Map();
+    const are = /\b(id|class)=("[^"]*"|'[^']*')/gi;
+    let m, scanned = 0;
+    while ((m = are.exec(text)) !== null && scanned < MAX_NODES_PER_FILE) {
+        scanned++;
+        const v = m[2].slice(1, -1);
+        if (m[1].toLowerCase() === 'id') {
+            const t = _skelToken(v);
+            if (!idSeen.has(t) && ids.length < 120) { idSeen.add(t); ids.push(t); }
+        } else {
+            for (const c of v.split(/\s+/)) {
+                if (!c) continue;
+                const t = _skelToken(c);
+                classCounts.set(t, (classCounts.get(t) || 0) + 1);
+            }
+        }
+    }
+    const classes = Array.from(classCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 60)
+        .map(([name, count]) => ({ name, count }));
+
+    const windows = [];
+    let coveredTo = -1;
+    for (const f of HTML_SKELETON_WINDOWS) {
+        const at = Math.floor(len * f);
+        if (at <= coveredTo) continue;
+        const w = _skelWindow(text, at, HTML_SKELETON_LINES_PER_WINDOW);
+        if (!w.lines.length) continue;
+        windows.push({ at_fraction: f, lines: w.lines });
+        coveredTo = w.end;
+    }
+    return {
+        skeleton_version: 1,
+        chars: len,
+        title_shape: titleM ? _skelTitle(titleM[1]) : null,
+        markers,
+        ids,
+        classes,
+        css: css.css,
+        css_chars: css.css_chars,
+        css_truncated: css.css_truncated,
+        windows,
     };
 }
 
@@ -2195,7 +2444,7 @@ function inspectFormat(format, buffer) {
             case 'json': return inspectJson(buffer.toString('utf8'));
             case 'csv':  return inspectCsv(buffer.toString('utf8'), ',');
             case 'tsv':  return inspectCsv(buffer.toString('utf8'), '\t');
-            case 'html': return inspectHtml(buffer.toString('utf8'));
+            case 'html': return inspectHtml(buffer.toString('utf8'), { skeleton: true });
             case 'mbox': return inspectMbox(buffer.toString('utf8'));
             case 'eml':  return inspectEml(buffer.toString('utf8'));
             case 'pdf':  return inspectPdf(buffer);
@@ -2595,6 +2844,7 @@ async function buildSampleEnvelope(rootPath, opts = {}) {
         throw new Error(`Path does not exist: ${rootPath}`);
     }
     const stat = fs.statSync(rootPath);
+    _htmlSkeletonsLeft = HTML_SKELETON_MAX_FILES;
     const sanitizer = new PathSanitizer();
     const entries = [];
     const pdfRefs = [];                          // PDFs to text-enrich post-walk.
@@ -2818,6 +3068,9 @@ module.exports = {
         inspectJson,
         inspectCsv,
         inspectHtml,
+        htmlSkeleton,
+        HTML_SKELETON_MAX_FILES,
+        _resetHtmlSkeletonBudget: () => { _htmlSkeletonsLeft = HTML_SKELETON_MAX_FILES; },
         inspectMbox,
         inspectEml,
         inspectPdf,
